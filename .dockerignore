@@ -1,0 +1,52 @@
+# Keep the build context small and keep secrets OUT of the image.
+# .env in particular must never be copied in — every secret arrives through the
+# container environment (docker-compose.yml / deploy/.env) instead.
+
+.env
+deploy/.env
+*.pem
+*.key
+*.crt
+
+.git
+.gitignore
+.claude
+
+# Local dev binaries (portable Redis for Windows) — Linux image, never needed.
+.tools/
+
+# The frontend SOURCE is not needed in the image — only its build output, which
+# lives in static/dist and is copied with the rest of static/. Keeping
+# node_modules out matters: it is larger than the whole application.
+frontend/node_modules/
+frontend/src/
+frontend/*.mjs
+
+# Runtime state: it belongs on the named volume, not baked into the image.
+update_job.log
+update_job.meta.json
+update_tickers.txt
+update_stop.flag
+update_pause.flag
+backups/
+*.dump
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Reference material and the superseded Streamlit scripts.
+legacy/
+*.pdf
+PROMPTS.md
+
+# Editor / OS noise
+~$*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

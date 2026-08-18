@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · {{ title }}{% endblock %}
+
+{% block content %}
+{% set cat_options = filters if kind == 'etf' else filters2 %}
+{% set cat_label = 'نوع صندوق' if kind == 'etf' else 'گروه' %}
+
+{# ─ multi-period gains + compare panel (mirrors etf_gainer.py) — TOP of page ─ #}
+<section class="panel calc-panel" id="calc-panel">
+  <div class="panel-head">
+    <h2>محاسبهٔ بازدهٔ دوره‌ای و مقایسه</h2>
+    <span class="muted small">بازدهٔ ۵ تا ۳۶۰ روز معاملاتی — یک نماد: مقایسه با برترین‌ها · دو نماد: مقایسهٔ رو‌در‌رو (صندوق یا سهم)</span>
+  </div>
+
+  <form method="get" class="filterbar calc-form">
+    {# keep the main table's current filters when comparing #}
+    {% if kind == 'stock' %}
+      {% if active_filter %}<input type="hidden" name="market" value="{{ active_filter }}">{% endif %}
+      {% if active_filter2 %}<input type="hidden" name="group" value="{{ active_filter2 }}">{% endif %}
+      {% if active_filter3 %}<input type="hidden" name="subgroup" value="{{ active_filter3 }}">{% endif %}
+    {% else %}
+      {% if active_filter %}<input type="hidden" name="type" value="{{ active_filter }}">{% endif %}
+    {% endif %}
+    {% if cat_options %}
+    <label>{{ cat_label }}:</label>
+    <select name="cat" onchange="this.form.submit()">
+      <option value="">همه</option>
+      {% for f in cat_options %}<option value="{{ f }}" {{ 'selected' if f == cat }}>{{ f }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    <label>نماد نخست:</label>
+    <input type="text" name="cmp" value="{{ cmp or '' }}" dir="rtl" autocomplete="off"
+           placeholder="مثلاً فولاد (صندوق یا سهم)">
+    <label>نماد دوم (اختیاری):</label>
+    <input type="text" name="cmp2" value="{{ cmp2 or '' }}" dir="rtl" autocomplete="off"
+           placeholder="برای مقایسهٔ رو‌در‌رو">
+    <button type="submit" class="btn">📊 محاسبه / مقایسه</button>
+    {% if compare or compare2 or cat %}<a class="btn ghost" href="?">پاک‌کردن</a>{% endif %}
+  </form>
+
+  {% if cmp and not compare %}
+  <p class="flash error small" style="margin:10px 0 0">نماد «{{ cmp }}» در پایگاه داده یافت نشد.</p>
+  {% endif %}
+  {% if cmp2 and not compare2 %}
+  <p class="flash error small" style="margin:10px 0 0">نماد «{{ cmp2 }}» در پایگاه داده یافت نشد.</p>
+  {% endif %}
+
+  {# ── head-to-head: two chosen tickers, period by period ── #}
+  {% if compare and compare2 %}
+  <div class="cmp-head">
+    <h3>مقایسهٔ رو‌در‌رو</h3>
+    <span class="muted small">
+      «{{ compare.ticker }}» ({{ 'صندوق' if compare_kind=='etf' else 'سهم' }})
+      در برابر
+      «{{ compare2.ticker }}» ({{ 'صندوق' if compare2_kind=='etf' else 'سهم' }})
+    </span>
+  </div>
+  <div class="table-scroll">
+    <table class="grid">
+      <thead>
+        <tr>
+          <th>دوره</th>
+          <th class="numh">{{ compare.ticker }}</th>
+          <th class="numh">{{ compare2.ticker }}</th>
+          <th class="numh">اختلاف</th>
+          <th>برنده</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in head2head %}
+        <tr>
+          <td>{{ c.label }}</td>
+          <td class="num">{{ pill(c.g1) }}</td>
+          <td class="num">{{ pill(c.g2) }}</td>
+          <td class="num">{{ pill(c.diff) }}</td>
+          <td class="sym">
+            {% if c.winner is none %}<span class="muted">—</span>
+            {% elif c.winner == '' %}<span class="muted">مساوی</span>
+            {% else %}{{ c.winner }}{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {# ── single ticker: comparison against the top performer per period ── #}
+  {% if compare and not compare2 %}
+  <div class="cmp-head">
+    <h3>مقایسهٔ «{{ compare.ticker }}»
+      <span class="tag" style="background:{{ '#1a9d63' if compare_kind=='etf' else '#2f6db3' }}">{{ 'صندوق' if compare_kind=='etf' else 'سهم' }}</span>
+      با برترین‌های {{ ('«' ~ cat ~ '»') if cat else 'کل بازار' }}</h3>
+    <span class="muted small">{{ compare.name }} · قیمت پایانی {{ fa(compare.latest) }}</span>
+  </div>
+  <div class="table-scroll">
+    <table class="grid">
+      <thead>
+        <tr>
+          <th>دوره</th>
+          <th class="numh">بازدهٔ نماد شما</th>
+          <th>برترین نماد</th>
+          <th class="numh">بازدهٔ برتر</th>
+          <th class="numh">اختلاف</th>
+          <th>وضعیت</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in comparison %}
+        <tr>
+          <td>{{ c.label }}</td>
+          <td class="num">{{ pill(c.yours) }}</td>
+          <td class="sym">{{ c.top_ticker or '—' }}</td>
+          <td class="num">{{ pill(c.top) }}</td>
+          <td class="num">{{ pill(c.diff) }}</td>
+          <td class="small">
+            {% if c.diff is none %}<span class="muted">—</span>
+            {% elif c.diff >= -0.0001 and c.top_ticker == compare.ticker %}<span class="up-title">👑 صدرنشین</span>
+            {% elif c.diff >= 0 %}<span class="up-title">✅ جلوتر</span>
+            {% else %}<span class="down-title">❌ عقب‌تر</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {# ── performance table: every ticker × periods ──
+       Converted to a Vue island (order 08). The controls ABOVE this point —
+       «نماد نخست», «نماد دوم» and the category select — still submit the form,
+       because they drive server-side computation (_period_panel works out the
+       top performer per period and the head-to-head winner). Only the long
+       list is client-side; it was rendering 742 rows into the DOM. #}
+  <div id="calc-grid-app"
+       hidden
+       data-kind="{{ kind }}"
+       data-as-of="{{ as_of or '' }}"
+       data-cat="{{ cat or '' }}"
+       data-pinned='{{ pinned_tickers | tojson }}'
+       data-detail-base="{{ url_for('stock_detail', stock_id=0)[:-1] if kind == 'stock' else url_for('etf_detail', etf_id=0)[:-1] }}"></div>
+
+  <noscript class="bn-island-noscript">
+    <p class="muted note">این جدول به JavaScript نیاز دارد.</p>
+  </noscript>
+</section>
+
+{# ─ main market table ─
+     Converted to a Vue island (order 08). Jinja renders the mount point and
+     hands it the parameters it cannot know client-side (the detail URL shape,
+     the export route); everything the table shows comes from /api/market/<kind>
+     in one fetch, and the market / group / sub-group filters no longer reload
+     the page. The URL query parameters are still written, so links and the Back
+     button behave exactly as before.
+
+     `hidden` until the island mounts, so a slow bundle shows nothing rather
+     than an empty shell that then jumps. #}
+<div id="market-panel-app"
+     hidden
+     data-kind="{{ kind }}"
+     data-as-of="{{ as_of or '' }}"
+     data-title="{{ title }}"
+     data-export-url="{{ url_for('export_gainer', kind=kind) }}"
+     data-detail-base="{{ url_for('stock_detail', stock_id=0)[:-1] if kind == 'stock' else url_for('etf_detail', etf_id=0)[:-1] }}"></div>
+
+{# Shown only if the island fails to load or fetch — the page degrades to a
+   link back to the server-rendered view rather than a blank panel. #}
+<section class="panel bn-island-fallback" hidden>
+  <div class="panel-head"><h1>{{ title }}</h1></div>
+  <p class="muted note">
+    جدول بارگذاری نشد. <a href="{{ url_for('export_gainer', kind=kind) }}">خروجی اکسل</a>
+    یا صفحه را دوباره بارگذاری کنید.
+  </p>
+</section>
+
+<p class="muted small note">
+  بازدهی هر دوره بر پایهٔ «قیمت پایانی تعدیل‌شده» (adj_final) و بر حسب روزهای معاملاتی محاسبه می‌شود.
+  برای مرتب‌سازی روی عنوان ستون‌ها کلیک کنید.
+</p>
+{% endblock %}
+
+{% block scripts %}
+{# The Vue island. Built by `npm run build` in frontend/ to static/dist/, and
+   cache-busted by the same asset_version() mtime stamp every other asset uses.
+   BN.initTable is gone from this page: sorting and filtering are TanStack
+   Table's job now. app.js still provides the search box, the nav loader and
+   BN.toggleWatch, which the island calls so the watchlist stars, the nav badge
+   and the other tables stay in step. #}
+<script type="module"
+        src="{{ url_for('static', filename='dist/market.js') }}?v={{ asset_version('dist/market.js') }}"></script>
+{% endblock %}

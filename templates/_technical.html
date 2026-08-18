@@ -1,0 +1,112 @@
+{# ── «خلاصهٔ تکنیکال» — TradingView-style summary: oscillators + moving averages
+     aggregated to a rating, plus pivot points, ATR & volume. Expects `tech`. ── #}
+{% macro sigbadge(s) %}
+  {% if s > 0 %}<span class="vbadge pos">خرید</span>
+  {% elif s < 0 %}<span class="vbadge neg">فروش</span>
+  {% else %}<span class="vbadge mid">خنثی</span>{% endif %}
+{% endmacro %}
+{% macro ratingbar(avg) %}
+  <div class="ta-bar"><span class="ta-mark" style="left:{{ ((avg + 1) / 2 * 100)|round(1) }}%"></span></div>
+  <div class="ta-scale"><span>فروش قوی</span><span>خنثی</span><span>خرید قوی</span></div>
+{% endmacro %}
+
+<div class="tab-pane" data-pane="summary" role="tabpanel">
+  {% if not tech %}
+    <section class="panel"><p class="muted">دادهٔ کافی برای خلاصهٔ تکنیکال این نماد وجود ندارد.</p></section>
+  {% else %}
+  {% set ov = tech.overall %}
+
+  {# ── overall rating hero + two group summaries ── #}
+  <div class="ta-heads">
+    <section class="panel ta-hero tone-{{ ov.tone }}">
+      <div class="muted small">جمع‌بندی کل ({{ fa(tech.oscillators|length + tech.moving_averages|length) }} شاخص)</div>
+      <div class="ta-verdict pill-{{ ov.tone }}">{{ ov.label }}</div>
+      {{ ratingbar(ov.avg) }}
+      <div class="ta-counts">
+        <span class="neg">فروش {{ fa(ov.sell) }}</span>
+        <span class="mid">خنثی {{ fa(ov.neutral) }}</span>
+        <span class="pos">خرید {{ fa(ov.buy) }}</span>
+      </div>
+    </section>
+    <section class="panel ta-mini">
+      <h3>نوسان‌گرها</h3>
+      <div class="vbadge {{ tech.osc.rating.tone }} big">{{ tech.osc.rating.label }}</div>
+      <div class="ta-counts small"><span class="neg">{{ fa(tech.osc.sell) }}</span> · <span class="mid">{{ fa(tech.osc.neutral) }}</span> · <span class="pos">{{ fa(tech.osc.buy) }}</span></div>
+    </section>
+    <section class="panel ta-mini">
+      <h3>میانگین‌های متحرک</h3>
+      <div class="vbadge {{ tech.ma.rating.tone }} big">{{ tech.ma.rating.label }}</div>
+      <div class="ta-counts small"><span class="neg">{{ fa(tech.ma.sell) }}</span> · <span class="mid">{{ fa(tech.ma.neutral) }}</span> · <span class="pos">{{ fa(tech.ma.buy) }}</span></div>
+    </section>
+  </div>
+
+  {# ── indicator tables side by side ── #}
+  <div class="two-col">
+    <section class="panel">
+      <h2>نوسان‌گرها (Oscillators)</h2>
+      <table class="grid kv">
+        <thead><tr><th>شاخص</th><th class="numh">مقدار</th><th>سیگنال</th></tr></thead>
+        <tbody>
+          {% for o in tech.oscillators %}
+          <tr><td class="mname">{{ o.name }}</td><td class="num">{{ fa(o.value) }}</td><td>{{ sigbadge(o.signal) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    <section class="panel">
+      <h2>میانگین‌های متحرک (Moving Averages)</h2>
+      <table class="grid kv">
+        <thead><tr><th>شاخص</th><th class="numh">مقدار</th><th>سیگنال</th></tr></thead>
+        <tbody>
+          {% for m in tech.moving_averages %}
+          <tr><td class="mname" dir="ltr" style="text-align:right">{{ m.name }}</td><td class="num">{{ fa(m.value) }}</td><td>{{ sigbadge(m.signal) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  {# ── pivot points (support / resistance) ── #}
+  <div class="two-col">
+    <section class="panel">
+      <h2>نقاط پیوت (حمایت و مقاومت)</h2>
+      {% if tech.pivots %}
+      {# tech.last.close is adj_close — the last TRADE of that pivot bar, not
+         adj_final («پایانی»). It also belongs to the pivot bar, which is not
+         necessarily today's. The label used to claim both. #}
+      <p class="muted small">سطوح احتمالی حمایت (S) و مقاومت (R) بر پایهٔ آخرین کندلِ دارای دامنهٔ معاملاتی. آخرین معاملهٔ همان کندل: <b>{{ fa(tech.last.close) }}</b></p>
+      <table class="grid kv">
+        <thead><tr><th>سطح</th><th class="numh">کلاسیک</th><th class="numh">فیبوناچی</th></tr></thead>
+        <tbody>
+          {% for lvl in ['R3','R2','R1','P','S1','S2','S3'] %}
+          <tr class="{{ 'pivot-p' if lvl == 'P' else ('pivot-r' if lvl[0]=='R' else 'pivot-s') }}">
+            <td class="mname">{{ 'پیوت' if lvl == 'P' else lvl }}</td>
+            <td class="num">{{ fa(tech.pivots.classic[lvl]) }}</td>
+            <td class="num">{{ fa(tech.pivots.fibonacci[lvl]) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">این نماد دامنهٔ معاملاتی درون‌روزی (سقف/کف) در پایگاه داده ندارد، بنابراین نقاط پیوت قابل محاسبه نیست.</p>
+      {% endif %}
+    </section>
+    <section class="panel">
+      <h2>نوسان و حجم</h2>
+      <div class="risk-tiles">
+        <div class="tile"><div class="tile-l">ATR (۱۴)</div><div class="tile-v">{{ fa(tech.atr) }}</div><div class="tile-u">میانگین دامنهٔ واقعی</div></div>
+        <div class="tile"><div class="tile-l">حجم امروز</div><div class="tile-v">{{ fa(tech.vol_last) }}</div><div class="tile-u">تعداد سهم</div></div>
+        <div class="tile"><div class="tile-l">میانگین حجم ۲۰ روز</div><div class="tile-v small">{{ fa(tech.vol_avg) }}</div><div class="tile-u">تعداد سهم</div></div>
+        <div class="tile"><div class="tile-l">حجم نسبت به میانگین</div>
+          <div class="tile-v {{ 'pos-v' if tech.vol_ratio and tech.vol_ratio >= 1 else '' }}">{% if tech.vol_ratio %}{{ fa(tech.vol_ratio) }}×{% else %}—{% endif %}</div>
+          <div class="tile-u">&gt;۱ یعنی حجم بالاتر از عادی</div></div>
+      </div>
+    </section>
+  </div>
+
+  <p class="muted small note disclaimer">
+    ⚠ خلاصهٔ تکنیکال از ۱۱ نوسان‌گر و ۱۵ میانگین متحرک استاندارد ساخته می‌شود و صرفاً آموزشی است — توصیهٔ خرید یا فروش نیست.
+    روش کار برگرفته از «Technical Ratings» تریدینگ‌ویو و فرمول‌های متعارف نقاط پیوت است.
+  </p>
+  {% endif %}
+</div>

@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · {{ entity.ticker }}{% endblock %}
+{% block body_class %}detail-page{% endblock %}
+
+{% block content %}
+<div class="crumb">
+  <a href="{{ back_url }}">{{ back_label }}</a> › {{ entity.ticker }}
+</div>
+
+{% if not analysis %}
+  <section class="panel"><p class="muted">دادهٔ قیمتی کافی برای این نماد در پایگاه داده وجود ندارد.</p></section>
+{% else %}
+<section class="panel sec-head">
+  <div>
+    <div class="sym-big">
+      {{ entity.ticker }}
+      {% set ticker = entity.ticker %}{% set eid = entity.id %}
+      <button type="button"
+              class="watch-star big{{ ' on' if (kind ~ ':' ~ entity.ticker) in watched }}"
+              data-kind="{{ kind }}" data-ticker="{{ entity.ticker }}" data-id="{{ entity.id }}"
+              onclick="BN.toggleWatch(this)" title="افزودن/حذف از دیده‌بان">
+        <span class="star-glyph">★</span><span class="star-label">دیده‌بان</span>
+      </button>
+    </div>
+    <div class="rtl-name">{{ entity.name }}</div>
+    <div class="muted small">
+      {% if kind == 'stock' %}{{ entity.market }} · {{ entity.sector }}{% if entity.sub_sector %} · {{ entity.sub_sector }}{% endif %}
+      {% else %}<span class="tag" style="background:{{ ETF_TYPE_COLORS.get(entity.type,'#868fa3') }}">{{ entity.type }}</span>{% endif %}
+    </div>
+  </div>
+  <div class="sec-kpis">
+    <div class="tile">
+      <div class="tile-l">قیمت پایانی</div>
+      <div class="tile-v">{{ fa(analysis.latest) }}</div>
+      <div class="tile-u">{{ fy(analysis.latest_date) }}</div>
+    </div>
+    <div class="tile">
+      <div class="tile-l">تغییر روز</div>
+      <div class="tile-v">{{ pill(analysis.day_change) }}</div>
+    </div>
+    <div class="tile">
+      <div class="tile-l">بیشترین / کمترین (کل)</div>
+      <div class="tile-v small">{{ fa(analysis.high) }} / {{ fa(analysis.low) }}</div>
+    </div>
+    <div class="tile">
+      <div class="tile-l">تعداد روز معاملاتی</div>
+      <div class="tile-v">{{ fa(analysis.points) }}</div>
+    </div>
+  </div>
+</section>
+
+<div class="tabs" data-role="sec-tabs">
+  <nav class="tab-nav" role="tablist">
+    <button type="button" class="tab-btn on" data-tab="signal" role="tab">امتیاز و سیگنال</button>
+    <button type="button" class="tab-btn" data-tab="summary" role="tab">خلاصهٔ تکنیکال</button>
+    <button type="button" class="tab-btn" data-tab="technical" role="tab">نمودار تکنیکال</button>
+    <button type="button" class="tab-btn" data-tab="returns" role="tab">بازدهی</button>
+    <button type="button" class="tab-btn" data-tab="history" role="tab">سابقهٔ داده‌ها</button>
+  </nav>
+
+  <div class="tab-panels">
+    {% include "_signal.html" %}
+    {% include "_technical.html" %}
+
+    <div class="tab-pane" data-pane="technical" role="tabpanel">
+      <div id="pxchart"></div>
+    </div>
+
+    <div class="tab-pane" data-pane="returns" role="tabpanel">
+      <div class="two-col">
+        <section class="panel">
+          <h2>بازدهی دوره‌ای</h2>
+          <table class="grid">
+            <thead><tr><th>دوره</th><th>بازدهی</th><th>سقف (فاصله تا اوج)</th><th>کف (فاصله تا کف)</th></tr></thead>
+            <tbody>
+              {% for p in analysis.periods %}
+              <tr>
+                <td class="mname">{{ p.label }}</td>
+                <td class="num">{{ pill(p.gain) }}</td>
+                <td class="num">{{ pill(p.ceil) }}</td>
+                <td class="num">{{ pill(p.floor) }}</td>
+              </tr>
+              {% endfor %}
+              <tr class="total-row">
+                <td class="mname">از ابتدای داده ({{ fy(analysis.first.start_date) }})</td>
+                <td class="num">{{ pill(analysis.first.gain) }}</td>
+                <td class="num">{{ pill(analysis.first.ceil) }}</td>
+                <td class="num">{{ pill(analysis.first.floor) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <h2>بازدهی سال‌به‌سال</h2>
+          <p class="muted small">بازدهی از همین تاریخ در سال‌های گذشته تا امروز.</p>
+          <table class="grid">
+            <thead><tr><th>مبنا</th><th>تاریخ مبنا</th><th>بازدهی تا امروز</th></tr></thead>
+            <tbody>
+              {% for y in analysis.yoy %}
+              <tr>
+                <td class="mname">{{ fy(y.years) }} سال پیش</td>
+                <td class="muted">{{ fy(y.date) }}</td>
+                <td class="num">{{ pill(y.gain) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </div>
+
+    <div class="tab-pane" data-pane="history" role="tabpanel">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>سابقهٔ داده‌ها (OHLCV)</h2>
+          <span class="muted small">قیمت‌های تعدیل‌شده · جدیدترین در بالا</span>
+        </div>
+        <div id="pxhistory"></div>
+      </section>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if analysis %}
+<script src="{{ url_for('static', filename='js/vendor/klinecharts.min.js') }}?v={{ asset_version('js/vendor/klinecharts.min.js') }}"></script>
+{# chart-tools.js registers the hand-built TradingView-style overlays
+   (pitchforks, Gann, Fibonacci set) BEFORE the chart mounts #}
+<script src="{{ url_for('static', filename='js/chart-tools.js') }}?v={{ asset_version('js/chart-tools.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chart.js') }}?v={{ asset_version('js/chart.js') }}"></script>
+<script>
+  document.getElementById("pxchart").className = "pro-chart chart-full";
+  BNChart.mount("pxchart", "{{ kind }}", {{ entity.id }}, "pxhistory");
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}بورس‌نگار{% endblock %}</title>
+  <!-- Vazirmatn Persian font — self-hosted; @font-face lives in style.css -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ asset_version('css/style.css') }}">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <div id="nav-loader" class="nav-loader" aria-hidden="true">
+    <div class="nav-loader-box">
+      <div class="nav-spinner"></div>
+      <span>در حال محاسبه… لطفاً صبر کنید</span>
+    </div>
+  </div>
+  <header class="topbar">
+    <div class="brand">
+      <a href="{{ url_for('index') }}">
+        <span class="logo">📈</span>
+        <span class="brand-name">بورس‌نگار</span>
+      </a>
+      <span class="brand-sub">سامانهٔ یکپارچهٔ تحلیل بازار سرمایه</span>
+    </div>
+    <nav class="topnav">
+      <a href="{{ url_for('index') }}" class="{{ 'on' if request.endpoint == 'index' }}">خانه</a>
+      <a href="{{ url_for('dashboard') }}" class="{{ 'on' if request.endpoint == 'dashboard' }}">داشبورد</a>
+      <a href="{{ url_for('stocks_page') }}" class="{{ 'on' if request.endpoint in ('stocks_page','stock_detail') }}">سهام</a>
+      <a href="{{ url_for('etfs_page') }}" class="{{ 'on' if request.endpoint in ('etfs_page','etf_detail') }}">صندوق‌ها</a>
+      <a href="{{ url_for('screener_page') }}" class="{{ 'on' if request.endpoint == 'screener_page' }}">غربالگر</a>
+      <a href="{{ url_for('performance_page') }}" class="{{ 'on' if request.endpoint == 'performance_page' }}">بازدهٔ بازه</a>
+      <a href="{{ url_for('strategies_page') }}" class="{{ 'on' if request.endpoint == 'strategies_page' }}">استراتژی‌ها</a>
+      <a href="{{ url_for('filters_page') }}" class="{{ 'on' if request.endpoint == 'filters_page' }}">فیلترها</a>
+      {% if current_user.is_authenticated %}
+      <a href="{{ url_for('watchlist_page') }}" class="{{ 'on' if request.endpoint == 'watchlist_page' }}">★ دیده‌بان{% if watch_count %} <span class="nav-badge">{{ fa(watch_count) }}</span>{% endif %}</a>
+      {% endif %}
+      {% if current_user.is_authenticated and current_user.is_admin %}
+      <a href="{{ url_for('update_page') }}" class="{{ 'on' if request.endpoint == 'update_page' }}">به‌روزرسانی</a>
+      {% endif %}
+    </nav>
+    <div class="search-wrap">
+      <input type="text" id="search" placeholder="جستجوی نماد یا نام…" autocomplete="off">
+      <div id="search-results" class="search-results"></div>
+    </div>
+    {% if current_user.is_authenticated %}
+    <div class="user-box">
+      <span class="user-name" title="{{ current_user.username }}">{{ current_user.display_name }}</span>
+      <form method="post" action="{{ url_for('auth.logout') }}" style="margin:0">
+        <button type="submit" class="logout-btn" title="خروج از حساب">خروج</button>
+      </form>
+    </div>
+    {% endif %}
+  </header>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-wrap">
+      {% for cat, msg in messages %}
+      <div class="flash {{ cat }}">{{ msg }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    بورس‌نگار · داده‌ها از پایگاه دادهٔ بورس تهران (finpy_tse)
+  </footer>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}?v={{ asset_version('js/app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

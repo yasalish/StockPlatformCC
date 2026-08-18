@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · دیده‌بان{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <h1>★ دیده‌بان من</h1>
+  <p class="muted">
+    {% if total %}{{ fa(total) }} نماد دنبال‌شده · تاریخ مبنا: {{ fy(as_of) }}
+    {% else %}هنوز نمادی به دیده‌بان اضافه نکرده‌اید.{% endif %}
+  </p>
+</section>
+
+{% if not total %}
+<section class="panel empty-state">
+  <div class="empty-star">★</div>
+  <h2>دیده‌بان شما خالی است</h2>
+  <p class="muted">
+    روی ستارهٔ کنار هر نماد در صفحهٔ <a href="{{ url_for('stocks_page') }}">سهام</a> یا
+    <a href="{{ url_for('etfs_page') }}">صندوق‌ها</a>، یا در صفحهٔ جزئیات هر نماد کلیک کنید
+    تا این‌جا جمع شود.
+  </p>
+</section>
+{% else %}
+
+{% macro watch_table(rows, kind) %}
+<div class="table-scroll">
+  <table class="grid sortable" id="wl-{{ kind }}">
+    <thead>
+      <tr>
+        <th data-sort="str">نماد</th>
+        <th data-sort="str">نام</th>
+        <th data-sort="str">{{ 'نوع صندوق' if kind == 'etf' else 'بازار' }}</th>
+        <th data-sort="num">قیمت پایانی</th>
+        {% for p in PERIODS %}<th data-sort="num" class="numh">{{ p.label }}</th>{% endfor %}
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      {% set url = url_for('stock_detail', stock_id=r.id) if kind == 'stock' else url_for('etf_detail', etf_id=r.id) %}
+      <tr class="clickable" data-ticker="{{ r.ticker }}" onclick="location.href='{{ url }}'">
+        <td class="sym">{% set ticker = r.ticker %}{% set eid = r.id %}{% include "_star.html" %}{{ r.ticker }}</td>
+        <td class="rtl-name">{{ r.name }}</td>
+        <td class="small">
+          {% if kind == 'etf' %}<span class="tag" style="background:{{ ETF_TYPE_COLORS.get(r.type,'#868fa3') }}">{{ r.type }}</span>
+          {% else %}<span class="muted">{{ r.market }}</span>{% endif %}
+        </td>
+        <td class="num" data-v="{{ r.latest or 0 }}">{{ fa(r.latest) }}</td>
+        {% for p in PERIODS %}
+        <td class="num" data-v="{{ r[p.key] if r[p.key] is not none else -99999 }}">{{ pill(r[p.key]) }}</td>
+        {% endfor %}
+        <td class="chev">›</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+<section class="panel">
+  <div class="panel-head"><h2>📈 سهام ({{ fa(stock_rows|length) }})</h2></div>
+  {% if stock_rows %}{{ watch_table(stock_rows, 'stock') }}
+  {% else %}<p class="muted note">سهمی در دیده‌بان نیست.</p>{% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>🏦 صندوق‌ها ({{ fa(etf_rows|length) }})</h2></div>
+  {% if etf_rows %}{{ watch_table(etf_rows, 'etf') }}
+  {% else %}<p class="muted note">صندوقی در دیده‌بان نیست.</p>{% endif %}
+</section>
+
+<p class="muted small note">برای حذف یک نماد، روی ستارهٔ آن کلیک کنید. برای مرتب‌سازی روی عنوان ستون‌ها کلیک کنید.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  if (document.getElementById("wl-stock")) BN.initTable("wl-stock", null);
+  if (document.getElementById("wl-etf")) BN.initTable("wl-etf", null);
+</script>
+{% endblock %}

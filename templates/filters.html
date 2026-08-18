@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · فیلترهای تکنیکال{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <h1>فیلترهای تکنیکال — الگوهای کندلی و اندیکاتورها</h1>
+  <p class="muted" style="max-width:74ch;margin:6px 0 0">
+    همهٔ نمادها روی آخرین دادهٔ قیمت با مجموعه‌ای از فیلترهای رایج تحلیل تکنیکال پویش می‌شوند:
+    الگوهای شمعی (کندل پوشای صعودی/نزولی، چکش، ستارهٔ صبحگاهی/شامگاهی و …) و وضعیت اندیکاتورها
+    (اشباع خرید/فروش RSI، مکدی، باند بولینگر و میانگین متحرک). نمادهایی که هم‌اکنون هر فیلتر روی آن‌ها
+    برقرار است فهرست می‌شوند.
+  </p>
+</section>
+
+{# ── the island: summary cards, filter bar and one section per filter. The rows
+   come from /api/scan/filters/<kind>, and each section builds its table only
+   when it is scrolled to — server-rendering all nineteen was 1.2 MB of HTML and
+   23,000 DOM nodes per navigation. #}
+<div id="scan-app" hidden
+     data-what="filters"
+     data-kind="{{ kind }}"
+     data-detail-base-stock="{{ url_for('stock_detail', stock_id=0)[:-1] }}"
+     data-detail-base-etf="{{ url_for('etf_detail', etf_id=0)[:-1] }}"></div>
+
+<p class="muted note bn-island-noscript">در حال بارگذاری…</p>
+
+<section class="panel bn-island-fallback" hidden>
+  <div class="panel-head"><h2>فیلترهای تکنیکال</h2></div>
+  <p class="muted note">فهرست بارگذاری نشد. صفحه را دوباره بارگذاری کنید.</p>
+</section>
+
+<p class="muted small note">
+  پارامترها: RSI با دورهٔ ۱۴ (اشباع فروش زیر ۳۰، اشباع خرید بالای ۷۰)، مکدی ۱۲/۲۶/۹،
+  باند بولینگر ۲۰ دوره با ۲ انحراف معیار، میانگین متحرک سادهٔ ۲۰۰ روزه. الگوهای کندلی روی
+  «قیمت‌های تعدیل‌شدهٔ باز/سقف/کف/بسته» و اندیکاتورها روی «قیمت پایانی تعدیل‌شده» محاسبه می‌شوند.
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script type="module"
+        src="{{ url_for('static', filename='dist/scan.js') }}?v={{ asset_version('dist/scan.js') }}"></script>
+{% endblock %}

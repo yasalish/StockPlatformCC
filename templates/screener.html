@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · غربالگر هوشمند{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <h1>غربالگر هوشمند — بهترین موقعیت‌های خرید</h1>
+  <p class="muted" style="max-width:74ch;margin:6px 0 0">
+    همهٔ نمادها بر پایهٔ یک «امتیاز فنی» ۰ تا ۱۰۰ رتبه‌بندی می‌شوند که روند، مومنتوم، قدرت نسبی (RSI)،
+    موقعیت قیمت در بازهٔ سالانه و کنترل ریسک را با هم ترکیب می‌کند. بالاترین امتیازها در صدر فهرست‌اند.
+  </p>
+</section>
+
+{# ── the island: summary cards, filter bar and the ranked table. The rows come
+   from /api/screener/<kind> and only the ones on screen are in the DOM — all
+   779 as HTML were 1.1 MB and 16,600 nodes on every navigation. #}
+<div id="screener-app" hidden
+     data-kind="{{ kind }}"
+     data-detail-base-stock="{{ url_for('stock_detail', stock_id=0)[:-1] }}"
+     data-detail-base-etf="{{ url_for('etf_detail', etf_id=0)[:-1] }}"></div>
+
+<p class="muted note bn-island-noscript">در حال بارگذاری…</p>
+
+<section class="panel bn-island-fallback" hidden>
+  <div class="panel-head"><h2>غربالگر هوشمند</h2></div>
+  <p class="muted note">فهرست بارگذاری نشد. صفحه را دوباره بارگذاری کنید.</p>
+</section>
+
+<p class="muted small note disclaimer">
+  ⚠ امتیاز فنی صرفاً از قیمت گذشته محاسبه می‌شود و برای مقاصد آموزشی است — توصیهٔ خرید یا فروش نیست.
+  برای مرتب‌سازی روی عنوان ستون‌ها کلیک کنید.
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script type="module"
+        src="{{ url_for('static', filename='dist/screener.js') }}?v={{ asset_version('dist/screener.js') }}"></script>
+{% endblock %}

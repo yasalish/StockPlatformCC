@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · استراتژی‌های خرید{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <h1>استراتژی‌های خرید بر پایهٔ اندیکاتورها</h1>
+  <p class="muted" style="max-width:70ch;margin:6px 0 0">
+    نمادها با چند استراتژی شناخته‌شدهٔ تحلیل تکنیکال (با پارامترهای استاندارد) روی آخرین دادهٔ قیمت پویش می‌شوند
+    و مواردی که هم‌اکنون سیگنال خرید می‌دهند فهرست می‌گردند.
+  </p>
+</section>
+
+<p class="flash error small" style="margin:0 0 16px">
+  ⚠ این صفحه صرفاً یک ابزار آموزشی و پویشگر تکنیکال است و توصیهٔ خرید/فروش یا مشاورهٔ سرمایه‌گذاری نیست.
+  پیش از هر تصمیم، خودتان تحلیل و بررسی کنید.
+</p>
+
+{# ── the island: summary cards, filter bar, ⭐ picks and one section per
+   strategy. The rows are fetched from /api/scan/strategies/<kind> and each
+   section builds its table only when it is scrolled to — server-rendering all
+   sixteen was 2.2 MB of HTML and 38,000 DOM nodes per navigation. #}
+<div id="scan-app" hidden
+     data-what="strategies"
+     data-kind="{{ kind }}"
+     data-detail-base-stock="{{ url_for('stock_detail', stock_id=0)[:-1] }}"
+     data-detail-base-etf="{{ url_for('etf_detail', etf_id=0)[:-1] }}"></div>
+
+<p class="muted note bn-island-noscript">در حال بارگذاری…</p>
+
+<section class="panel bn-island-fallback" hidden>
+  <div class="panel-head"><h2>استراتژی‌های خرید</h2></div>
+  <p class="muted note">فهرست بارگذاری نشد. صفحه را دوباره بارگذاری کنید.</p>
+</section>
+
+<p class="muted small note">
+  پارامترها با مقادیر استاندارد هر استراتژی محاسبه می‌شوند و همهٔ محاسبات روی «قیمت پایانی تعدیل‌شده»
+  (adj_final) و «قیمت‌های تعدیل‌شدهٔ باز/سقف/کف/بسته» انجام می‌شود.
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script type="module"
+        src="{{ url_for('static', filename='dist/scan.js') }}?v={{ asset_version('dist/scan.js') }}"></script>
+{% endblock %}

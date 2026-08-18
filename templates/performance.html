@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · بازدهٔ دوره‌ای{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <h1>بازدهٔ دوره‌ای — سقف و کف</h1>
+  <p class="muted" style="max-width:80ch;margin:6px 0 0">
+    برای هر نماد، بازدهٔ بازه‌های ۱ هفته تا ۳ سال و «از ابتدا» به همراه «سقف»
+    (فاصلهٔ قیمت پایانی تا بیشترین قیمت آن بازه) و «کف» (فاصله تا کمترین قیمت بازه)
+    محاسبه می‌شود. با انتخاب «از/تا» می‌توانید تاریخ مبنا را عوض کنید و یک ستون
+    «بازهٔ دلخواه» بیفزایید — بر پایهٔ «قیمت پایانی تعدیل‌شده» (adj_final).
+  </p>
+</section>
+
+{# The date range stays a server round trip: «از…تا» adds a column that only the
+   database can compute, and this form owns the Jalali picker. Its hidden inputs
+   are kept in step with the island's dropdowns by PerfPanel.syncDateForm(). #}
+<form method="get" id="perf-date-form" class="filterbar" style="margin-top:14px">
+  <input type="hidden" name="kind" value="{{ kind }}">
+  <input type="hidden" name="market" value="{{ market or '' }}">
+  <input type="hidden" name="group" value="{{ group or '' }}">
+  <input type="hidden" name="subgroup" value="{{ subgroup or '' }}">
+  <input type="hidden" name="cmp" value="{{ cmp or '' }}">
+  <label>از تاریخ:</label>
+  <input type="text" name="rfrom" value="{{ rfrom }}" dir="ltr" data-jdate readonly
+         placeholder="YYYY-MM-DD" class="date-inp">
+  <label>تا تاریخ (مبنا):</label>
+  <input type="text" name="rto" value="{{ rto }}" dir="ltr" data-jdate readonly
+         placeholder="YYYY-MM-DD" class="date-inp">
+  <button type="submit" class="btn">📈 محاسبه</button>
+  {% if rfrom or rto %}<a class="btn ghost" href="{{ url_for('performance_page', kind=kind, market=market, group=group, subgroup=subgroup, cmp=cmp) }}">پاک‌کردن تاریخ‌ها</a>{% endif %}
+</form>
+
+{# ── the island: filters, 🏆 winners, the compare table and the wide grid ──
+   The rows are NOT rendered here. 782 symbols × 22 columns was 2.2 MB of markup
+   and 37,000 DOM nodes per navigation; the island fetches the same numbers from
+   /api/performance/<kind> and materialises only the rows on screen. #}
+<div id="perf-app" hidden
+     data-kind="{{ kind }}"
+     data-detail-base-stock="{{ url_for('stock_detail', stock_id=0)[:-1] }}"
+     data-detail-base-etf="{{ url_for('etf_detail', etf_id=0)[:-1] }}"></div>
+
+<p class="muted note bn-island-noscript">در حال بارگذاری جدول…</p>
+
+{# Shown only if the island fails to load or fetch, so the page degrades to an
+   explanation rather than a blank space. #}
+<section class="panel bn-island-fallback" hidden>
+  <div class="panel-head"><h2>بازدهٔ دوره‌ای</h2></div>
+  <p class="muted note">جدول بارگذاری نشد. صفحه را دوباره بارگذاری کنید.</p>
+</section>
+
+<p class="muted small note">
+  بازده = (قیمت پایانی پایان بازه − قیمت پایانی آغاز بازه) ÷ آغاز بازه.
+  «سقف» فاصلهٔ قیمت کنونی تا بیشترین قیمت بازه (عددی منفی یا صفر) و «کف» فاصله تا کمترین قیمت بازه (عددی مثبت یا صفر) است.
+  دوره‌ها بر حسب روز معاملاتی‌اند (۱ ماه ≈ ۲۰ روز).
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/jdatepicker.js') }}?v={{ asset_version('js/jdatepicker.js') }}"></script>
+{# The Vue island, built by `npm run build` in frontend/ and cache-busted by the
+   same asset_version() stamp every other asset uses. BN.initTable is gone from
+   this page — sorting, filtering and the mirrored scrollbar are the island's
+   job now; app.js still provides the search box, the nav loader and
+   BN.toggleWatch, which the grid calls so the stars and the nav badge agree. #}
+<script type="module"
+        src="{{ url_for('static', filename='dist/perf.js') }}?v={{ asset_version('dist/perf.js') }}"></script>
+{% endblock %}

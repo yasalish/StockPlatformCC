@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · داشبورد{% endblock %}
+
+{% block content %}
+{# The dashboard shell paints instantly with NO database work. The data-heavy
+   blocks (counts, top gainers/losers, top ETFs) are fetched right after paint
+   from /dashboard/data and injected below. #}
+<section class="hero">
+  <h1>داشبورد بازار</h1>
+</section>
+
+<div id="dashboard" data-src="{{ url_for('dashboard_data') }}">
+  <div class="dash-loading">
+    <div class="nav-spinner"></div>
+    <span class="muted">در حال بارگذاری داده‌های بازار…</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    var host = document.getElementById("dashboard");
+    if (!host) return;
+    fetch(host.dataset.src, { headers: { "X-Requested-With": "fetch" } })
+      .then(function (r) {
+        if (!r.ok) throw new Error("http " + r.status);
+        return r.text();
+      })
+      .then(function (html) { host.innerHTML = html; })
+      .catch(function () {
+        host.innerHTML =
+          '<p class="flash error">بارگذاری داده‌های داشبورد ناموفق بود. ' +
+          '<a href="' + location.pathname + '">تلاش دوباره</a></p>';
+      });
+  })();
+</script>
+{% endblock %}

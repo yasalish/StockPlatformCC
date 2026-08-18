@@ -1,0 +1,115 @@
+{# ── «امتیاز و سیگنال» — composite technical score, verdict, reasons, indicators
+     & risk. Expects `analysis.signal` (see db.signal_score). Purely technical. ── #}
+{% set sig = analysis.signal %}
+{% macro pc(x) %}{% if x is not none %}{{ fa(x * 100) }}٪{% else %}—{% endif %}{% endmacro %}
+{% set sub_meta = [
+     ('trend', 'روند', 'قیمت نسبت به میانگین‌های ۵۰ و ۲۰۰ روزه و شیب آن‌ها'),
+     ('momentum', 'مومنتوم', 'بازدهی ۳ و ۶ ماهه و تأیید مکدی'),
+     ('rsi', 'قدرت نسبی (RSI)', 'جایگاه RSI-۱۴ در ناحیهٔ سالم/اشباع'),
+     ('range', 'موقعیت در بازهٔ سالانه', 'فاصلهٔ قیمت تا سقف و کف ۵۲ هفته'),
+     ('risk', 'کنترل ریسک', 'نوسان‌پذیری و بیشینه افت (هرچه کم‌ریسک‌تر، بهتر)'),
+   ] %}
+
+<div class="tab-pane on" data-pane="signal" role="tabpanel">
+  {% if not sig %}
+    <section class="panel"><p class="muted">دادهٔ کافی برای امتیازدهی این نماد وجود ندارد (حداقل ۳۰ روز معاملاتی لازم است).</p></section>
+  {% else %}
+  {% set v = sig.verdict %}
+  <div class="signal-grid">
+
+    {# ── verdict + gauge ── #}
+    <section class="panel score-panel">
+      <div class="score-gauge tone-{{ v.tone }}" style="--p:{{ sig.score }}">
+        <div class="gauge-inner">
+          <div class="gauge-num">{{ fa(sig.score) }}</div>
+          <div class="gauge-max">از ۱۰۰</div>
+        </div>
+      </div>
+      <div class="verdict-big pill-{{ v.tone }}">{{ v.label }}</div>
+      <p class="muted small center">امتیاز فنی نماد بر پایهٔ روند، مومنتوم، قدرت نسبی، موقعیت قیمت و ریسک.</p>
+
+      <div class="subscores">
+        {% for key, label, hint in sub_meta %}
+        {% set s = sig.subs[key] %}
+        <div class="subscore" title="{{ hint }}">
+          <div class="ss-top"><span class="ss-label">{{ label }}</span>
+            <span class="ss-val">{% if s is not none %}{{ fa(s) }}{% else %}—{% endif %}</span></div>
+          <div class="ss-track">
+            {% if s is not none %}
+            {% set st = 'pos' if s >= 60 else ('mid' if s >= 45 else 'neg') %}
+            <div class="ss-fill t-{{ st }}" style="width:{{ s }}%"></div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+        {# reserved fundamental bucket — surfaced as a roadmap placeholder #}
+        <div class="subscore disabled" title="با افزوده‌شدن دادهٔ بنیادی (P/E، سود، فروش) فعال می‌شود">
+          <div class="ss-top"><span class="ss-label">تحلیل بنیادی</span><span class="ss-val muted">به‌زودی</span></div>
+          <div class="ss-track"><div class="ss-fill t-mute" style="width:100%"></div></div>
+        </div>
+      </div>
+    </section>
+
+    {# ── reasons: strengths vs cautions ── #}
+    <section class="panel reasons-panel">
+      <h2>چرا این امتیاز؟</h2>
+      {% set strengths = sig.reasons | selectattr('tone', 'equalto', 'pos') | list %}
+      {% set cautions = sig.reasons | rejectattr('tone', 'equalto', 'pos') | list %}
+      <div class="two-col">
+        <div>
+          <h3 class="rn-head pos">نقاط قوت</h3>
+          {% if strengths %}
+          <ul class="reasons">
+            {% for r in strengths %}<li class="rn pos"><span class="dot"></span>{{ r.text }}</li>{% endfor %}
+          </ul>
+          {% else %}<p class="muted small">مورد قابل‌توجهی یافت نشد.</p>{% endif %}
+        </div>
+        <div>
+          <h3 class="rn-head neg">هشدارها</h3>
+          {% if cautions %}
+          <ul class="reasons">
+            {% for r in cautions %}<li class="rn {{ r.tone }}"><span class="dot"></span>{{ r.text }}</li>{% endfor %}
+          </ul>
+          {% else %}<p class="muted small">مورد قابل‌توجهی یافت نشد.</p>{% endif %}
+        </div>
+      </div>
+    </section>
+
+    {# ── indicators snapshot ── #}
+    <section class="panel">
+      <h2>شاخص‌های فنی</h2>
+      {% set ind = sig.indicators %}
+      <table class="grid kv">
+        <tbody>
+          <tr><td class="mname">RSI (۱۴)</td><td class="num">{{ fa(ind.rsi) }}</td></tr>
+          <tr><td class="mname">مکدی / خط سیگنال</td><td class="num">{{ fa(ind.macd) }} / {{ fa(ind.macd_signal) }}</td></tr>
+          <tr><td class="mname">هیستوگرام مکدی</td><td class="num">{% set val = None %}{% if ind.macd_hist is not none %}<span class="pill {{ 'up' if ind.macd_hist >= 0 else 'down' }}">{{ fa(ind.macd_hist) }}</span>{% else %}—{% endif %}</td></tr>
+          <tr><td class="mname">میانگین ۲۰ روزه</td><td class="num">{{ fa(ind.sma20) }}</td></tr>
+          <tr><td class="mname">میانگین ۵۰ روزه</td><td class="num">{{ fa(ind.sma50) }}</td></tr>
+          <tr><td class="mname">میانگین ۲۰۰ روزه</td><td class="num">{{ fa(ind.sma200) }}</td></tr>
+          <tr><td class="mname">باند بولینگر (پایین/بالا)</td><td class="num">{{ fa(ind.boll_lo) }} / {{ fa(ind.boll_up) }}</td></tr>
+          <tr><td class="mname">سقف / کف ۵۲ هفته</td><td class="num">{{ fa(ind.hi_52w) }} / {{ fa(ind.lo_52w) }}</td></tr>
+          <tr><td class="mname">موقعیت در بازه</td><td class="num">{{ pc(ind.range_pos) }}</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    {# ── risk metrics ── #}
+    <section class="panel">
+      <h2>سنجه‌های ریسک</h2>
+      <p class="muted small">بر پایهٔ بازده روزانهٔ حدود دو سال اخیر.</p>
+      <div class="risk-tiles">
+        <div class="tile"><div class="tile-l">نوسان سالانه</div><div class="tile-v">{{ pc(ind.vol) }}</div><div class="tile-u">انحراف معیار بازده</div></div>
+        <div class="tile"><div class="tile-l">بیشینه افت</div><div class="tile-v neg">{{ pc(ind.max_dd) }}</div><div class="tile-u">حداکثر افت از اوج</div></div>
+        <div class="tile"><div class="tile-l">بازده به ریسک</div><div class="tile-v">{% if ind.ror is not none %}{{ fa(ind.ror) }}{% else %}—{% endif %}</div><div class="tile-u">شبه‌شارپ (بدون نرخ بدون‌ریسک)</div></div>
+        <div class="tile"><div class="tile-l">بتا (β)</div><div class="tile-v">{% if ind.beta is not none %}{{ fa(ind.beta) }}{% else %}—{% endif %}</div><div class="tile-u">نسبت به شاخص هم‌وزن بازار</div></div>
+      </div>
+    </section>
+  </div>
+
+  <p class="muted small note disclaimer">
+    ⚠ این امتیاز و سیگنال‌ها صرفاً بر پایهٔ تحلیل تکنیکالِ قیمت گذشته و برای مقاصد آموزشی است و
+    توصیهٔ خرید یا فروش نیست. تصمیم سرمایه‌گذاری را با بررسی بنیادی و مدیریت ریسک خود بگیرید.
+  </p>
+  {% endif %}
+</div>

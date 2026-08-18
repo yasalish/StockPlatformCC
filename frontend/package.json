@@ -1,0 +1,25 @@
+{
+  "name": "boursenegar-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Vue 3 islands for بورس‌نگار. NOT a single-page app: Jinja still renders every page shell, nav, search box and auth; these bundles mount into one <div> inside a template. Order 08 converts market.html only.",
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@tanstack/vue-table": "^8.20.5",
+    "@tanstack/vue-virtual": "^3.10.8",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "playwright-core": "^1.62.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vue-tsc": "^2.2.0"
+  }
+}

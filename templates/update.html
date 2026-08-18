@@ -1,0 +1,386 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · به‌روزرسانی{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <h1>به‌روزرسانی داده‌ها</h1>
+  <div class="stat-row">
+    <div class="stat-card">
+      <div class="stat-num">{{ fy(summary.stock_latest) }}</div>
+      <div class="stat-label">آخرین تاریخ سهام در پایگاه داده</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num">{{ fy(summary.etf_latest) }}</div>
+      <div class="stat-label">آخرین تاریخ صندوق‌ها</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num">{{ fy(yesterday) }}</div>
+      <div class="stat-label">دیروز (تاریخ هدف)</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num">{{ '✅' if updater_available else '⛔' }}</div>
+      <div class="stat-label">وضعیت ماژول finpy_tse</div>
+    </div>
+  </div>
+</section>
+
+{% if not updater_available %}
+<section class="panel">
+  <p class="flash error" style="margin:0">ماژول به‌روزرسانی در دسترس نیست: {{ updater_error }}</p>
+  <p class="muted small note">برای فعال‌سازی، بستهٔ <code>finpy-tse</code> را نصب کنید: <code>pip install finpy-tse</code></p>
+</section>
+{% else %}
+
+<!-- live progress panel (shown while/after a job runs) -->
+<section class="panel" id="progress-panel" style="{{ '' if status.active else 'display:none' }}">
+  <div class="panel-head">
+    <h2>وضعیت به‌روزرسانی</h2>
+    <div class="head-actions">
+      <span class="muted small" id="prog-kind"></span>
+      <button type="button" class="btn ghost" id="pause-btn" style="display:none">⏸ مکث</button>
+      <button type="button" class="btn danger" id="stop-btn" style="display:none">⏹ توقف</button>
+    </div>
+  </div>
+  <div class="now-updating" id="prog-now" style="display:none">
+    <span class="spin"></span>
+    <span>در حال دریافت: <b id="prog-current">—</b></span>
+  </div>
+  <div class="prog-tiles">
+    <div class="tile"><div class="tile-l">پردازش‌شده</div><div class="tile-v" id="prog-processed">۰</div></div>
+    <div class="tile tile-btn" id="tile-success"><div class="tile-l">موفق ▾</div><div class="tile-v up-t" id="prog-success">۰</div></div>
+    <div class="tile tile-btn" id="tile-failed"><div class="tile-l">ناموفق / بدون داده ▾</div><div class="tile-v down-t" id="prog-failed">۰</div></div>
+    <div class="tile"><div class="tile-l">زمان سپری‌شده</div><div class="tile-v" id="prog-elapsed">۰ث</div></div>
+  </div>
+  <div class="progbar"><span id="prog-fill"></span></div>
+  <p class="muted small note" id="prog-msg">در حال اجرا…</p>
+
+  <div class="list-box" id="success-box" style="display:none">
+    <h3 class="up-t">نمادهای موفق (<span id="succ-count">۰</span>)</h3>
+    <div class="chips" id="success-list"></div>
+  </div>
+  <div class="list-box" id="failed-box" style="display:none">
+    <div class="list-head">
+      <h3 class="down-t">نمادهای ناموفق / بدون داده (<span id="fail-count">۰</span>)</h3>
+      <button type="button" class="btn ghost small" id="retry-all-btn">🔁 تلاش دوباره برای همه</button>
+    </div>
+    <p class="muted small" style="margin:2px 0 10px">روی نام هر نماد کلیک کنید تا فقط همان دوباره به‌روزرسانی شود.</p>
+    <div class="chips" id="failed-list"></div>
+  </div>
+</section>
+
+<section class="panel" id="form-panel">
+  <div class="panel-head"><h2>دریافت قیمت‌های جدید</h2></div>
+  <p class="muted small">
+    داده‌های قیمت از سرویس <b>finpy_tse</b> دریافت و در پایگاه داده درج می‌شود.
+    این کار در <b>پس‌زمینه</b> اجرا می‌شود و می‌توانید همین‌جا پیشرفت را ببینید یا آن را متوقف کنید.
+  </p>
+  <form method="post" action="{{ url_for('update_run') }}" class="update-form" id="update-form">
+    <div class="update-grid">
+      <label>نوع:
+        <select name="kind" id="kind-select">
+          <option value="stock">سهام</option>
+          <option value="etf">صندوق‌ها</option>
+        </select>
+      </label>
+      <label>حالت:
+        <select name="mode" id="mode-select">
+          <option value="incremental">افزایشی (از آخرین تاریخ)</option>
+          <option value="full">کل سابقه (از روز نخست)</option>
+        </select>
+      </label>
+      <label id="lbl-start">از تاریخ (YYYY-MM-DD):
+        <input type="text" name="start_date" id="start-date" value="{{ stock_next }}" required dir="ltr" data-jdate readonly>
+      </label>
+      <label id="lbl-end">تا تاریخ (YYYY-MM-DD):
+        <input type="text" name="end_date" id="end-date" value="{{ yesterday }}" required dir="ltr" data-jdate readonly>
+      </label>
+      <label id="lbl-ticker">نماد (اختیاری):
+        <input type="text" name="ticker" id="upd-ticker" placeholder="خالی = همهٔ نمادها" dir="rtl" autocomplete="off">
+      </label>
+    </div>
+    <p class="muted small note" style="margin:0 0 12px">
+      برای به‌روزرسانی فقط یک نماد، آن را در کادر «نماد» وارد کنید؛ برای همهٔ نمادها آن را خالی بگذارید.
+    </p>
+    <p class="flash error small" id="full-warn" style="display:none;margin:0 0 12px">
+      ⚠ در حالت «کل سابقه» تمام تاریخچهٔ هر نماد از روز نخست دریافت می‌شود (تاریخ‌ها نادیده گرفته می‌شوند).
+      این عملیات طولانی است؛ پیش از اجرا مطمئن شوید جدول قیمت خالی است تا رکورد تکراری ایجاد نشود.
+    </p>
+    <button type="submit" class="btn" id="run-btn">🔄 اجرای به‌روزرسانی</button>
+  </form>
+</section>
+{% endif %}
+
+<!-- delete panel (works independently of finpy_tse — pure DB operation) -->
+<section class="panel danger-zone" id="delete-panel">
+  <div class="panel-head">
+    <h2 class="down-t">🗑 حذف داده‌های قیمت</h2>
+    <span class="muted small">حذف رکوردهای قیمت یک نماد یا همهٔ نمادها در یک بازهٔ تاریخ</span>
+  </div>
+  <p class="flash error small" style="margin:0 0 14px">
+    ⚠ این عملیات رکوردهای قیمت را برای همیشه از پایگاه داده حذف می‌کند و بازگشت‌پذیر نیست.
+    پیش از حذف از تاریخ‌های «از» و «تا» مطمئن شوید.
+  </p>
+  <div class="update-grid">
+    <label>نوع:
+      <select id="del-kind">
+        <option value="stock">سهام</option>
+        <option value="etf">صندوق‌ها</option>
+      </select>
+    </label>
+    <label id="del-ticker-lbl">نماد:
+      <input type="text" id="del-ticker" placeholder="مثلاً فولاد" dir="rtl" autocomplete="off">
+    </label>
+    <label class="chk-cell">
+      <span>&nbsp;</span>
+      <label class="chk"><input type="checkbox" id="del-all"> حذف همهٔ نمادها</label>
+    </label>
+    <label>از تاریخ (YYYY-MM-DD):
+      <input type="text" id="del-start" value="{{ yesterday }}" dir="ltr" data-jdate readonly>
+    </label>
+    <label>تا تاریخ (YYYY-MM-DD):
+      <input type="text" id="del-end" value="{{ yesterday }}" dir="ltr" data-jdate readonly>
+    </label>
+  </div>
+  <button type="button" class="btn danger" id="del-btn">🗑 حذف داده‌ها</button>
+  <p class="note" id="del-msg" style="display:none"></p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/jdatepicker.js') }}?v={{ asset_version('js/jdatepicker.js') }}"></script>
+
+<!-- shared helpers + delete panel (available whether or not finpy_tse is installed) -->
+<script>
+  const fa = (s) => String(s).replace(/[0-9]/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
+  const DELETE_URL = "{{ url_for('update_delete') }}";
+
+  // «حذف همهٔ نمادها» toggle disables the single-ticker field
+  const delAll = document.getElementById("del-all");
+  const delTicker = document.getElementById("del-ticker");
+  const delTickerLbl = document.getElementById("del-ticker-lbl");
+  delAll.addEventListener("change", () => {
+    delTicker.disabled = delAll.checked;
+    if (delAll.checked) delTicker.value = "";
+    delTickerLbl.style.opacity = delAll.checked ? ".45" : "";
+  });
+
+  function showDel(text, ok) {
+    const el = document.getElementById("del-msg");
+    el.style.display = ""; el.textContent = text;
+    el.className = "note " + (ok ? "up-t" : "down-t");
+  }
+
+  document.getElementById("del-btn").addEventListener("click", async () => {
+    const kind = document.getElementById("del-kind").value;
+    const ticker = delAll.checked ? "" : delTicker.value.trim();
+    const start = document.getElementById("del-start").value.trim();
+    const end = document.getElementById("del-end").value.trim();
+    if (!start || !end) { showDel("تاریخ «از» و «تا» را وارد کنید.", false); return; }
+    if (start > end) { showDel("تاریخ «از» نباید بعد از «تا» باشد.", false); return; }
+    if (!delAll.checked && !ticker) {
+      showDel("یک نماد وارد کنید یا گزینهٔ «حذف همهٔ نمادها» را انتخاب کنید.", false); return;
+    }
+    const target = ticker ? `نماد «${ticker}»` : "همهٔ نمادها";
+    if (!confirm(`حذف داده‌های قیمت ${target} از ${start} تا ${end}؟\nاین عملیات بازگشت‌پذیر نیست.`)) return;
+
+    const btn = document.getElementById("del-btn");
+    btn.disabled = true; btn.textContent = "در حال حذف…";
+    try {
+      const res = await fetch(DELETE_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, ticker, start_date: start, end_date: end }),
+      });
+      const j = await res.json();
+      if (j.ok) {
+        const scope = j.all ? "همهٔ نمادها" : "نماد " + ticker;
+        showDel(`✅ ${fa(j.deleted)} رکورد حذف شد (${scope}، ${fa(start)} تا ${fa(end)}).`, true);
+      } else {
+        showDel("⛔ " + (j.error || "خطا در حذف"), false);
+      }
+    } catch (e) { showDel("⛔ خطا در ارتباط با سرور", false); }
+    btn.disabled = false; btn.textContent = "🗑 حذف داده‌ها";
+  });
+</script>
+
+{% if updater_available %}
+<script>
+  const STOCK_NEXT = "{{ stock_next }}", ETF_NEXT = "{{ etf_next }}";
+  const RETRY_URL = "{{ url_for('update_retry') }}";
+  const TOTALS = { stock: {{ summary.stocks }}, etf: {{ summary.etfs }} };
+
+  // kind-aware default start date
+  const kindSel = document.getElementById("kind-select");
+  const startInp = document.getElementById("start-date");
+  kindSel.addEventListener("change", () => {
+    startInp.value = kindSel.value === "etf" ? ETF_NEXT : STOCK_NEXT;
+  });
+
+  // mode toggle: full history disables the date fields
+  const modeSel = document.getElementById("mode-select");
+  const endInp = document.getElementById("end-date");
+  const runBtn = document.getElementById("run-btn");
+  modeSel.addEventListener("change", () => {
+    const full = modeSel.value === "full";
+    document.getElementById("full-warn").style.display = full ? "" : "none";
+    [startInp, endInp].forEach((el) => {
+      el.disabled = full; el.required = !full;
+      el.parentElement.style.opacity = full ? ".45" : "";
+    });
+    runBtn.textContent = full ? "⬇ دریافت کل سابقه" : "🔄 اجرای به‌روزرسانی";
+  });
+
+  let lastStatus = null;
+  const panel = document.getElementById("progress-panel");
+  const form  = document.getElementById("form-panel");
+
+  function render(s) {
+    if (!s.active) return;
+    lastStatus = s;
+    panel.style.display = "";
+
+    // --- run-state controls FIRST -----------------------------------------
+    // The stop button (and spinner / message / form) are set before the tile
+    // and symbol-list rendering below, so that even if that later DOM work
+    // ever throws (missing element, unexpected value), the stop button is
+    // already shown while a job is running — you can always halt an update.
+    const now = document.getElementById("prog-now");
+    const stopBtn = document.getElementById("stop-btn");
+    const pauseBtn = document.getElementById("pause-btn");
+    const msg = document.getElementById("prog-msg");
+    if (s.running) {
+      document.getElementById("prog-current").textContent = s.current || "…";
+      now.style.display = s.paused ? "none" : "";
+      stopBtn.style.display = "";
+      // pause ⇄ resume: label + action follow the current paused state
+      pauseBtn.style.display = "";
+      pauseBtn.textContent = s.paused ? "▶ ادامه" : "⏸ مکث";
+      pauseBtn.dataset.paused = s.paused ? "1" : "";
+      pauseBtn.disabled = false;
+      // 'queued'    — job row created, no Celery worker has claimed a batch yet
+      // 'finalizing' — every symbol done; the last task is rebuilding the views
+      msg.textContent = s.paused
+        ? "⏸ مکث شد — برای ادامه دکمهٔ «ادامه» را بزنید"
+        : (s.status === "queued"
+            ? "⏳ در صف اجرا — منتظر آزاد شدن کارگر…"
+            : (s.status === "finalizing"
+                ? "♻ همهٔ نمادها پردازش شدند — در حال بازسازی تحلیل‌ها…"
+                : "در حال اجرا… (این صفحه هر چند ثانیه به‌روز می‌شود)"));
+      form.style.display = "none";
+    } else {
+      now.style.display = "none";
+      stopBtn.style.display = "none";
+      pauseBtn.style.display = "none";
+      // There is no subprocess return code any more — the job's own status is
+      // the authority, and it is the same value in every worker.
+      const stopped = s.stopped || s.status === "stopped";
+      const okm = !stopped && s.result && s.result.indexOf("error=") === -1;
+      msg.innerHTML = stopped
+        ? `⏹ به‌روزرسانی متوقف شد — پردازش‌شده: ${fa(s.processed)}، موفق: ${fa(s.success)}`
+        : (okm
+            ? `✅ پایان یافت — موفق: ${fa(s.success)}، ناموفق: ${fa(s.failed)}`
+            : `⛔ پایان با خطا: ${(s.result || "").replace("RESULT ", "")}`);
+      msg.className = okm ? "up-t note" : (stopped ? "muted note" : "down-t note");
+      form.style.display = "";   // allow a new run
+    }
+
+    // --- numeric tiles ----------------------------------------------------
+    // when retrying a hand-picked subset the denominator is the subset size
+    // s.total is the number of rows the job created in update_job_ticker — the
+    // real denominator. TOTALS is the page-load fallback for a job-less page.
+    const total = s.total || (s.subset ? s.subset : (TOTALS[s.kind] || 0));
+    const kindFa = s.kind === "etf" ? "صندوق‌ها" : "سهام";
+    const scope = s.subset ? ` · ${fa(s.subset)} نماد انتخابی` : "";
+    document.getElementById("prog-kind").textContent = (s.full
+      ? `${kindFa} · کل سابقه`
+      : `${kindFa} · ${fa(s.start)} تا ${fa(s.end)}`) + scope;
+    document.getElementById("prog-processed").textContent =
+      fa(s.processed) + (total ? " / " + fa(total) : "");
+    document.getElementById("prog-success").textContent = fa(s.success);
+    document.getElementById("prog-failed").textContent = fa(s.failed);
+    document.getElementById("prog-elapsed").textContent = fa(s.elapsed) + "ث";
+    const pct = total ? Math.min(100, Math.round(s.processed / total * 100)) : (s.running ? 50 : 100);
+    document.getElementById("prog-fill").style.width = pct + "%";
+
+    // --- success / failure symbol lists (revealed by clicking the tiles) ---
+    const succ = s.success_list || [], fail = s.failed_list || [];
+    document.getElementById("succ-count").textContent = fa(succ.length);
+    document.getElementById("fail-count").textContent = fa(fail.length);
+    document.getElementById("success-list").innerHTML =
+      succ.map(t => `<span class="chip up">${t || "—"}</span>`).join("") ||
+      `<span class="muted small">موردی نیست</span>`;
+    document.getElementById("failed-list").innerHTML =
+      fail.map(f => f.ticker
+        ? `<button type="button" class="chip down retry" data-ticker="${f.ticker}"${s.running ? " disabled" : ""} title="${(f.reason || "")}${f.attempts ? ` — ${fa(f.attempts)} تلاش` : ""}${f.detail ? `
+${f.detail}` : ""} — برای تلاش دوباره کلیک کنید">${f.ticker}${f.attempts > 1 ? `<sup class="tries">${fa(f.attempts)}×</sup>` : ""}</button>`
+        : `<span class="chip down">—</span>`).join("") ||
+      `<span class="muted small">موردی نیست</span>`;
+    const retryAll = document.getElementById("retry-all-btn");
+    if (retryAll) retryAll.disabled = s.running || !fail.length;
+  }
+
+  document.getElementById("stop-btn").addEventListener("click", async () => {
+    const btn = document.getElementById("stop-btn");
+    btn.disabled = true; btn.textContent = "در حال توقف…";
+    try { await fetch("{{ url_for('update_stop') }}", { method: "POST" }); } catch (e) {}
+    btn.disabled = false; btn.textContent = "⏹ توقف";
+    poll();
+  });
+
+  // pause ⇄ resume — same button toggles based on the current paused state
+  document.getElementById("pause-btn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const isPaused = btn.dataset.paused === "1";
+    const url = isPaused ? "{{ url_for('update_resume') }}" : "{{ url_for('update_pause') }}";
+    btn.disabled = true;
+    btn.textContent = isPaused ? "در حال ادامه…" : "در حال مکث…";
+    try { await fetch(url, { method: "POST" }); } catch (err) {}
+    poll();   // refresh state; render() re-labels the button
+  });
+
+  // clicking a tile toggles its symbol list
+  const toggle = (id) => { const b = document.getElementById(id);
+    b.style.display = b.style.display === "none" ? "" : "none"; };
+  document.getElementById("tile-success").addEventListener("click", () => toggle("success-box"));
+  document.getElementById("tile-failed").addEventListener("click", () => toggle("failed-box"));
+
+  // ---- retry failed symbols -------------------------------------------------
+  async function retry(tickers) {
+    tickers = (tickers || []).filter(Boolean);
+    if (!tickers.length) return;
+    const label = tickers.length === 1 ? `نماد «${tickers[0]}»` : `${fa(tickers.length)} نماد`;
+    if (!confirm(`تلاش دوبارهٔ به‌روزرسانی برای ${label}؟`)) return;
+    try {
+      const res = await fetch(RETRY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tickers }),
+      });
+      const j = await res.json();
+      if (!j.ok) { alert(j.error || "خطا در شروع تلاش دوباره"); return; }
+      panel.style.display = "";
+      form.style.display = "none";
+      poll();   // a fresh job started — follow its live progress
+    } catch (e) { alert("خطا در ارتباط با سرور"); }
+  }
+
+  // click a single failed symbol → retry just it
+  document.getElementById("failed-list").addEventListener("click", (e) => {
+    const b = e.target.closest(".retry");
+    if (b && !b.disabled && b.dataset.ticker) retry([b.dataset.ticker]);
+  });
+  // retry every failed symbol from the last run
+  document.getElementById("retry-all-btn").addEventListener("click", () => {
+    const t = (lastStatus?.failed_list || []).map(f => f.ticker).filter(Boolean);
+    retry(t);
+  });
+
+  async function poll() {
+    try {
+      const s = await (await fetch("{{ url_for('update_status') }}")).json();
+      render(s);
+      if (s.active && s.running) setTimeout(poll, 3000);
+    } catch (e) { setTimeout(poll, 5000); }
+  }
+  {% if status.active %}poll();{% endif %}
+</script>
+{% endif %}
+{% endblock %}

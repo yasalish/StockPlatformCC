@@ -1,0 +1,7 @@
+{# Watchlist star toggle. Expects in scope: `kind`, `ticker`, `eid`.
+   Uses the global `watched` set ("kind:ticker") injected by inject_watchlist. #}
+<button type="button"
+        class="watch-star{{ ' on' if (kind ~ ':' ~ ticker) in watched }}"
+        data-kind="{{ kind }}" data-ticker="{{ ticker }}" data-id="{{ eid or '' }}"
+        onclick="event.stopPropagation();BN.toggleWatch(this)"
+        title="افزودن/حذف از دیده‌بان" aria-label="دیده‌بان">★</button>

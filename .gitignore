@@ -1,0 +1,35 @@
+# Secrets / local config
+.env
+deploy/.env
+*.apps.googleusercontent.com.json
+
+# TLS material must never be committed
+*.pem
+*.key
+*.crt
+
+# Database dumps: large, and they contain every row of user data.
+backups/*.dump
+backups/*.dump.sha256
+backups/.heartbeat
+
+# Frontend (order 08). node_modules is huge; static/dist IS committed on
+# purpose — the VPS build should not need npm, and the Dockerfile copies it in.
+frontend/node_modules/
+frontend/.vite/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+
+# Logs / runtime
+*.log
+update_job.meta.json
+
+# Local dev binaries (the portable Redis build used on Windows)
+.tools/
+
+# Editor / OS
+~$*
+.DS_Store

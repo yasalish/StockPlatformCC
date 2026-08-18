@@ -1,0 +1,164 @@
+{% set is_reg = (mode == 'register') %}
+<!DOCTYPE html>
+<html lang="fa" dir="rtl" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ 'ثبت‌نام' if is_reg else 'ورود' }} — بورس‌نگار</title>
+
+  <!-- Vazirmatn Persian font + icon glyphs — self-hosted; both live in auth.css -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}?v={{ asset_version('css/auth.css') }}">
+</head>
+<body>
+<div class="auth-shell">
+  <!-- Brand showcase -->
+  <aside class="auth-hero">
+    <div class="auth-hero-inner">
+      <a class="auth-logo" href="{{ url_for('auth.login') }}">
+        <i class="fa-solid fa-chart-line"></i><span>بورس‌نگار</span>
+      </a>
+      <div class="auth-hero-copy">
+        {% if is_reg %}
+        <h2 class="auth-hero-title">تحلیل حرفه‌ای بازار سرمایه، همین‌جا.</h2>
+        <p class="auth-hero-text">
+          چند ثانیه تا شروع فاصله داری. حسابت را بساز و بازدهی سهام و صندوق‌ها را در
+          دوره‌های مختلف دنبال کن — با استراتژی‌ها، فیلترها و نمودارهای حرفه‌ای.
+        </p>
+        <ul class="auth-hero-list">
+          <li><i class="fa-solid fa-check"></i> بازدهی همهٔ نمادها از یک هفته تا ۱۸ ماه</li>
+          <li><i class="fa-solid fa-check"></i> استراتژی‌ها، فیلترها و خروجی اکسل</li>
+          <li><i class="fa-solid fa-check"></i> نمودار حرفه‌ای قیمت و جزئیات نماد</li>
+        </ul>
+        {% else %}
+        <h2 class="auth-hero-title">تصمیم‌های بهتر، بر پایهٔ داده.</h2>
+        <p class="auth-hero-text">
+          سامانهٔ یکپارچهٔ تحلیل بورس تهران — بازدهی سهام و صندوق‌ها، استراتژی‌ها،
+          فیلترها و نمودارها، همه در یک جا و کاملاً راست‌به‌چپ.
+        </p>
+        <ul class="auth-hero-list">
+          <li><i class="fa-solid fa-check"></i> داشبورد بازار و برترین‌ها/ضعیف‌ترین‌ها</li>
+          <li><i class="fa-solid fa-check"></i> مقایسهٔ دوره‌ای نمادها</li>
+          <li><i class="fa-solid fa-check"></i> داده‌های به‌روز بورس تهران</li>
+        </ul>
+        {% endif %}
+      </div>
+      <div class="auth-hero-foot">© بورس‌نگار — سامانهٔ یکپارچهٔ تحلیل بازار سرمایه</div>
+    </div>
+  </aside>
+
+  <!-- Form -->
+  <main class="auth-main">
+    <button class="btn-icon auth-theme" id="themeToggle" title="حالت روشن/تاریک">
+      <i class="fa-solid fa-moon"></i>
+    </button>
+
+    <div class="auth-box">
+      <div class="auth-mini-brand">
+        <i class="fa-solid fa-chart-line"></i><span>بورس‌نگار</span>
+      </div>
+
+      <div class="auth-box-head">
+        <h1 class="auth-title">{{ 'ساخت حساب جدید' if is_reg else 'ورود به حساب' }}</h1>
+        <p class="auth-sub">{{ 'حساب خود را بسازید و تحلیل بازار را شروع کنید.' if is_reg else 'خوش آمدید! برای ادامه وارد شوید.' }}</p>
+      </div>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+          <div class="auth-flash {{ category }}">
+            <i class="fa-solid {{ 'fa-circle-check' if category == 'success' else 'fa-circle-exclamation' }}"></i>
+            <span>{{ message }}</span>
+          </div>
+        {% endfor %}
+      {% endwith %}
+
+      {% if google_enabled %}
+      <a class="btn-google" href="{{ url_for('auth.google_login') }}">
+        <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        {{ 'ثبت‌نام با گوگل' if is_reg else 'ورود با گوگل' }}
+      </a>
+      <div class="auth-divider"><span>یا با نام کاربری ادامه دهید</span></div>
+      {% endif %}
+
+      {% if is_reg %}
+      <form class="auth-form" method="post" action="{{ url_for('auth.register') }}">
+        <label for="display_name">نام نمایشی</label>
+        <div class="auth-field">
+          <i class="fa-solid fa-id-badge"></i>
+          <input type="text" id="display_name" name="display_name" value="{{ display_name or '' }}"
+                 autocomplete="name" placeholder="نامی که در برنامه نمایش داده می‌شود">
+        </div>
+
+        <label for="username">نام کاربری</label>
+        <div class="auth-field">
+          <i class="fa-solid fa-user"></i>
+          <input type="text" id="username" name="username" value="{{ username or '' }}"
+                 autocomplete="username" required placeholder="حروف انگلیسی، عدد، . _ -">
+        </div>
+        <p class="auth-hint">۳ تا ۳۲ نویسه؛ فقط حروف انگلیسی، عدد، نقطه، خط تیره و زیرخط.</p>
+
+        <label for="password">گذرواژه</label>
+        <div class="auth-field">
+          <i class="fa-solid fa-lock"></i>
+          <input type="password" id="password" name="password"
+                 autocomplete="new-password" required minlength="6" placeholder="حداقل ۶ نویسه">
+          <button type="button" class="auth-eye" data-target="password" title="نمایش گذرواژه">
+            <i class="fa-solid fa-eye"></i>
+          </button>
+        </div>
+
+        <label for="confirm">تکرار گذرواژه</label>
+        <div class="auth-field">
+          <i class="fa-solid fa-lock"></i>
+          <input type="password" id="confirm" name="confirm"
+                 autocomplete="new-password" required minlength="6" placeholder="گذرواژه را دوباره وارد کنید">
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block auth-submit">
+          <i class="fa-solid fa-user-plus"></i> ساخت حساب
+        </button>
+      </form>
+
+      <p class="auth-alt">قبلاً حساب ساخته‌اید؟ <a href="{{ url_for('auth.login') }}">وارد شوید</a></p>
+      {% else %}
+      <form class="auth-form" method="post" action="{{ url_for('auth.login', next=request.args.get('next','')) }}">
+        <label for="username">نام کاربری</label>
+        <div class="auth-field">
+          <i class="fa-solid fa-user"></i>
+          <input type="text" id="username" name="username" value="{{ username or '' }}"
+                 autocomplete="username" required autofocus placeholder="نام کاربری شما">
+        </div>
+
+        <label for="password">گذرواژه</label>
+        <div class="auth-field">
+          <i class="fa-solid fa-lock"></i>
+          <input type="password" id="password" name="password"
+                 autocomplete="current-password" required placeholder="••••••••">
+          <button type="button" class="auth-eye" data-target="password" title="نمایش گذرواژه">
+            <i class="fa-solid fa-eye"></i>
+          </button>
+        </div>
+
+        <label class="auth-check">
+          <input type="checkbox" name="remember" checked>
+          <span>مرا به خاطر بسپار</span>
+        </label>
+
+        <button type="submit" class="btn btn-primary btn-block auth-submit">
+          <i class="fa-solid fa-right-to-bracket"></i> ورود
+        </button>
+      </form>
+
+      <p class="auth-alt">حساب ندارید؟ <a href="{{ url_for('auth.register') }}">ثبت‌نام کنید</a></p>
+      {% endif %}
+    </div>
+  </main>
+</div>
+
+<script src="{{ url_for('static', filename='js/auth.js') }}?v={{ asset_version('js/auth.js') }}"></script>
+</body>
+</html>

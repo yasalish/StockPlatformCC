@@ -1,0 +1,81 @@
+{# Data-heavy dashboard blocks, rendered server-side and fetched lazily by
+   index.html so the landing page itself does no DB work and paints instantly. #}
+<div class="stat-row">
+  <div class="stat-card">
+    <div class="stat-num">{{ fa(summary.stocks) }}</div>
+    <div class="stat-label">نماد سهام</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ fa(summary.etfs) }}</div>
+    <div class="stat-label">صندوق</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ fa(summary.stock_rows + summary.etf_rows) }}</div>
+    <div class="stat-label">رکورد قیمت</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ fy(summary.stock_latest) }}</div>
+    <div class="stat-label">آخرین تاریخ داده</div>
+  </div>
+</div>
+
+<div class="two-col">
+  <section class="panel">
+    <div class="panel-head">
+      <h2 class="up-title">🔼 بیشترین بازدهی ۱ ماهه (سهام)</h2>
+      <a class="muted" href="{{ url_for('stocks_page') }}">مشاهدهٔ همه ›</a>
+    </div>
+    <table class="grid">
+      <thead><tr><th>نماد</th><th>بازار</th><th>۱ ماه</th></tr></thead>
+      <tbody>
+        {% for s in top_gainers %}
+        <tr class="clickable" onclick="location.href='{{ url_for('stock_detail', stock_id=s.id) }}'">
+          <td class="sym">{% set kind = 'stock' %}{% set ticker = s.ticker %}{% set eid = s.id %}{% include "_star.html" %}{{ s.ticker }}</td>
+          <td class="rtl-name muted">{{ s.market }}</td>
+          <td class="num">{{ pill(s.p20) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2 class="down-title">🔽 بیشترین افت ۱ ماهه (سهام)</h2>
+      <a class="muted" href="{{ url_for('stocks_page') }}">مشاهدهٔ همه ›</a>
+    </div>
+    <table class="grid">
+      <thead><tr><th>نماد</th><th>بازار</th><th>۱ ماه</th></tr></thead>
+      <tbody>
+        {% for s in top_losers %}
+        <tr class="clickable" onclick="location.href='{{ url_for('stock_detail', stock_id=s.id) }}'">
+          <td class="sym">{% set kind = 'stock' %}{% set ticker = s.ticker %}{% set eid = s.id %}{% include "_star.html" %}{{ s.ticker }}</td>
+          <td class="rtl-name muted">{{ s.market }}</td>
+          <td class="num">{{ pill(s.p20) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>🏆 برترین صندوق‌ها (بازدهی ۱ ماهه)</h2>
+    <a class="muted" href="{{ url_for('etfs_page') }}">مشاهدهٔ همه ›</a>
+  </div>
+  <table class="grid">
+    <thead><tr><th>نماد</th><th>نوع</th><th>قیمت پایانی</th><th>۱ ماه</th><th></th></tr></thead>
+    <tbody>
+      {% for s in etf_top %}
+      <tr class="clickable" onclick="location.href='{{ url_for('etf_detail', etf_id=s.id) }}'">
+        <td class="sym">{% set kind = 'etf' %}{% set ticker = s.ticker %}{% set eid = s.id %}{% include "_star.html" %}{{ s.ticker }}</td>
+        <td><span class="tag" style="background:{{ ETF_TYPE_COLORS.get(s.type, '#868fa3') }}">{{ s.type }}</span></td>
+        <td class="num">{{ fa(s.latest) }}</td>
+        <td class="num">{{ pill(s.p20) }}</td>
+        <td class="chev">›</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

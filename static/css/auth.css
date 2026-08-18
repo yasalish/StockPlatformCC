@@ -1,0 +1,230 @@
+/* =====================================================================
+   بورس‌نگار — استایل صفحه‌های ورود و ثبت‌نام
+   Self-contained auth styling (login + register). Mirrors the filmnegar
+   auth screens but branded in the platform's blue palette. Scoped variables
+   live here so the main style.css stays untouched. Light + dark via
+   [data-theme] on <html>.
+   ===================================================================== */
+
+/* Vazirmatn — SELF-HOSTED (static/fonts/), same block as style.css. This page
+   is standalone (it does NOT extend base.html and does NOT load style.css), so
+   it needs its own @font-face declarations. Was a render-blocking jsdelivr
+   <link>; that CDN is unreliable from Iran. Browsers fetch only the weights a
+   page actually uses, so declaring all nine costs nothing. */
+@font-face{font-family:Vazirmatn;src:url('../fonts/Vazirmatn-Thin.woff2') format('woff2');font-weight:100;font-style:normal;font-display:swap}
+@font-face{font-family:Vazirmatn;src:url('../fonts/Vazirmatn-ExtraLight.woff2') format('woff2');font-weight:200;font-style:normal;font-display:swap}
+@font-face{font-family:Vazirmatn;src:url('../fonts/Vazirmatn-Light.woff2') format('woff2');font-weight:300;font-style:normal;font-display:swap}
+@font-face{font-family:Vazirmatn;src:url('../fonts/Vazirmatn-Regular.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:Vazirmatn;src:url('../fonts/Vazirmatn-Medium.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
+@font-face{font-family:Vazirmatn;src:url('../fonts/Vazirmatn-SemiBold.woff2') format('woff2');font-weight:600;font-style:normal;font-display:swap}
+@font-face{font-family:Vazirmatn;src:url('../fonts/Vazirmatn-Bold.woff2') format('woff2');font-weight:700;font-style:normal;font-display:swap}
+@font-face{font-family:Vazirmatn;src:url('../fonts/Vazirmatn-ExtraBold.woff2') format('woff2');font-weight:800;font-style:normal;font-display:swap}
+@font-face{font-family:Vazirmatn;src:url('../fonts/Vazirmatn-Black.woff2') format('woff2');font-weight:900;font-style:normal;font-display:swap}
+
+:root {
+  /* filmnegar palette: warm cream + gold accent, slate-navy brand hero */
+  --bg: #f4f2ea;
+  --bg-elev: #ffffff;
+  --text: #1c2830;
+  --text-muted: #6a7078;
+  --border: #e4dfd1;
+  --border-strong: #d3ccb9;
+  --primary: #b89529;
+  --primary-hover: #a2811f;
+  --primary-soft: #f4ecd2;
+  --primary-grad: linear-gradient(135deg, #d4b85b 0%, #c4a749 55%, #a98d2c 100%);
+  --danger: #e5484d;
+  --danger-soft: #fdecec;
+  --shadow-sm: 0 1px 2px rgba(30, 35, 20, .05), 0 2px 6px rgba(30, 35, 20, .05);
+  --shadow-lg: 0 10px 30px rgba(35, 40, 25, .14), 0 28px 64px rgba(35, 40, 25, .18);
+  --shadow-primary: 0 6px 18px rgba(180, 150, 55, .32), 0 2px 6px rgba(180, 150, 55, .22);
+  --ring: 0 0 0 4px var(--primary-soft);
+  --radius-lg: 20px;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --font: "Vazirmatn", Tahoma, "Segoe UI", sans-serif;
+  --brand-1: #16232c;
+  --brand-2: #22333e;
+  --brand-3: #3a4b55;
+}
+
+[data-theme="dark"] {
+  --bg: #16232c;
+  --bg-elev: #1f2e38;
+  --text: #eaf0f3;
+  --text-muted: #93a2ac;
+  --border: #2a3a45;
+  --border-strong: #3a4b55;
+  --primary: #c7ab4d;
+  --primary-hover: #d8bc5e;
+  --primary-soft: #322c18;
+  --primary-grad: linear-gradient(135deg, #d8bc5e 0%, #c7ab4d 55%, #ad9235 100%);
+  --danger: #f0555a;
+  --danger-soft: #2a1417;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, .6), 0 30px 70px rgba(0, 0, 0, .5);
+  --shadow-primary: 0 6px 20px rgba(199, 171, 77, .5);
+  --brand-1: #16232c;
+  --brand-2: #22333e;
+  --brand-3: #3a4b55;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  font-family: var(--font);
+  background: var(--bg); color: var(--text);
+  transition: background .25s ease, color .25s ease;
+  -webkit-font-smoothing: antialiased;
+}
+button, input { font-family: var(--font); }
+
+/* --- Icon glyphs ---------------------------------------------------------
+   This page's <i class="fa-solid fa-…"> markup used to be painted by a Font
+   Awesome stylesheet loaded from cdnjs — a foreign CDN, same reachability
+   problem as the jsdelivr font above, and the only icon set on the whole
+   platform (every other template draws its icons as literal characters).
+   Rather than vendor a ~100 kB icon font for eleven glyphs, each class maps to
+   a Unicode character already present in system fonts. Keeps every icon slot
+   filled, so spacing and the show-password affordance are unchanged, at zero
+   bytes. auth.js swaps fa-moon⇄fa-sun and fa-eye⇄fa-eye-slash at runtime. */
+i[class*="fa-"] { font-style: normal; line-height: 1; }
+.fa-chart-line::before        { content: "📈"; }
+.fa-check::before             { content: "✓"; }
+.fa-circle-check::before      { content: "✓"; }
+.fa-circle-exclamation::before{ content: "⚠"; }
+.fa-moon::before              { content: "☾"; }
+.fa-sun::before               { content: "☀"; }
+.fa-id-badge::before          { content: "📇"; }
+.fa-user::before              { content: "👤"; }
+.fa-lock::before              { content: "🔒"; }
+.fa-eye::before               { content: "👁"; }
+.fa-eye-slash::before         { content: "👁"; }
+.fa-eye-slash                 { opacity: .45; }   /* "hidden" state */
+.fa-user-plus::before         { content: "✚"; }
+.fa-right-to-bracket::before  { content: "←"; }   /* RTL: forward = leftward */
+
+/* --- Buttons (minimal, only what the auth screens need) --- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1.5px solid transparent; border-radius: var(--radius-sm);
+  padding: 11px 18px; font-size: 14.5px; font-weight: 600; cursor: pointer;
+  color: var(--text); background: var(--bg-elev); transition: all .18s ease;
+}
+.btn-block { width: 100%; }
+.btn-primary {
+  background-image: var(--primary-grad); border-color: transparent; color: #fff;
+  box-shadow: var(--shadow-primary); font-weight: 700;
+}
+.btn-primary:hover { filter: brightness(1.05); box-shadow: 0 10px 26px rgba(31, 78, 120, .42); }
+.btn-primary:active { transform: translateY(0); filter: brightness(.97); }
+.btn-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; border-radius: 50%; border: 1.5px solid var(--border);
+  background: var(--bg-elev); color: var(--text); cursor: pointer; transition: all .18s ease;
+}
+.btn-icon:hover { border-color: var(--primary); color: var(--primary); }
+
+/* =====================================================================
+   Auth shell — split hero (brand) + form
+   ===================================================================== */
+.auth-shell {
+  min-height: 100vh; display: grid; grid-template-columns: 1.05fr 0.95fr;
+  background: var(--bg);
+}
+
+/* --- Brand showcase --- */
+.auth-hero {
+  position: relative; overflow: hidden; color: #fff; padding: 48px 52px;
+  background:
+    radial-gradient(900px 620px at 82% -8%, rgba(199, 171, 77, .28), transparent 60%),
+    radial-gradient(680px 520px at -12% 112%, rgba(58, 75, 85, .55), transparent 58%),
+    linear-gradient(152deg, var(--brand-1) 0%, var(--brand-2) 46%, var(--brand-3) 100%);
+}
+.auth-hero::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, .05) 0 1px, transparent 1px 44px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, .05) 0 1px, transparent 1px 44px);
+  -webkit-mask: radial-gradient(120% 120% at 72% 16%, #000 28%, transparent 74%);
+          mask: radial-gradient(120% 120% at 72% 16%, #000 28%, transparent 74%);
+}
+.auth-hero-inner { position: relative; z-index: 1; height: 100%; display: flex; flex-direction: column; }
+.auth-logo { display: inline-flex; align-items: center; gap: 11px; font-size: 22px; font-weight: 800; color: #fff; text-decoration: none; }
+.auth-logo i { color: #bcd6f0; }
+.auth-hero-copy { margin: auto 0; max-width: 470px; }
+.auth-hero-title { font-size: 33px; line-height: 1.5; font-weight: 800; margin: 0 0 16px; letter-spacing: -.3px; }
+.auth-hero-text { font-size: 15.5px; line-height: 2.1; color: rgba(255, 255, 255, .82); margin: 0 0 28px; }
+.auth-hero-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.auth-hero-list li { display: flex; align-items: center; gap: 12px; font-size: 14.5px; color: rgba(255, 255, 255, .92); }
+.auth-hero-list i {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 27px; height: 27px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(255, 255, 255, .14); color: #fff; font-size: 12px;
+}
+.auth-hero-foot { font-size: 12.5px; color: rgba(255, 255, 255, .6); }
+
+/* --- Form side --- */
+.auth-main { position: relative; display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
+.auth-theme { position: absolute; top: 20px; left: 20px; }
+.auth-box { width: 100%; max-width: 400px; }
+.auth-mini-brand {
+  display: none; align-items: center; justify-content: center; gap: 10px;
+  font-size: 22px; font-weight: 800; color: var(--text); margin-bottom: 22px;
+}
+.auth-mini-brand i { color: var(--primary); }
+.auth-box-head { margin-bottom: 24px; }
+.auth-title { font-size: 25px; font-weight: 800; margin: 0 0 7px; letter-spacing: -.3px; }
+.auth-sub { color: var(--text-muted); font-size: 14.5px; margin: 0; }
+
+.auth-form { display: flex; flex-direction: column; }
+.auth-form label { font-size: 13px; font-weight: 600; margin: 13px 0 6px; color: var(--text); }
+.auth-field {
+  position: relative; display: flex; align-items: center;
+  background: var(--bg-elev); border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm); transition: border-color .18s ease, box-shadow .18s ease;
+}
+.auth-field:focus-within { border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-soft); }
+.auth-field > i:first-child { color: var(--text-muted); padding: 0 13px; font-size: 14px; }
+.auth-field input {
+  flex: 1; min-width: 0; border: none; background: transparent; color: var(--text);
+  padding: 12px 6px 12px 0; font-size: 15px; outline: none;
+}
+.auth-field input::placeholder { color: var(--text-muted); opacity: .7; }
+.auth-eye { border: none; background: transparent; color: var(--text-muted); cursor: pointer; padding: 0 13px; font-size: 14px; }
+.auth-eye:hover { color: var(--primary); }
+.auth-hint { color: var(--text-muted); font-size: 11.5px; margin: 6px 2px 0; }
+
+.auth-check { flex-direction: row !important; align-items: center; gap: 8px; font-weight: 500 !important; cursor: pointer; margin-top: 16px; font-size: 13.5px; }
+.auth-check input { width: 16px; height: 16px; accent-color: var(--primary); }
+
+.auth-submit { margin-top: 22px; font-size: 15px; padding: 13px; border-radius: var(--radius-sm); }
+.auth-alt { text-align: center; color: var(--text-muted); font-size: 14px; margin: 22px 0 0; }
+.auth-alt a { color: var(--primary); text-decoration: none; font-weight: 700; }
+.auth-alt a:hover { text-decoration: underline; }
+
+.auth-flash {
+  display: flex; align-items: center; gap: 9px; font-size: 13.5px;
+  padding: 11px 13px; border-radius: var(--radius-sm); margin-bottom: 14px;
+}
+.auth-flash.error { background: var(--danger-soft); color: var(--danger); }
+.auth-flash.success { background: var(--primary-soft); color: var(--primary); }
+
+/* Divider + Google button */
+.auth-divider { display: flex; align-items: center; gap: 14px; color: var(--text-muted); font-size: 12.5px; margin: 20px 0; }
+.auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.btn-google {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; padding: 12px 16px; text-decoration: none;
+  background: var(--bg-elev); color: var(--text);
+  border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 14.5px; font-weight: 600; transition: all .18s ease;
+}
+.btn-google:hover { border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-soft); transform: translateY(-1px); }
+.btn-google svg { flex-shrink: 0; }
+
+@media (max-width: 900px) {
+  .auth-shell { grid-template-columns: 1fr; }
+  .auth-hero { display: none; }
+  .auth-mini-brand { display: flex; }
+}

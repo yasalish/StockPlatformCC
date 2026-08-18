@@ -1,0 +1,506 @@
+# docker-compose.yml — بورس‌نگار production stack.
+#
+#   migrate          alembic upgrade head, once, before anything else (order 07)
+#   backup           nightly pg_dump + weekly restore test (order 07)
+#   nginx  :80/:443  TLS termination, gzip+brotli, static files, rate limits
+#   web              Gunicorn (gthread) + Flask                     — not published
+#   worker           Celery: the TSETMC fetch (order 06)            — not published
+#   beat             Celery Beat: the nightly schedule (order 06)   — not published
+#   db               PostgreSQL 17, tuned per order 01              — not published
+#   redis            cache (db 0) + Celery broker (db 1) / results (db 2)
+#
+# Only nginx publishes ports. db, redis and web are reachable solely on the
+# internal compose network, which is why Gunicorn can trust the X-Forwarded-*
+# headers and why PostgreSQL is not exposed to the internet.
+#
+# Run it with the deployment env file, NOT the local-development .env:
+#     docker compose --env-file deploy/.env up -d --build
+# Every secret below uses ${VAR:?...} syntax, so forgetting that flag fails
+# immediately with a readable message instead of silently picking up dev values.
+
+name: boursenegar
+
+services:
+  # =========================================================================
+  # PostgreSQL 17
+  # =========================================================================
+  db:
+    image: ${REGISTRY-}postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${STOCK_DB_NAME:-Stock}
+      POSTGRES_USER: ${STOCK_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${STOCK_DB_PASSWORD:?set STOCK_DB_PASSWORD in deploy/.env}
+      # Persian text sorts and compares correctly under a UTF-8 collation; the
+      # image defaults to the C locale, which would order «فولاد» wrongly.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+      TZ: ${TZ:-Asia/Tehran}
+      PGTZ: ${TZ:-Asia/Tehran}
+    # -----------------------------------------------------------------------
+    # The order 01 tuning, baked in.
+    #
+    # These were measured against a 16 GB box with an NVMe SSD and a 1,263 MB
+    # hot table. On a smaller VPS they are wrong in the dangerous direction —
+    # override them in deploy/.env rather than editing this file. The rule of
+    # thumb: shared_buffers ≈ 25% of RAM, effective_cache_size ≈ 75%.
+    #
+    #   shared_buffers                 128MB -> 4GB    hot table fits in cache
+    #   work_mem                         4MB -> 64MB   kills the external merge
+    #                                                  sort that spilled 10,400 kB
+    #                                                  to disk on every scan
+    #   effective_cache_size             4GB -> 12GB   tells the planner the OS
+    #                                                  page cache exists
+    #   random_page_cost                 4.0 -> 1.1    4.0 models a spinning
+    #                                                  disk; this is NVMe, so
+    #                                                  index scans were being
+    #                                                  rejected for seq scans
+    #   max_parallel_workers_per_gather    2 -> 4      the market-wide scans are
+    #                                                  the parallel case
+    # -----------------------------------------------------------------------
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-4GB}
+      - -c
+      - work_mem=${PG_WORK_MEM:-64MB}
+      - -c
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-12GB}
+      - -c
+      - random_page_cost=${PG_RANDOM_PAGE_COST:-1.1}
+      - -c
+      - max_parallel_workers_per_gather=${PG_PARALLEL_WORKERS_PER_GATHER:-4}
+      # Not from order 01, but required for the above to behave in a container:
+      # maintenance_work_mem sizes REFRESH MATERIALIZED VIEW and CREATE INDEX,
+      # both of which this app does routinely.
+      - -c
+      - maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-512MB}
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-100}
+      # Log anything slower than the app's own 200 ms [perf] threshold, so a
+      # slow page can be traced to the statement behind it.
+      - -c
+      - log_min_duration_statement=200
+      - -c
+      - timezone=${TZ:-Asia/Tehran}
+    # PostgreSQL puts parallel-worker communication in /dev/shm. Docker's default
+    # is 64 MB, which max_parallel_workers_per_gather=4 exhausts — the symptom is
+    # "could not resize shared memory segment" partway through a market scan.
+    shm_size: ${PG_SHM_SIZE:-1gb}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Read-only mount of the backups directory so pg_dump / pg_restore can be
+      # run with `docker compose exec db` without copying files in and out.
+      - ./backups:/backups
+    healthcheck:
+      # pg_isready checks that the server ACCEPTS CONNECTIONS, which is what
+      # dependents actually need — the process being alive is not enough during
+      # crash recovery on a 6-million-row table.
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -q"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    stop_grace_period: 60s
+    networks: [internal]
+
+  # =========================================================================
+  # Redis — the shared analytics cache (order 04)
+  # =========================================================================
+  redis:
+    image: ${REGISTRY-}redis:7-bookworm
+    restart: unless-stopped
+    # appendonly yes because the named volume is required to survive recreation.
+    # allkeys-lru bounds memory: this is a cache, so evicting the coldest entry
+    # is always preferable to an out-of-memory error, and every entry carries a
+    # TTL anyway (ANALYTICS_CACHE_TTL).
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD in deploy/.env}
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-512mb}
+      - --maxmemory-policy
+      - allkeys-lru
+      - --save
+      - "900 1"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      # -a is needed because requirepass is set; without it PING returns NOAUTH
+      # and the container would sit permanently unhealthy.
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in deploy/.env}
+    networks: [internal]
+
+  # =========================================================================
+  # web — Gunicorn + Flask
+  # =========================================================================
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REGISTRY: ${REGISTRY-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL-}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST-}
+    restart: unless-stopped
+    # tini as pid 1, so signals reach Gunicorn's master cleanly on `compose stop`.
+    # (market.py no longer spawns a subprocess — since order 06 the fetch runs in
+    # the worker service — but an init is still the right pid 1 for a container.)
+    init: true
+    environment:
+      APP_ENV: production
+      TRUST_PROXY: "1"
+      TZ: ${TZ:-Asia/Tehran}
+
+      # --- secrets: no defaults, no values in the image ---------------------
+      STOCK_SECRET: ${STOCK_SECRET:?set STOCK_SECRET in deploy/.env — generate with `python -c "import secrets; print(secrets.token_hex(32))"`}
+      STOCK_DB_PASSWORD: ${STOCK_DB_PASSWORD:?set STOCK_DB_PASSWORD in deploy/.env}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in deploy/.env}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET-}
+
+      # --- PostgreSQL: the service name, not localhost ---------------------
+      STOCK_DB_NAME: ${STOCK_DB_NAME:-Stock}
+      STOCK_DB_USER: ${STOCK_DB_USER:-postgres}
+      STOCK_DB_HOST: db
+      STOCK_DB_PORT: "5432"
+      # Per-worker pool. workers(4) x 8 = 32 connections, inside max_connections
+      # (100) with room for psql, pg_dump and the order 06 Celery workers.
+      STOCK_DB_POOL_MAX: ${STOCK_DB_POOL_MAX:-8}
+
+      # --- Redis ------------------------------------------------------------
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      # The 7.x server speaks RESP3; cache.py defaults to RESP2 for the older
+      # Windows build used in development, so opt in explicitly here.
+      REDIS_PROTOCOL: "3"
+      ANALYTICS_CACHE_TTL: ${ANALYTICS_CACHE_TTL:-21600}
+
+      # --- Celery (order 06) -------------------------------------------------
+      # The web process only ENQUEUES; the worker service does the fetching. It
+      # still needs the broker settings to put a message on the queue, and they
+      # must match the worker's exactly or jobs would queue into a void.
+      CELERY_BROKER_DB: "1"
+      CELERY_RESULT_DB: "2"
+      CELERY_BATCH_SIZE: ${CELERY_BATCH_SIZE:-25}
+
+      # --- observability (order 07) -----------------------------------------
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SERVICE_NAME: boursenegar-web
+      SLOW_REQUEST_MS: ${SLOW_REQUEST_MS:-200}
+      SENTRY_DSN: ${SENTRY_DSN-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0}
+
+      # --- cookies ----------------------------------------------------------
+      # nginx terminates TLS, so the browser is always on HTTPS.
+      COOKIE_SECURE: "1"
+
+      # --- Gunicorn (see gunicorn.conf.py for the reasoning) ---------------
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS-}
+      GUNICORN_THREADS: ${GUNICORN_THREADS-}
+      GUNICORN_LOGLEVEL: ${GUNICORN_LOGLEVEL:-info}
+    volumes:
+      # Job-control files (order 06 replaces these with a database table).
+      - appstate:/var/lib/boursenegar
+      # The SAME host directory nginx serves, so asset_version()'s mtime-based
+      # cache-busting URL always matches the file nginx actually returns.
+      - ./static:/app/static:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 40s          # > gunicorn graceful_timeout (30s)
+    networks: [internal]
+
+  # =========================================================================
+  # migrate — `alembic upgrade head`, once, before anything else starts (order 07)
+  #
+  # A one-shot service rather than a line in each container's entrypoint. web,
+  # worker and beat all start at the same moment; three of them running the same
+  # CREATE TABLE concurrently is a race, and while migrations/env.py takes a
+  # PostgreSQL advisory lock to make that safe, having two of them block on a
+  # lock during every deploy is not a design, it is a survivable accident.
+  #
+  # Everything else waits on `service_completed_successfully`, so a failed
+  # migration stops the deploy instead of letting the app start against a schema
+  # it does not understand.
+  # =========================================================================
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REGISTRY: ${REGISTRY-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL-}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST-}
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      APP_ENV: production
+      TZ: ${TZ:-Asia/Tehran}
+      STOCK_SECRET: ${STOCK_SECRET:?set STOCK_SECRET in deploy/.env}
+      STOCK_DB_PASSWORD: ${STOCK_DB_PASSWORD:?set STOCK_DB_PASSWORD in deploy/.env}
+      STOCK_DB_NAME: ${STOCK_DB_NAME:-Stock}
+      STOCK_DB_USER: ${STOCK_DB_USER:-postgres}
+      STOCK_DB_HOST: db
+      STOCK_DB_PORT: "5432"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in deploy/.env}
+      REDIS_HOST: redis
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+
+  # =========================================================================
+  # backup — nightly pg_dump with retention (order 07)
+  #
+  # Built from the SAME postgres image as the database, so pg_dump is guaranteed
+  # to be the same major version as the server. (pg_dump refuses to dump a newer
+  # server than itself, which is the usual way a backup service silently stops
+  # working after a database upgrade.)
+  #
+  # Storage is the local ./backups directory — self-hosted, as required. Nothing
+  # leaves the machine. To keep an off-box copy, rsync that directory to another
+  # host you control or to a domestic provider.
+  # =========================================================================
+  backup:
+    image: ${REGISTRY-}postgres:17-bookworm
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/scripts/backup-loop.sh"]
+    environment:
+      TZ: ${TZ:-Asia/Tehran}
+      STOCK_DB_NAME: ${STOCK_DB_NAME:-Stock}
+      STOCK_DB_USER: ${STOCK_DB_USER:-postgres}
+      STOCK_DB_PASSWORD: ${STOCK_DB_PASSWORD:?set STOCK_DB_PASSWORD in deploy/.env}
+      STOCK_DB_HOST: db
+      STOCK_DB_PORT: "5432"
+      BACKUP_DIR: /backups
+      # 02:30 Tehran — after beat's 20:30/21:30 fetches have long finished, and
+      # before the market opens, so the dump is of a settled database.
+      BACKUP_AT: ${BACKUP_AT:-02:30}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_KEEP_MIN: ${BACKUP_KEEP_MIN:-3}
+      # Restore the newest dump into a scratch database and diff the row counts,
+      # weekly. A backup nobody has restored is a hypothesis.
+      BACKUP_VERIFY_WEEKDAY: ${BACKUP_VERIFY_WEEKDAY:-5}
+    volumes:
+      - ./backups:/backups
+      - ./deploy/scripts:/scripts:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # The loop touches this file every time it wakes, so a stuck scheduler is
+      # visible rather than looking identical to a quiet night.
+      test: ["CMD-SHELL", "test -f /backups/.heartbeat && test $$(( $$(date +%s) - $$(stat -c %Y /backups/.heartbeat) )) -lt 7200"]
+      interval: 300s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    networks: [internal]
+
+  # =========================================================================
+  # worker — Celery: the process that actually fetches from TSETMC (order 06)
+  #
+  # Same image as web; only the command differs. It is the ONLY service that
+  # imports finpy_tse and talks to tsetmc.com, which is why the web containers
+  # stay light and why a finpy/asyncio failure can no longer take a page down.
+  # =========================================================================
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REGISTRY: ${REGISTRY-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL-}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST-}
+    restart: unless-stopped
+    init: true
+    # --pool=prefork forks a fresh child per task batch. finpy_tse drives
+    # asyncio/aiohttp and misbehaves when reused across event loops — a separate
+    # child process is what run_update.py's subprocess used to provide, and
+    # prefork provides it here, with retries and resumability on top.
+    #
+    # --concurrency is deliberately modest: TSETMC rate-limits, and the timeouts
+    # it returns under load are exactly the "No data returned" failures order 06
+    # exists to surface. Raise it only if the failure counts stay at zero.
+    #
+    # -Ofair stops a worker hoarding messages while one long batch runs.
+    command: >
+      celery -A celery_app worker
+      --loglevel=${CELERY_LOGLEVEL:-info}
+      --queues=updates
+      --pool=prefork
+      --concurrency=${CELERY_CONCURRENCY:-4}
+      -Ofair
+      --max-tasks-per-child=${CELERY_MAX_TASKS_PER_CHILD:-200}
+    environment: &app_env
+      APP_ENV: production
+      TZ: ${TZ:-Asia/Tehran}
+      STOCK_SECRET: ${STOCK_SECRET:?set STOCK_SECRET in deploy/.env}
+      STOCK_DB_PASSWORD: ${STOCK_DB_PASSWORD:?set STOCK_DB_PASSWORD in deploy/.env}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in deploy/.env}
+      STOCK_DB_NAME: ${STOCK_DB_NAME:-Stock}
+      STOCK_DB_USER: ${STOCK_DB_USER:-postgres}
+      STOCK_DB_HOST: db
+      STOCK_DB_PORT: "5432"
+      STOCK_DB_POOL_MAX: ${STOCK_DB_POOL_MAX:-8}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      REDIS_PROTOCOL: "3"
+      ANALYTICS_CACHE_TTL: ${ANALYTICS_CACHE_TTL:-21600}
+      # Broker and results on their OWN logical Redis databases, away from the
+      # allkeys-lru analytics cache in db 0.
+      CELERY_BROKER_DB: "1"
+      CELERY_RESULT_DB: "2"
+      CELERY_BATCH_SIZE: ${CELERY_BATCH_SIZE:-25}
+      APP_STATE_DIR: /var/lib/boursenegar
+      # --- observability (order 07) ----------------------------------------
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SERVICE_NAME: boursenegar-worker
+      SENTRY_DSN: ${SENTRY_DSN-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0}
+    volumes:
+      - appstate:/var/lib/boursenegar
+      - ./static:/app/static:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # inspect ping round-trips a control message through the broker, so it
+      # proves the worker is consuming — not merely that the process exists.
+      test: ["CMD-SHELL", "celery -A celery_app inspect ping -t 10 | grep -q pong"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 45s
+    # Longer than task_soft_time_limit so a graceful stop can finish the batch
+    # in flight instead of having it redelivered.
+    stop_grace_period: 120s
+    networks: [internal]
+
+  # =========================================================================
+  # beat — the nightly schedule (order 06)
+  #
+  # EXACTLY ONE of these may run. Two Beats means every scheduled fetch is
+  # enqueued twice, so this service must never be scaled above 1.
+  # =========================================================================
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REGISTRY: ${REGISTRY-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL-}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST-}
+    restart: unless-stopped
+    init: true
+    # --max-interval caps how long beat sleeps between checks, which also bounds
+    # how stale the schedule file can get — the healthcheck below relies on that.
+    # --pidfile= (empty) because a container restart would otherwise leave a
+    # stale pidfile and beat would refuse to start.
+    command: >
+      celery -A celery_app beat
+      --loglevel=${CELERY_LOGLEVEL:-info}
+      --schedule=/var/lib/boursenegar/celerybeat-schedule
+      --pidfile=
+      --max-interval=60
+    environment:
+      <<: *app_env
+    volumes:
+      - appstate:/var/lib/boursenegar
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # beat syncs its schedule database periodically; if the file has not been
+      # touched in 10 minutes beat has stopped ticking. This checks that it is
+      # DOING something, which a process-exists check would not.
+      test: ["CMD-SHELL", "python -c \"import os,sys,time; p='/var/lib/boursenegar/celerybeat-schedule'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 600 else 1)\""]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    stop_grace_period: 30s
+    networks: [internal]
+
+  # =========================================================================
+  # nginx — the only service with published ports
+  # =========================================================================
+  nginx:
+    build:
+      context: ./deploy/nginx
+      dockerfile: Dockerfile
+      args:
+        REGISTRY: ${REGISTRY-}
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-deb.debian.org}
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      TZ: ${TZ:-Asia/Tehran}
+      TLS_SELF_SIGNED_CN: ${SERVER_NAME:-localhost}
+    volumes:
+      - ./static:/srv/static:ro     # served directly, never touching Gunicorn
+      - tlscerts:/etc/nginx/tls     # drop a real fullchain.pem + privkey.pem here
+      - certbotwww:/var/www/certbot # ACME http-01 webroot, ready but unused
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/nginx-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks: [internal]
+
+# ===========================================================================
+# Named volumes — data survives `docker compose down` and `--force-recreate`.
+# It does NOT survive `docker compose down -v`, which is the command to be
+# careful with.
+# ===========================================================================
+volumes:
+  pgdata:                           # PostgreSQL cluster
+  redisdata:                        # Redis AOF + RDB
+  appstate:                         # celery beat schedule (the job's own
+                                    # state moved into PostgreSQL in order 06)
+  tlscerts:                         # certificate and key
+  certbotwww:                       # ACME challenge webroot
+
+networks:
+  internal:
+    driver: bridge
