@@ -196,36 +196,16 @@ function scheduleMeasure() {
 }
 
 /* ------------------------------------------- the mirrored top scrollbar */
-// performance.html used to carry a hand-written copy of this in a <script>. It
-// belongs with the table it mirrors: the island owns the table now, and the
-// element it scrolled did not exist when that script ran.
+// This component used to build and sync its own mirror bar (and performance.html
+// carried a hand-written copy of that before the island existed). Order 09 moved
+// the behaviour to static/js/tables.js, which does the same thing for EVERY
+// `.table-scroll` in the app — the server-rendered tables included — and adds
+// the toolbar and the sticky positioning.
+//
+// Keeping this copy as well would render two scrollbars stacked on top of each
+// other on /performance only. What is left here is the `scroller` ref: the
+// virtualizer needs it, and tables.js finds the same element by class.
 const scroller = ref<HTMLElement | null>(null);
-const topbar = ref<HTMLElement | null>(null);
-const showTop = ref(false);
-let lock = false;
-
-function syncTop() {
-  const s = scroller.value;
-  const t = topbar.value;
-  if (!s || !t) return;
-  const spacer = t.firstElementChild as HTMLElement | null;
-  if (spacer) spacer.style.width = minWidth.value + "px";
-  showTop.value = minWidth.value > s.clientWidth;
-}
-
-function onTopScroll() {
-  if (lock || !scroller.value || !topbar.value) return;
-  lock = true;
-  scroller.value.scrollLeft = topbar.value.scrollLeft;
-  lock = false;
-}
-
-function onBodyScroll() {
-  if (lock || !scroller.value || !topbar.value) return;
-  lock = true;
-  topbar.value.scrollLeft = scroller.value.scrollLeft;
-  lock = false;
-}
 
 onMounted(() => {
   measureMargin();
@@ -233,17 +213,14 @@ onMounted(() => {
     measureMargin();
     requestAnimationFrame(measureMargin);
   });
-  syncTop();
   window.addEventListener("scroll", scheduleMeasure, { passive: true });
   window.addEventListener("resize", scheduleMeasure);
-  window.addEventListener("resize", syncTop);
 });
 
 onUnmounted(() => {
   if (rafId) cancelAnimationFrame(rafId);
   window.removeEventListener("scroll", scheduleMeasure);
   window.removeEventListener("resize", scheduleMeasure);
-  window.removeEventListener("resize", syncTop);
 });
 
 const virtualizer = useWindowVirtualizer(
@@ -271,7 +248,9 @@ watch(
   () => {
     virtualizer.value.measure();
     scheduleMeasure();
-    syncTop();
+    // The mirrored scrollbar re-measures itself: tables.js observes this
+    // scroller and its table with a ResizeObserver, so a column-width change
+    // reaches it without this component knowing the bar exists.
   },
 );
 
@@ -312,10 +291,7 @@ defineExpose({ visibleCount: computed(() => visibleRows.value.length) });
 </script>
 
 <template>
-  <div v-show="showTop" ref="topbar" class="table-scroll-top" aria-hidden="true" @scroll="onTopScroll">
-    <div></div>
-  </div>
-  <div ref="scroller" class="table-scroll" @scroll="onBodyScroll">
+  <div ref="scroller" class="table-scroll">
     <table class="grid sortable perf-grid grid-virtual" :style="{ minWidth: minWidth + 'px' }">
       <colgroup>
         <col v-for="col in columns" :key="col.id" :style="{ width: col.width + 'px' }" />

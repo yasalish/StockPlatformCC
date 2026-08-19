@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · درباره{% endblock %}
+
+{#  Invent nothing. No support address, no phone number, no company name, no
+    version string — none of those exist in this repository, and an «درباره» page
+    that names a channel nobody answers is worse than one that names none. Every
+    figure on this page comes from db.db_summary(); every claim about behaviour
+    is something the code in this repo does.  #}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>دربارهٔ بورس‌نگار</h1>
+    <span class="muted small">سامانهٔ یکپارچهٔ تحلیل بازار سرمایه</span>
+  </div>
+
+  <p>
+    بورس‌نگار یک سامانهٔ تحلیل بازار سرمایهٔ تهران است: قیمت‌های تاریخی سهام و صندوق‌ها را
+    نگه می‌دارد، بازدهٔ دوره‌ای را می‌سنجد، بازار را غربال می‌کند و برای هر نماد نمودار و
+    خلاصهٔ تکنیکال می‌سازد. همهٔ محاسبه‌ها روی همین پایگاه داده انجام می‌شود؛ هیچ عددی از
+    سرویس بیرونی در لحظهٔ نمایش گرفته نمی‌شود.
+  </p>
+
+  <div class="about-facts">
+    <div class="stat-card">
+      <div class="stat-num">{{ fa(summary.stocks) }}</div>
+      <div class="stat-label">نماد سهام</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num">{{ fa(summary.etfs) }}</div>
+      <div class="stat-label">صندوق قابل معامله</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num">{{ fa(summary.stock_rows + summary.etf_rows) }}</div>
+      <div class="stat-label">رکورد قیمت روزانه</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num">{{ fy(summary.stock_latest) }}</div>
+      <div class="stat-label">آخرین تاریخ داده</div>
+    </div>
+  </div>
+</section>
+
+<div class="two-col">
+  <section class="panel doc-sec">
+    <h2>دادهٔ ما از کجا می‌آید</h2>
+    <p>
+      داده‌ها از پایگاه دادهٔ بورس تهران و از طریق کتابخانهٔ <code>finpy_tse</code> دریافت
+      می‌شوند و در یک پایگاه دادهٔ PostgreSQL محلی ذخیره می‌مانند. به‌روزرسانی کاری است که
+      مدیر سامانه انجام می‌دهد، نه چیزی که در پس‌زمینه و بی‌خبر اتفاق بیفتد؛ تاریخ آخرین
+      داده در بالای هر جدول نوشته شده است تا هیچ‌وقت ندانید عددی که می‌بینید مال کِی است.
+    </p>
+    <p>
+      قیمت‌ها <b>تعدیل‌شده</b>اند: اثر افزایش سرمایه و سود نقدی از سری قیمت پاک شده است.
+      بدون این کار، یک مجمع عادی در نمودار مثل یک سقوط شدید دیده می‌شود و هر بازدهٔ بلندمدتی
+      اشتباه در می‌آید.
+    </p>
+  </section>
+
+  <section class="panel doc-sec">
+    <h2>فارسی، جدی گرفته‌شده</h2>
+    <ul>
+      <li>
+        قلم <b>وزیرمتن</b> روی همین سرور میزبانی می‌شود، نه روی CDN. نسخهٔ قبلی از
+        jsdelivr خوانده می‌شد و وقتی آن CDN از داخل ایران در دسترس نبود، اولین رنگ‌آمیزی
+        هر صفحه پشت یک درخواست ناموفق معطل می‌ماند.
+      </li>
+      <li>تاریخ‌ها شمسی‌اند و ارقام فارسی؛ اگر لاتین لازم داشتید، یک گزینه در تنظیمات است.</li>
+      <li>
+        کل رابط راست‌چین است و در CSS فقط از خاصیت‌های منطقی
+        (<code>margin-inline-start</code> و مانند آن) استفاده شده، تا چیدمان در هر دو جهت
+        درست بماند.
+      </li>
+      <li>
+        شش پوسته — سه روشن و سه تاریک — به‌همراه گزینهٔ رنگی برای کوررنگی سبز-قرمز، که
+        در سامانه‌ای که تمام معنایش در رنگ سبز و قرمز است یک ضرورت است، نه یک تجمل.
+      </li>
+    </ul>
+  </section>
+</div>
+
+<section class="panel doc-sec">
+  <h2>حریم خصوصی و حساب کاربری</h2>
+  <p>
+    گذرواژه‌ها فقط به‌صورت درهم‌سازی‌شده (hash) ذخیره می‌شوند و هیچ‌جا به‌صورت متن ساده نگه
+    داشته نمی‌شوند. تنظیمات نمایش و دیده‌بان شما به حسابتان گره خورده است؛ «بازدیدهای اخیر»
+    اما فقط در همین مرورگر می‌ماند و به حساب شما فرستاده نمی‌شود، چون یک ردّ گشت‌وگذار است،
+    نه یک ترجیح — و نباید روی رایانهٔ مشترک همراه حساب برود.
+  </p>
+</section>
+
+<section class="panel doc-sec">
+  <h2>یک هشدار لازم</h2>
+  <p>
+    هیچ‌چیز در این سامانه توصیهٔ خرید یا فروش نیست. امتیازها، سیگنال‌ها و خلاصه‌های تکنیکال،
+    محاسبه‌های آماری روی قیمت‌های گذشته‌اند و گذشته تضمینی برای آینده نیست. تصمیم سرمایه‌گذاری
+    با خود شماست.
+  </p>
+</section>
+{% endblock %}

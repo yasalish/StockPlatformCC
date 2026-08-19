@@ -6,6 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ 'ثبت‌نام' if is_reg else 'ورود' }} — بورس‌نگار</title>
 
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}?v={{ asset_version('favicon.svg') }}" type="image/svg+xml">
+
   <!-- Vazirmatn Persian font + icon glyphs — self-hosted; both live in auth.css -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}?v={{ asset_version('css/auth.css') }}">
 </head>

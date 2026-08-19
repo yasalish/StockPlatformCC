@@ -2,6 +2,9 @@
 {% block title %}بورس‌نگار · {{ title }}{% endblock %}
 
 {% block content %}
+{#  data-preset-*: ui.js offers «ذخیرهٔ این نما», which saves this URL's query
+    string as a named غربالگر. The page needs to declare nothing else.  #}
+<div data-preset-page="market" data-preset-kind="{{ kind }}"></div>
 {% set cat_options = filters if kind == 'etf' else filters2 %}
 {% set cat_label = 'نوع صندوق' if kind == 'etf' else 'گروه' %}
 

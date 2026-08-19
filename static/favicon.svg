@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="بورس‌نگار">
+  <!-- The tab icon. An SVG rather than an .ico because it is 600 bytes, stays
+       sharp on every display, and can carry the app's own gold on the header's
+       slate — the two colours the brand is made of (--header1 / --brand). -->
+  <rect width="64" height="64" rx="14" fill="#16232c"/>
+  <path d="M12 44 L26 30 L36 38 L52 18" fill="none" stroke="#c7ab4d"
+        stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="52" cy="18" r="5" fill="#c7ab4d"/>
+</svg>

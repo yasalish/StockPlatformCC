@@ -2,6 +2,9 @@
 {% block title %}بورس‌نگار · به‌روزرسانی{% endblock %}
 
 {% block content %}
+{#  data-no-autorefresh: this console polls /update/status itself and holds a
+    running job's log; a page reload underneath it would discard both.  #}
+<div data-no-autorefresh></div>
 <section class="hero">
   <h1>به‌روزرسانی داده‌ها</h1>
   <div class="stat-row">

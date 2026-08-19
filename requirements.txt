@@ -24,3 +24,7 @@ alembic>=1.13
 # Error tracking. Optional at runtime — no SENTRY_DSN, no Sentry. Point it at a
 # self-hosted Sentry or GlitchTip; see observability.py.
 sentry-sdk[flask]>=2.0
+
+# Dev-only. The suite in tests/ is pure (no database, no Redis, no Flask app), so
+# `pytest -q` runs on a laptop with nothing else installed or running.
+pytest>=8.0

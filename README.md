@@ -16,6 +16,11 @@ the previous collection of separate Streamlit scripts. Same PostgreSQL database
   بازدهی سال‌به‌سال، نمودار قیمت، و بازدهی از ابتدای داده.
 - **صندوق‌ها** (`/etfs`) — همان جدول بازدهی برای ETFها با فیلتر نوع صندوق.
 - **به‌روزرسانی** (`/update`) — دریافت قیمت‌های جدید از `finpy_tse` و درج در پایگاه داده.
+- **نقشهٔ بازار** (`/heatmap`) — کل بازار در یک صفحه: هر گروه یک جعبه و هر نماد یک
+  خانه، با اندازهٔ متناسب با ارزش معاملات و رنگ متناسب با بازدهٔ دورهٔ انتخابی.
+- **تنظیمات** (`/settings`) — پوسته (شش تا)، ارقام فارسی/لاتین، چگالی و راه‌راه‌بودن
+  جدول، ضخامت نوار پیمایش، اندازهٔ قلم، کوررنگی، به‌روزرسانی خودکار و…
+- **راهنما** (`/help`) و **درباره** (`/about`).
 - **جستجو** — جستجوی زندهٔ نماد/نام (سهام + صندوق) در نوار بالا.
 
 ## اجرا / Run
@@ -40,14 +45,22 @@ python app.py            # http://127.0.0.1:5002
 | `tasks.py` | وظیفه‌های دریافت داده، با تلاش مجدد و از‌سرگیری |
 | `tse_fetch.py` | دریافت و درج قیمت یک نماد (بدون تکرار سطر) |
 | `reports.py` | خروجی اکسل جدول بازدهی (openpyxl) |
+| `prefs.py` | فهرست تنظیمات نمایش و قواعد اعتبارسنجی آن‌ها (ماژول خالص، بدون Flask/DB) |
+| `plans.py` | نوع حساب و سهمیه‌ها (ماژول خالص) — پورت اشتراک هنوز پیاده نشده |
+| `account.py` | API حساب کاربری: تنظیمات و غربالگرهای ذخیره‌شده |
+| `static/js/theme.js` | اعمال پوسته و تنظیمات روی `<html>` و همگام‌سازی با سرور |
+| `static/js/tables.js` | نوار پیمایش بالای هر جدول + ابزار (تمام‌صفحه، CSV، چاپ) |
+| `static/js/ui.js` | میان‌برها، بازدیدهای اخیر، بازگشت به بالا، ذخیرهٔ نما |
+| `static/js/heatmap.js` | ترسیم «نقشهٔ بازار» |
 | `templates/` | قالب‌های Jinja (RTL) |
+| `tests/` | آزمون‌های خالص (`pytest -q` بدون پایگاه داده) |
 | `static/` | CSS + JS (نمودار SVG بدون کتابخانهٔ خارجی) |
 | `gunicorn.conf.py` | تنظیمات سرور تولید (gthread) — همراه دلیل هر عدد |
 | `Dockerfile` | ایمیج برنامه (Python slim، کاربر غیر‌root) |
 | `docker-compose.yml` | شش سرویس: nginx، web، worker، beat، db، redis |
 | `deploy/nginx/` | ایمیج و پیکربندی nginx (TLS، gzip+brotli، فایل‌های ایستا) |
 | `observability.py` | لاگ JSON ساختاریافته + شناسهٔ درخواست + Sentry |
-| `migrations/` | مهاجرت‌های Alembic (شمای پایه، ۰۲، ۰۳، ۰۶) |
+| `migrations/` | مهاجرت‌های Alembic (شمای پایه، ۰۲، ۰۳، ۰۶، ۰۹) |
 | `deploy/scripts/` | پشتیبان‌گیری شبانه و اسکریپت بازیابی آزموده‌شده |
 | `frontend/` | جزیره‌های Vue 3 + TypeScript برای بازار، بازدهٔ دوره‌ای، فیلترها/استراتژی‌ها و غربالگر |
 | `static/dist/` | خروجی ساخت Vite — با `asset_version()` نسخه‌گذاری می‌شود |
@@ -413,6 +426,158 @@ python .tools/check_nginx_conf.py   # a real `nginx -t` over deploy/nginx/
 `verify_order06.py` starts a real Celery worker, kills it mid-run with
 `taskkill /F`, starts another, and asserts every symbol ends up written exactly
 once. It runs against scratch tables, so it never touches the price data.
+
+## تنظیمات و پوسته / Settings, themes and the table scrollbars (order 09)
+
+### نوار پیمایش بالای جدول‌ها
+
+Every wide table now carries a **second horizontal scrollbar above it**, mirrored
+from the real one at the bottom and synced in both directions, sticky under the
+site header. The problem it solves: `/performance` is ۷۸۲ rows tall and ۲۰
+columns wide, so the only control that moved the table sideways sat two screens
+below the part of the table you were reading.
+
+* `static/js/tables.js` builds it. It finds every `.table-scroll` — including
+  the ones the Vue islands mount after page load, via a `MutationObserver` — and
+  inserts a `.tbl-bar` (mirror + toolbar) directly **before** the scroller.
+* The mirror is a real overflow container with a spacer inside, so the browser
+  draws a **real scrollbar**: wheel-tilt, drag, shift+wheel and assistive
+  technology all keep working. A div with a fake thumb would have to
+  reimplement every one of them.
+* A table that already fits shows no mirror at all.
+* Thickness is `--sbar-h`: ۱۴ / ۲۰ / ۲۸ px, chosen in تنظیمات, default ۲۰
+  (the browser default is ~۸).
+
+Two engine facts are baked into the CSS, both learned by measuring:
+
+1. **`scrollbar-color` and `::-webkit-scrollbar` are mutually exclusive in
+   Chromium ≥ 121.** Setting the standard property makes Chrome ignore every
+   `::-webkit-scrollbar` rule for that element — including the height. So
+   `scrollbar-color` is scoped to `@supports not selector(::-webkit-scrollbar)`,
+   i.e. Firefox, where it is the only thing that works. Firefox cannot be given
+   a pixel thickness at all (`scrollbar-width` takes only `auto | thin | none`),
+   so there the bars keep the platform height.
+2. **Headless Chrome draws overlay scrollbars**, which take no layout space, so
+   the bar cannot be measured in a headless run: `verify_order09.py --headed`
+   is what proves the ۲۰px bar is really painted.
+
+Beside the mirror sits a small toolbar: **تمام‌صفحه** for every table, plus
+**CSV** and **چاپ** on the non-virtualized ones. The virtualized grids keep only
+the full-screen button on purpose — they hold ~۶۰ rows in the DOM at a time, so
+exporting from the page would produce a file with sixty of seven hundred rows in
+it: a wrong answer that looks like a right one. Those pages keep their
+server-side Excel export, which reads the database.
+
+### پوسته‌ها / Themes
+
+Six: **روشن** (the original cream + gold), **سپیا**, **کاغذ سفید**, **تاریک**,
+**نیمه‌شب**, **ذغالی**. `:root` in `static/css/style.css` **is** the light theme —
+deliberately not `[data-theme="light"]`, so an unknown or missing value renders
+as the theme everyone already knows (`prefs.family_of()` answers `light` for the
+same reason).
+
+Adding one is three steps:
+
+1. A `[data-theme="<id>"]` block that redefines **every** custom property
+   `:root` defines. A block that redefines half of them inherits the rest and
+   renders as a broken light theme; `tests/test_prefs.py` and
+   `verify_order09.py` both diff the property names and fail if one is missing.
+2. An entry in `prefs.THEMES` (id, label, family, swatch) — the picker and the
+   ☾/☀ toggle read that list.
+3. Nothing else. `--radius` is geometry, not colour.
+
+Adding the themes required an **appearance-preserving refactor first**: the
+~۷۰ literal hex values in `style.css` (`#fff` alone appeared ۲۵ times) became
+tokens (`--on-brand`, `--hover`, `--input-bg`, `--star`, …), each holding exactly
+the value its rule used to carry, so the light theme is unchanged to the pixel.
+`verify_order09.py` re-checks that no light-surface literal is left as the value
+of an ordinary property.
+
+The theme is applied **before the first paint** by an inline script in
+`base.html`'s `<head>`, above the stylesheet: applied from an external file it
+lands after first paint and every navigation flashes the wrong theme. For a
+signed-in account the server renders the attributes onto `<html>` and marks them
+`data-prefs="server"`, which tells that script to leave them alone — otherwise
+one browser's localStorage would overwrite the account's theme on every load.
+
+There is also **رنگ صعود و نزول: آبی/نارنجی**, a colour-blind alternative that
+overrides only `--up`/`--down`/`--up-bg`/`--down-bg` and therefore composes with
+all six themes. In a platform whose entire meaning is carried by green and red,
+that is a necessity rather than a nicety.
+
+### تنظیمات / The settings screen
+
+`/settings`, saved per account, applied immediately — no «ذخیره» button, because
+a theme picker you have to confirm is a theme picker you cannot preview.
+
+| where | what |
+|---|---|
+| `prefs.py` | pure module: what a preference **may** be. No Flask, no db, no network — same discipline as `plans.py`. |
+| `user_prefs` table | one row per user, updated in place (`db.get_prefs` / `set_prefs` / `reset_prefs`). |
+| `account.py` | `GET`/`PATCH /api/me/prefs`, `POST /api/me/prefs/reset`, and the saved-screen endpoints. |
+| `static/js/theme.js` | turns the settings into `data-*` attributes on `<html>` and writes changes back. |
+
+Rules worth knowing before changing it:
+
+* **An invalid value is dropped, never raised.** These arrive from a `<select>`;
+  a tab left open since last week must not `500` a settings save.
+* **`prefs.DEFAULTS` is the schema.** `get_prefs()` merges the stored row *under*
+  it, so adding a preference is one key plus one nullable column — no backfill.
+  The column defaults in `db.init_db()` **and** in migration `0005` must equal
+  `prefs.DEFAULTS` exactly, or a fresh account and a saved-then-reset account
+  render differently.
+* **Every preference must do something.** Each key in `prefs.DEFAULTS` names, in
+  its comment, the code that reads it. A settings screen full of switches that
+  change nothing is worse than a short one.
+
+Migration: `migrations/versions/0005_user_prefs_and_screens.py` (`0005` → `0004`)
+creates `user_prefs` and `saved_screens`. `db.init_db()` creates the same two
+idempotently at boot — exactly as `jobs.ensure_tables()` still does for the
+order-06 tables, and for the same two reasons: the local `python app.py` path
+where nobody has run Alembic, and a fresh deployment whose first request beats
+the migration.
+
+### نقشهٔ بازار و نبض بازار / Market map and breadth
+
+* **`/heatmap`** — the whole market on one screen: a box per گروه (صنعت for
+  stocks, نوع for ETFs), a tile per symbol, **sized by traded value** and
+  **coloured by return over the chosen period**. It answers the question a
+  ranked list actively hides — where the money went — because the top of a list
+  sorted by return is always the smallest, most volatile symbols. Group averages
+  are value-weighted: a plain mean counts a symbol with ۱۰۰ میلیون تومان of
+  turnover the same as one with ۱۰۰ میلیارد.
+* **نبض بازار** on the dashboard — advancers vs decliners as a bar drawn from the
+  actual counts, plus the value-weighted market return, the median symbol, the
+  extremes and the busiest groups. A green headline built on three heavyweight
+  symbols and one built on four hundred symbols are different markets, and a
+  table sorted by return cannot tell them apart.
+
+Both read the **same cached gainer rows** every other screen reads, plus one
+extra cached query (`db.last_session`) for the last session's volume/value and
+the one-day change. No new materialized view: `d1` is computed from the two most
+recent bars rather than added to `db.PERIODS`, because a new period key changes
+the column list of `mv_market_gainer_*` and every market page would fail on a
+missing column until the views were rebuilt.
+
+### چیزهای کوچک‌تر / The smaller additions
+
+منوی کاربر در نوار بالا · کلید ☾/☀ · صفحه‌های **راهنما** و **درباره** ·
+«ذخیرهٔ این نما» (saved filter presets, stored as the query string verbatim) ·
+«بازدیدهای اخیر» (localStorage — a browsing trail, not a preference, so it does
+not follow the account onto a shared machine) · back-to-top · keyboard shortcuts
+(`/` `t` `f` `g` `m` `s` `?`) · arrow-key navigation in the search box ·
+optional auto-refresh · a favicon (the browser's request for `/favicon.ico` had
+been a 404 on every page load) · and a theme-aware KLineChart palette, since a
+`<canvas>` cannot inherit the page's CSS variables.
+
+### آزمون‌ها / Tests
+
+```bash
+pytest -q                              # pure: no database, no Redis, no Flask
+python verify_order09.py               # full verification (needs the database + Chrome)
+python verify_order09.py --headed      # …and measures the painted scrollbar
+python verify_order09.py --no-browser  # static + API checks only
+```
 
 ## جزیره‌های Vue / The Vue islands (order 08, then the four heavy tables)
 

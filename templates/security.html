@@ -10,7 +10,10 @@
 {% if not analysis %}
   <section class="panel"><p class="muted">دادهٔ قیمتی کافی برای این نماد در پایگاه داده وجود ندارد.</p></section>
 {% else %}
-<section class="panel sec-head">
+{#  data-symbol*: ui.js records the visit in localStorage and shows the strip
+    of «بازدیدهای اخیر» at the top of every page.  #}
+<section class="panel sec-head" data-symbol="{{ entity.ticker }}"
+         data-symbol-kind="{{ kind }}" data-symbol-id="{{ entity.id }}">
   <div>
     <div class="sym-big">
       {{ entity.ticker }}
@@ -70,42 +73,46 @@
       <div class="two-col">
         <section class="panel">
           <h2>بازدهی دوره‌ای</h2>
-          <table class="grid">
-            <thead><tr><th>دوره</th><th>بازدهی</th><th>سقف (فاصله تا اوج)</th><th>کف (فاصله تا کف)</th></tr></thead>
-            <tbody>
-              {% for p in analysis.periods %}
-              <tr>
-                <td class="mname">{{ p.label }}</td>
-                <td class="num">{{ pill(p.gain) }}</td>
-                <td class="num">{{ pill(p.ceil) }}</td>
-                <td class="num">{{ pill(p.floor) }}</td>
-              </tr>
-              {% endfor %}
-              <tr class="total-row">
-                <td class="mname">از ابتدای داده ({{ fy(analysis.first.start_date) }})</td>
-                <td class="num">{{ pill(analysis.first.gain) }}</td>
-                <td class="num">{{ pill(analysis.first.ceil) }}</td>
-                <td class="num">{{ pill(analysis.first.floor) }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="table-scroll">
+            <table class="grid">
+              <thead><tr><th>دوره</th><th>بازدهی</th><th>سقف (فاصله تا اوج)</th><th>کف (فاصله تا کف)</th></tr></thead>
+              <tbody>
+                {% for p in analysis.periods %}
+                <tr>
+                  <td class="mname">{{ p.label }}</td>
+                  <td class="num">{{ pill(p.gain) }}</td>
+                  <td class="num">{{ pill(p.ceil) }}</td>
+                  <td class="num">{{ pill(p.floor) }}</td>
+                </tr>
+                {% endfor %}
+                <tr class="total-row">
+                  <td class="mname">از ابتدای داده ({{ fy(analysis.first.start_date) }})</td>
+                  <td class="num">{{ pill(analysis.first.gain) }}</td>
+                  <td class="num">{{ pill(analysis.first.ceil) }}</td>
+                  <td class="num">{{ pill(analysis.first.floor) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section class="panel">
           <h2>بازدهی سال‌به‌سال</h2>
           <p class="muted small">بازدهی از همین تاریخ در سال‌های گذشته تا امروز.</p>
-          <table class="grid">
-            <thead><tr><th>مبنا</th><th>تاریخ مبنا</th><th>بازدهی تا امروز</th></tr></thead>
-            <tbody>
-              {% for y in analysis.yoy %}
-              <tr>
-                <td class="mname">{{ fy(y.years) }} سال پیش</td>
-                <td class="muted">{{ fy(y.date) }}</td>
-                <td class="num">{{ pill(y.gain) }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+          <div class="table-scroll">
+            <table class="grid">
+              <thead><tr><th>مبنا</th><th>تاریخ مبنا</th><th>بازدهی تا امروز</th></tr></thead>
+              <tbody>
+                {% for y in analysis.yoy %}
+                <tr>
+                  <td class="mname">{{ fy(y.years) }} سال پیش</td>
+                  <td class="muted">{{ fy(y.date) }}</td>
+                  <td class="num">{{ pill(y.gain) }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         </section>
       </div>
     </div>

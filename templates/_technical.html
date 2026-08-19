@@ -44,25 +44,29 @@
   <div class="two-col">
     <section class="panel">
       <h2>نوسان‌گرها (Oscillators)</h2>
-      <table class="grid kv">
-        <thead><tr><th>شاخص</th><th class="numh">مقدار</th><th>سیگنال</th></tr></thead>
-        <tbody>
-          {% for o in tech.oscillators %}
-          <tr><td class="mname">{{ o.name }}</td><td class="num">{{ fa(o.value) }}</td><td>{{ sigbadge(o.signal) }}</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="grid kv">
+          <thead><tr><th>شاخص</th><th class="numh">مقدار</th><th>سیگنال</th></tr></thead>
+          <tbody>
+            {% for o in tech.oscillators %}
+            <tr><td class="mname">{{ o.name }}</td><td class="num">{{ fa(o.value) }}</td><td>{{ sigbadge(o.signal) }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </section>
     <section class="panel">
       <h2>میانگین‌های متحرک (Moving Averages)</h2>
-      <table class="grid kv">
-        <thead><tr><th>شاخص</th><th class="numh">مقدار</th><th>سیگنال</th></tr></thead>
-        <tbody>
-          {% for m in tech.moving_averages %}
-          <tr><td class="mname" dir="ltr" style="text-align:right">{{ m.name }}</td><td class="num">{{ fa(m.value) }}</td><td>{{ sigbadge(m.signal) }}</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="grid kv">
+          <thead><tr><th>شاخص</th><th class="numh">مقدار</th><th>سیگنال</th></tr></thead>
+          <tbody>
+            {% for m in tech.moving_averages %}
+            <tr><td class="mname" dir="ltr" style="text-align:right">{{ m.name }}</td><td class="num">{{ fa(m.value) }}</td><td>{{ sigbadge(m.signal) }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </section>
   </div>
 
@@ -75,18 +79,20 @@
          adj_final («پایانی»). It also belongs to the pivot bar, which is not
          necessarily today's. The label used to claim both. #}
       <p class="muted small">سطوح احتمالی حمایت (S) و مقاومت (R) بر پایهٔ آخرین کندلِ دارای دامنهٔ معاملاتی. آخرین معاملهٔ همان کندل: <b>{{ fa(tech.last.close) }}</b></p>
-      <table class="grid kv">
-        <thead><tr><th>سطح</th><th class="numh">کلاسیک</th><th class="numh">فیبوناچی</th></tr></thead>
-        <tbody>
-          {% for lvl in ['R3','R2','R1','P','S1','S2','S3'] %}
-          <tr class="{{ 'pivot-p' if lvl == 'P' else ('pivot-r' if lvl[0]=='R' else 'pivot-s') }}">
-            <td class="mname">{{ 'پیوت' if lvl == 'P' else lvl }}</td>
-            <td class="num">{{ fa(tech.pivots.classic[lvl]) }}</td>
-            <td class="num">{{ fa(tech.pivots.fibonacci[lvl]) }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="grid kv">
+          <thead><tr><th>سطح</th><th class="numh">کلاسیک</th><th class="numh">فیبوناچی</th></tr></thead>
+          <tbody>
+            {% for lvl in ['R3','R2','R1','P','S1','S2','S3'] %}
+            <tr class="{{ 'pivot-p' if lvl == 'P' else ('pivot-r' if lvl[0]=='R' else 'pivot-s') }}">
+              <td class="mname">{{ 'پیوت' if lvl == 'P' else lvl }}</td>
+              <td class="num">{{ fa(tech.pivots.classic[lvl]) }}</td>
+              <td class="num">{{ fa(tech.pivots.fibonacci[lvl]) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
       {% else %}
       <p class="muted">این نماد دامنهٔ معاملاتی درون‌روزی (سقف/کف) در پایگاه داده ندارد، بنابراین نقاط پیوت قابل محاسبه نیست.</p>
       {% endif %}

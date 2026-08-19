@@ -30,6 +30,7 @@ from flask_login import current_user, login_required
 import observability
 import db
 import cache
+import prefs
 import reports
 import market
 
@@ -39,6 +40,7 @@ import market
 log = observability.setup_logging()
 from tv import tv as tv_blueprint
 from auth import auth_bp, login_manager, init_oauth
+from account import account_bp
 
 # APP_ENV=production tightens the two things that are merely inconvenient in
 # development but broken in production: a missing session secret, and trusting
@@ -95,7 +97,11 @@ if os.environ.get("TRUST_PROXY", "1" if IS_PRODUCTION else "").lower() in ("1", 
 login_manager.init_app(app)
 init_oauth(app)
 app.register_blueprint(auth_bp)
-db.init_db()                          # ensure the `users` table exists
+# /api/me/prefs and /api/me/screens — the signed-in user's own record. Kept out
+# of app.py because those routes assume `current_user` on every line, and out of
+# auth.py because that blueprint is reachable unauthenticated by design.
+app.register_blueprint(account_bp)
+db.init_db()                          # ensure the `users` / `user_prefs` tables exist
 
 app.register_blueprint(tv_blueprint)  # TradingView UDF datafeed (see tv.py)
 
@@ -267,6 +273,52 @@ def inject_helpers():
             "ETF_TYPE_COLORS": db.ETF_TYPE_COLORS}
 
 
+def _prefs_attrs(p):
+    """The `data-*` attributes that carry the settings onto <html>.
+
+    Rendered server-side ONLY for a signed-in user, and that asymmetry is the
+    whole design. `data-prefs="server"` tells the pre-paint script in base.html
+    that the decision is already made, so it leaves the attributes alone; for
+    everyone else the attribute is absent and the script applies localStorage
+    before the first frame. Without the marker, a signed-in user's theme would
+    be overwritten on every page load by whatever another browser last wrote
+    into this one's localStorage.
+    """
+    flags = {
+        "data-prefs": "server",
+        "data-theme": p["theme"],
+        "data-density": p["density"],
+        "data-font": p["font_scale"],
+        "data-sbar": p["scrollbar_size"],
+        "data-updown": p["updown_scheme"],
+        "data-digits": p["digits"],
+        "data-zebra": "on" if p["zebra"] else "off",
+        "data-stickyhead": "on" if p["sticky_head"] else "off",
+        "data-motion": "reduce" if p["reduce_motion"] else "full",
+        "data-wide": "on" if p["wide"] else "off",
+    }
+    return Markup(" ".join(f'{k}="{escape(v)}"' for k, v in flags.items()))
+
+
+@app.context_processor
+def inject_prefs():
+    """Every template gets `prefs` (the merged settings), `prefs_json` (the same
+    values for the browser) and `prefs_attrs`.
+
+    One cheap indexed lookup by primary key for a signed-in user; an anonymous
+    visitor gets prefs.DEFAULTS with no query at all. It has to be free, because
+    the theme is on every screen — a round trip here would tax every page in the
+    app for a preference that changes once a month.
+    """
+    if current_user.is_authenticated:
+        p = db.get_prefs(current_user.id)
+        return {"prefs": p, "prefs_json": prefs.client_payload(p),
+                "prefs_attrs": _prefs_attrs(p), "prefs_meta": prefs}
+    p = prefs.payload({})
+    return {"prefs": p, "prefs_json": prefs.client_payload(p),
+            "prefs_attrs": Markup(""), "prefs_meta": prefs}
+
+
 @app.context_processor
 def inject_watchlist():
     """Expose the current user's watched symbols (as a set of "kind:ticker") and
@@ -432,9 +484,21 @@ def dashboard_data():
     top_losers = sorted(
         [s for s in stocks if s["p20"] is not None], key=lambda r: r["p20"])[:8]
     etf_top = etfs[:8]
+    # «نبض بازار» — advancers vs decliners over the user's default period. It
+    # reads the same cached gainer rows this function already has, plus one
+    # cached query for the last session, so the panel costs nothing the
+    # dashboard was not already paying.
+    period = _breadth_period(request.args.get("period"))
+    # The kind follows «بازار پیش‌فرض» so the setting reaches this panel too, not
+    # only /heatmap — a preference that applies to one of the two screens its
+    # own description names is a preference that looks broken.
+    breadth_kind = _map_kind(request.args.get("kind"))
+    breadth = db.market_breadth(breadth_kind, period=period)
     return render_template("_dashboard_data.html", summary=summary, as_of=as_of,
                            top_gainers=top_gainers, top_losers=top_losers,
-                           etf_top=etf_top)
+                           etf_top=etf_top, breadth=breadth, period=period,
+                           breadth_kind=breadth_kind,
+                           period_label=_period_label(period))
 
 
 @app.route("/stocks")
@@ -808,6 +872,110 @@ def etf_detail(etf_id):
     tech = db.technical_summary("etf", e["ticker"])
     return render_template("security.html", kind="etf", entity=e, analysis=analysis,
                            tech=tech, back_url=url_for("etfs_page"), back_label="صندوق‌ها")
+
+
+# The periods نقشهٔ بازار and نبض بازار can be read over. 'd1' (the last
+# session) is not one of db.PERIODS — it is computed by db.last_session(), which
+# is why it is spelled out here rather than derived from PERIODS.
+MAP_PERIODS = [{"key": "d1", "label": "آخرین روز"}] + [
+    {"key": p["key"], "label": p["label"]} for p in db.PERIODS
+]
+MAP_PERIOD_KEYS = tuple(p["key"] for p in MAP_PERIODS)
+
+
+def _period_label(key):
+    """The Persian name of a map/breadth period. Falls back to the key itself so
+    a period added to MAP_PERIODS without a label still renders something."""
+    for p in MAP_PERIODS:
+        if p["key"] == key:
+            return p["label"]
+    return key
+
+
+def _breadth_period(value):
+    """A period key from a query string, falling back to the user's default.
+
+    An unknown value falls back rather than 400s: these arrive from bookmarks
+    and from links shared between users, and a saved link to a period that has
+    since been renamed should still show the map."""
+    if value in MAP_PERIOD_KEYS:
+        return value
+    if current_user.is_authenticated:
+        return db.get_prefs(current_user.id)["default_period"]
+    return prefs.DEFAULTS["default_period"]
+
+
+def _map_kind(value):
+    if value in ("stock", "etf"):
+        return value
+    if current_user.is_authenticated:
+        return db.get_prefs(current_user.id)["default_kind"]
+    return prefs.DEFAULTS["default_kind"]
+
+
+@app.route("/heatmap")
+def heatmap_page():
+    """«نقشهٔ بازار» — the market as one screen of tiles, grouped by صنعت (or by
+    نوع صندوق), each tile sized by traded value and coloured by return.
+
+    The shell only; the map itself is drawn by static/js/heatmap.js from
+    /api/heatmap/<kind>. Rendering ~۷۸۰ tiles server-side would put the same
+    weight of markup on the page that order 08 spent its whole budget removing
+    from the market tables."""
+    kind = _map_kind(request.args.get("kind"))
+    period = _breadth_period(request.args.get("period"))
+    return render_template("heatmap.html", kind=kind, period=period,
+                           periods=MAP_PERIODS)
+
+
+@app.route("/api/heatmap/<kind>")
+def api_heatmap(kind):
+    if kind not in ("stock", "etf"):
+        abort(404)
+    period = _breadth_period(request.args.get("period"))
+    rows, as_of, groups = db.market_map(kind, period=period)
+    return jsonify({
+        "kind": kind, "as_of": as_of, "period": period,
+        "groups": groups,
+        # Only what a tile draws. The full row carries market / sub_sector /
+        # volume as well, and ۷۸۰ of those is ۳۰۰ kB of JSON for fields nothing
+        # on this screen reads.
+        "rows": [{"t": r["ticker"], "n": r["name"], "g": r["group"],
+                  "c": r["chg"], "v": r["value"], "p": r["latest"], "id": r["id"]}
+                 for r in rows],
+    })
+
+
+@app.route("/api/breadth/<kind>")
+def api_breadth(kind):
+    if kind not in ("stock", "etf"):
+        abort(404)
+    return jsonify(db.market_breadth(kind, period=_breadth_period(request.args.get("period"))))
+
+
+@app.route("/settings")
+def settings_page():
+    """«تنظیمات» — the display settings, saved per account.
+
+    Every control here writes through static/js/account.js to
+    PATCH /api/me/prefs and takes effect immediately; nothing is behind a «ذخیره»
+    button, because a theme picker you have to confirm is a theme picker you
+    cannot preview."""
+    return render_template("settings.html", themes=prefs.THEMES,
+                           periods=db.PERIODS, P=prefs)
+
+
+@app.route("/help")
+def help_page():
+    """«راهنما» — what each screen answers and how to read its columns."""
+    return render_template("help.html", periods=db.PERIODS,
+                           perf_periods=db.PERF_PERIODS)
+
+
+@app.route("/about")
+def about_page():
+    """«درباره» — what this platform is and where its numbers come from."""
+    return render_template("about.html", summary=db.db_summary())
 
 
 @app.route("/watchlist")

@@ -30,14 +30,38 @@
     return faDigits(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
   }
 
-  // ---- TradingView design tokens (match their default light theme) ----
-  const C = {
+  // ---- TradingView design tokens ----
+  // Two sets, because the chart is drawn on a <canvas>: it cannot inherit the
+  // page's CSS variables the way the rest of the app does, so a dark theme
+  // would otherwise leave one blazing white rectangle in the middle of an
+  // otherwise dark page — and grid lines nobody can see.
+  //
+  // The candle colours are deliberately the SAME in both. They are the only
+  // thing on screen carrying meaning rather than decoration, and a trader who
+  // switches theme must not have to re-learn which colour is a gain.
+  const C_LIGHT = {
     up: "#26a69a", down: "#ef5350", brand: "#2962ff",
     ink: "#131722", muted: "#787b86", line: "#e0e3eb", bg: "#ffffff",
     cross: "#9598a1", crossBg: "#131722", axisBg: "#f8f9fd",
   };
+  const C_DARK = {
+    up: "#26a69a", down: "#ef5350", brand: "#5b8dff",
+    ink: "#e7eef3", muted: "#8f9bab", line: "#2a3946", bg: "#16232c",
+    cross: "#8f9bab", crossBg: "#e7eef3", axisBg: "#1b2932",
+  };
+  const DARK_THEMES = { dark: 1, midnight: 1, graphite: 1 };
+  const C = Object.assign({}, C_LIGHT);
+
+  function readTheme() {
+    const id = document.documentElement.getAttribute("data-theme") || "light";
+    Object.assign(C, DARK_THEMES[id] ? C_DARK : C_LIGHT);
+    // The crosshair label is a filled box: its text has to invert with the box.
+    C.crossInk = DARK_THEMES[id] ? "#16232c" : "#ffffff";
+  }
+  readTheme();
 
   function chartStyles() {
+    readTheme();
     return {
       grid: {
         horizontal: { color: C.line, style: "solid", size: 1 },
@@ -55,7 +79,7 @@
           last: {
             upColor: C.up, downColor: C.down, noChangeColor: C.muted,
             line: { show: true, style: "dashed", dashedValue: [4, 4], size: 1 },
-            text: { color: "#fff", size: 12, paddingLeft: 4, paddingRight: 4, borderRadius: 2 },
+            text: { color: C.crossInk, size: 12, paddingLeft: 4, paddingRight: 4, borderRadius: 2 },
           },
         },
         tooltip: {
@@ -81,11 +105,11 @@
       crosshair: {
         horizontal: {
           line: { color: C.cross, style: "dashed", dashedValue: [4, 2], size: 1 },
-          text: { backgroundColor: C.crossBg, color: "#fff", size: 12, borderRadius: 2 },
+          text: { backgroundColor: C.crossBg, color: C.crossInk, size: 12, borderRadius: 2 },
         },
         vertical: {
           line: { color: C.cross, style: "dashed", dashedValue: [4, 2], size: 1 },
-          text: { backgroundColor: C.crossBg, color: "#fff", size: 12, borderRadius: 2 },
+          text: { backgroundColor: C.crossBg, color: C.crossInk, size: 12, borderRadius: 2 },
         },
       },
     };
@@ -322,6 +346,14 @@
     ro.observe(root.querySelector(".bnc-canvas"));
     window.BNChartInstance = chart;
 
+    // Repaint the canvas when the theme changes. Without this the chart keeps
+    // the palette it was built with until the next navigation, which is exactly
+    // the moment a user is looking at it — they pressed the theme button while
+    // reading this page.
+    document.addEventListener("bn:prefs", () => {
+      try { chart.setStyles(chartStyles()); } catch (e) { /* chart disposed */ }
+    });
+
     if (historyId) renderHistory(historyId, data);
   }
 
@@ -368,7 +400,12 @@
       </tr>`;
     }).join("");
 
-    let shown = Math.min(120, desc.length);
+    // Page size comes from the user's «تعداد ردیف در هر صفحه» setting; the 120
+    // that used to be hard-coded here is the fallback for a page rendered
+    // before theme.js has published the preferences (and for the anonymous
+    // case, which keeps the historical behaviour).
+    const pageSize = (window.BN_PREFS && parseInt(window.BN_PREFS.rows_per_page, 10)) || 120;
+    let shown = Math.min(pageSize, desc.length);
     host.innerHTML = `
       <div class="hist-bar">
         <span class="muted small">${faDigits(rows.length)} روز معاملاتی</span>
@@ -381,7 +418,7 @@
 
     const more = host.querySelector('[data-role="more"]');
     if (more) more.onclick = () => {
-      shown = Math.min(shown + 250, desc.length);
+      shown = Math.min(shown + pageSize, desc.length);
       host.querySelector('[data-role="hbody"]').innerHTML = render(shown);
       if (shown >= desc.length) more.parentElement.remove();
     };

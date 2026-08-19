@@ -1,9 +1,51 @@
 <!DOCTYPE html>
-<html lang="fa" dir="rtl">
+{#  data-* attributes carry the saved display settings (theme, density, digits,
+    …). They are rendered here ONLY for a signed-in account — see
+    app._prefs_attrs() — so that the inline script below knows whether the
+    server has already decided, or whether it should apply localStorage.  #}
+<html lang="fa" dir="rtl" {{ prefs_attrs }}>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}بورس‌نگار{% endblock %}</title>
+
+  {#  ── پوستهٔ پیش از رنگ‌آمیزی / pre-paint theme ──────────────────────────
+      This script MUST stay inline and MUST stay in <head>, above the
+      stylesheet. Applied from an external file it would run after the first
+      paint, and every navigation would flash the light theme before turning
+      dark — the single most-reported complaint about bolt-on dark modes.
+      Wrapped in try/catch because localStorage throws outright in private
+      browsing, and a settings read must never be able to stop a page from
+      rendering.  #}
+  <script>
+    (function () {
+      try {
+        var d = document.documentElement;
+        if (d.getAttribute("data-prefs") === "server") return;   // the account decided
+        var p = JSON.parse(localStorage.getItem("boursenegar-prefs") || "{}") || {};
+        var t = localStorage.getItem("boursenegar-theme") || p.theme;
+        if (t) d.setAttribute("data-theme", t);
+        if (p.density) d.setAttribute("data-density", p.density);
+        if (p.font_scale) d.setAttribute("data-font", p.font_scale);
+        if (p.scrollbar_size) d.setAttribute("data-sbar", p.scrollbar_size);
+        if (p.updown_scheme) d.setAttribute("data-updown", p.updown_scheme);
+        if (p.digits) d.setAttribute("data-digits", p.digits);
+        if (p.zebra != null) d.setAttribute("data-zebra", p.zebra ? "on" : "off");
+        if (p.sticky_head != null) d.setAttribute("data-stickyhead", p.sticky_head ? "on" : "off");
+        if (p.reduce_motion) d.setAttribute("data-motion", "reduce");
+        if (p.wide) d.setAttribute("data-wide", "on");
+      } catch (e) { /* private mode — the default theme is a fine fallback */ }
+    })();
+  </script>
+  {#  The same values as an object, for theme.js / tables.js / ui.js. Rendered
+      for anonymous visitors too (as prefs.DEFAULTS), so no default is ever
+      repeated in JavaScript.  #}
+  <script>window.BN_PREFS = {{ prefs_json | tojson }};</script>
+
+  {#  Declared so the browser stops requesting /favicon.ico, which this app has
+      never had — that request was a 404 on every single page load.  #}
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}?v={{ asset_version('favicon.svg') }}" type="image/svg+xml">
+
   <!-- Vazirmatn Persian font — self-hosted; @font-face lives in style.css -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ asset_version('css/style.css') }}">
 </head>
@@ -27,6 +69,7 @@
       <a href="{{ url_for('dashboard') }}" class="{{ 'on' if request.endpoint == 'dashboard' }}">داشبورد</a>
       <a href="{{ url_for('stocks_page') }}" class="{{ 'on' if request.endpoint in ('stocks_page','stock_detail') }}">سهام</a>
       <a href="{{ url_for('etfs_page') }}" class="{{ 'on' if request.endpoint in ('etfs_page','etf_detail') }}">صندوق‌ها</a>
+      <a href="{{ url_for('heatmap_page') }}" class="{{ 'on' if request.endpoint == 'heatmap_page' }}">نقشهٔ بازار</a>
       <a href="{{ url_for('screener_page') }}" class="{{ 'on' if request.endpoint == 'screener_page' }}">غربالگر</a>
       <a href="{{ url_for('performance_page') }}" class="{{ 'on' if request.endpoint == 'performance_page' }}">بازدهٔ بازه</a>
       <a href="{{ url_for('strategies_page') }}" class="{{ 'on' if request.endpoint == 'strategies_page' }}">استراتژی‌ها</a>
@@ -42,12 +85,38 @@
       <input type="text" id="search" placeholder="جستجوی نماد یا نام…" autocomplete="off">
       <div id="search-results" class="search-results"></div>
     </div>
+
+    {#  One-click light ⇄ dark. It crosses to the OTHER family's default rather
+        than to whichever alternate was last chosen there, so the button always
+        lands somewhere the user can predict (prefs.toggle_target()).  #}
+    <button type="button" class="icon-btn" data-role="theme-toggle"
+            title="تغییر پوسته (کلید t)" aria-label="تغییر پوسته">☾</button>
+
     {% if current_user.is_authenticated %}
-    <div class="user-box">
-      <span class="user-name" title="{{ current_user.username }}">{{ current_user.display_name }}</span>
-      <form method="post" action="{{ url_for('auth.logout') }}" style="margin:0">
-        <button type="submit" class="logout-btn" title="خروج از حساب">خروج</button>
-      </form>
+    <div class="user-menu" data-role="user-menu">
+      <button type="button" class="user-trigger" data-role="user-trigger"
+              aria-haspopup="true" aria-expanded="false">
+        <span class="user-avatar" aria-hidden="true">{{ (current_user.display_name or current_user.username)[:1] }}</span>
+        <span class="user-name">{{ current_user.display_name }}</span>
+        <span class="user-caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="user-pop" data-role="user-pop" hidden>
+        <div class="user-pop-head">
+          <div class="user-pop-name">{{ current_user.display_name }}</div>
+          <div class="user-pop-sub">{{ current_user.username }}{% if current_user.is_admin %} · مدیر{% endif %}</div>
+        </div>
+        <a href="{{ url_for('settings_page') }}"><span class="menu-ico">⚙</span>تنظیمات</a>
+        <a href="{{ url_for('watchlist_page') }}"><span class="menu-ico">★</span>دیده‌بان</a>
+        <a href="{{ url_for('help_page') }}"><span class="menu-ico">؟</span>راهنما</a>
+        <a href="{{ url_for('about_page') }}"><span class="menu-ico">ⓘ</span>درباره</a>
+        {% if current_user.is_admin %}
+        <a href="{{ url_for('update_page') }}"><span class="menu-ico">⟳</span>به‌روزرسانی داده‌ها</a>
+        {% endif %}
+        <div class="menu-sep"></div>
+        <form method="post" action="{{ url_for('auth.logout') }}" style="margin:0" data-no-loader>
+          <button type="submit" class="menu-item"><span class="menu-ico">⏻</span>خروج از حساب</button>
+        </form>
+      </div>
     </div>
     {% endif %}
   </header>
@@ -63,14 +132,32 @@
   {% endwith %}
 
   <main class="container">
+    {#  «بازدیدهای اخیر» — filled by ui.js from localStorage (a browsing trail,
+        not a saved preference: it must not follow the account onto a shared
+        machine). Hidden until there is something in it.  #}
+    <div id="bn-recents" class="recents" hidden></div>
+    {#  Page-level actions (currently «ذخیرهٔ این نما»), added by ui.js on any
+        screen that declares [data-preset-page].  #}
+    <div id="bn-actions" class="recents" hidden></div>
     {% block content %}{% endblock %}
   </main>
 
   <footer class="footer">
     بورس‌نگار · داده‌ها از پایگاه دادهٔ بورس تهران (finpy_tse)
+    <span class="muted"> · </span>
+    <a href="{{ url_for('help_page') }}">راهنما</a>
+    <span class="muted"> · </span>
+    <a href="{{ url_for('about_page') }}">درباره</a>
+    <span class="muted"> · </span>
+    <a href="{{ url_for('settings_page') }}">تنظیمات</a>
   </footer>
 
   <script src="{{ url_for('static', filename='js/app.js') }}?v={{ asset_version('js/app.js') }}"></script>
+  {#  theme.js after app.js: it extends the BN namespace app.js creates. Both are
+      independent of the islands, which load in the per-page scripts block.  #}
+  <script src="{{ url_for('static', filename='js/theme.js') }}?v={{ asset_version('js/theme.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/tables.js') }}?v={{ asset_version('js/tables.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/ui.js') }}?v={{ asset_version('js/ui.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

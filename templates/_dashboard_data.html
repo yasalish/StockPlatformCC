@@ -19,13 +19,98 @@
   </div>
 </div>
 
+{# ── نبض بازار ────────────────────────────────────────────────────────────
+   Advancers vs decliners. Every list on this page is sorted by return, and a
+   sorted list cannot answer the first question a trader asks in the morning:
+   was the market green, or were three heavyweight symbols green? The bar is
+   value-weighted for the same reason the tables are not — see db.market_breadth.
+#}
+<section class="panel">
+  <div class="panel-head">
+    <h2>نبض بازار</h2>
+    <span class="muted small">
+      {{ 'سهام' if breadth_kind == 'stock' else 'صندوق‌ها' }} ·
+      بازدهٔ {{ period_label }} · تا {{ fy(breadth.as_of) }} ·
+      <a href="{{ url_for('heatmap_page', kind=breadth_kind, period=breadth.period) }}">نقشهٔ بازار ›</a>
+    </span>
+  </div>
+
+  <div class="breadth">
+    <div>
+      <div class="breadth-nums">
+        <span class="breadth-big {{ 'up' if (breadth.avg or 0) >= 0 else 'down' }}">
+          {{ '+' if (breadth.avg or 0) >= 0 else '−' }}{{ fa(((breadth.avg or 0) | abs) | round(2)) }}٪
+        </span>
+        <span class="breadth-cap">میانگین وزنی بازار</span>
+      </div>
+      <div class="breadth-cap">
+        میانهٔ نمادها: {{ pill(breadth.median) }} ·
+        {{ fa(breadth.measured) }} نماد از {{ fa(breadth.total) }} نماد اندازه‌گیری شد
+      </div>
+    </div>
+
+    <div>
+      {# The three widths are the actual counts, so the bar IS the breadth — no
+         minimum width on a segment, because a market with two decliners should
+         show a sliver, not a block. #}
+      <div class="breadth-bar" role="img"
+           aria-label="{{ fa(breadth.up) }} صعودی، {{ fa(breadth.flat) }} بدون تغییر، {{ fa(breadth.down) }} نزولی">
+        <span class="b-up" style="flex:{{ breadth.up }} 0 0">{{ fa(breadth.up) }}</span>
+        <span class="b-flat" style="flex:{{ breadth.flat }} 0 0">{{ fa(breadth.flat) if breadth.flat > 4 }}</span>
+        <span class="b-down" style="flex:{{ breadth.down }} 0 0">{{ fa(breadth.down) }}</span>
+      </div>
+      <div class="breadth-legend">
+        <span class="l-up">▲ صعودی: <b>{{ fa(breadth.up) }}</b></span>
+        <span>■ بدون تغییر: <b>{{ fa(breadth.flat) }}</b></span>
+        <span class="l-down">▼ نزولی: <b>{{ fa(breadth.down) }}</b></span>
+        <span>ارزش معاملات آخرین روز: <b>{{ fa((breadth.total_value / 1e10) | round(1)) }}</b> همت</span>
+      </div>
+    </div>
+  </div>
+
+  {#  One base URL for the whole panel: the kind is fixed for it, so the link
+      shape is worked out once instead of per row.  #}
+  {% set detail_base = url_for('stock_detail', stock_id=0)[:-1] if breadth_kind == 'stock'
+                       else url_for('etf_detail', etf_id=0)[:-1] %}
+  <div class="breadth-lists">
+    <div class="mini-list">
+      <h3>برترین‌های دوره</h3>
+      {% for r in breadth.best %}
+      <a href="{{ detail_base }}{{ r.id }}">
+        <span class="sym">{{ r.ticker }}</span>{{ pill(r.chg) }}
+      </a>
+      {% endfor %}
+    </div>
+    <div class="mini-list">
+      <h3>ضعیف‌ترین‌های دوره</h3>
+      {% for r in breadth.worst %}
+      <a href="{{ detail_base }}{{ r.id }}">
+        <span class="sym">{{ r.ticker }}</span>{{ pill(r.chg) }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="mini-list" style="margin-top:14px">
+    <h3>گروه‌های پرمعامله</h3>
+    <div class="chips">
+      {% for g in breadth.groups %}
+      <span class="chip {{ 'up' if (g.avg or 0) >= 0 else 'down' }}" style="cursor:default">
+        {{ g.group }} {{ '+' if (g.avg or 0) >= 0 else '−' }}{{ fa(((g.avg or 0) | abs) | round(2)) }}٪
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
 <div class="two-col">
   <section class="panel">
     <div class="panel-head">
       <h2 class="up-title">🔼 بیشترین بازدهی ۱ ماهه (سهام)</h2>
       <a class="muted" href="{{ url_for('stocks_page') }}">مشاهدهٔ همه ›</a>
     </div>
-    <table class="grid">
+    <div class="table-scroll">
+      <table class="grid">
       <thead><tr><th>نماد</th><th>بازار</th><th>۱ ماه</th></tr></thead>
       <tbody>
         {% for s in top_gainers %}
@@ -36,7 +121,8 @@
         </tr>
         {% endfor %}
       </tbody>
-    </table>
+      </table>
+    </div>
   </section>
 
   <section class="panel">
@@ -44,7 +130,8 @@
       <h2 class="down-title">🔽 بیشترین افت ۱ ماهه (سهام)</h2>
       <a class="muted" href="{{ url_for('stocks_page') }}">مشاهدهٔ همه ›</a>
     </div>
-    <table class="grid">
+    <div class="table-scroll">
+      <table class="grid">
       <thead><tr><th>نماد</th><th>بازار</th><th>۱ ماه</th></tr></thead>
       <tbody>
         {% for s in top_losers %}
@@ -55,7 +142,8 @@
         </tr>
         {% endfor %}
       </tbody>
-    </table>
+      </table>
+    </div>
   </section>
 </div>
 
@@ -64,7 +152,8 @@
     <h2>🏆 برترین صندوق‌ها (بازدهی ۱ ماهه)</h2>
     <a class="muted" href="{{ url_for('etfs_page') }}">مشاهدهٔ همه ›</a>
   </div>
-  <table class="grid">
+  <div class="table-scroll">
+    <table class="grid">
     <thead><tr><th>نماد</th><th>نوع</th><th>قیمت پایانی</th><th>۱ ماه</th><th></th></tr></thead>
     <tbody>
       {% for s in etf_top %}
@@ -77,5 +166,6 @@
       </tr>
       {% endfor %}
     </tbody>
-  </table>
+    </table>
+  </div>
 </section>

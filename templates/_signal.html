@@ -79,19 +79,21 @@
     <section class="panel">
       <h2>شاخص‌های فنی</h2>
       {% set ind = sig.indicators %}
-      <table class="grid kv">
-        <tbody>
-          <tr><td class="mname">RSI (۱۴)</td><td class="num">{{ fa(ind.rsi) }}</td></tr>
-          <tr><td class="mname">مکدی / خط سیگنال</td><td class="num">{{ fa(ind.macd) }} / {{ fa(ind.macd_signal) }}</td></tr>
-          <tr><td class="mname">هیستوگرام مکدی</td><td class="num">{% set val = None %}{% if ind.macd_hist is not none %}<span class="pill {{ 'up' if ind.macd_hist >= 0 else 'down' }}">{{ fa(ind.macd_hist) }}</span>{% else %}—{% endif %}</td></tr>
-          <tr><td class="mname">میانگین ۲۰ روزه</td><td class="num">{{ fa(ind.sma20) }}</td></tr>
-          <tr><td class="mname">میانگین ۵۰ روزه</td><td class="num">{{ fa(ind.sma50) }}</td></tr>
-          <tr><td class="mname">میانگین ۲۰۰ روزه</td><td class="num">{{ fa(ind.sma200) }}</td></tr>
-          <tr><td class="mname">باند بولینگر (پایین/بالا)</td><td class="num">{{ fa(ind.boll_lo) }} / {{ fa(ind.boll_up) }}</td></tr>
-          <tr><td class="mname">سقف / کف ۵۲ هفته</td><td class="num">{{ fa(ind.hi_52w) }} / {{ fa(ind.lo_52w) }}</td></tr>
-          <tr><td class="mname">موقعیت در بازه</td><td class="num">{{ pc(ind.range_pos) }}</td></tr>
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table class="grid kv">
+          <tbody>
+            <tr><td class="mname">RSI (۱۴)</td><td class="num">{{ fa(ind.rsi) }}</td></tr>
+            <tr><td class="mname">مکدی / خط سیگنال</td><td class="num">{{ fa(ind.macd) }} / {{ fa(ind.macd_signal) }}</td></tr>
+            <tr><td class="mname">هیستوگرام مکدی</td><td class="num">{% set val = None %}{% if ind.macd_hist is not none %}<span class="pill {{ 'up' if ind.macd_hist >= 0 else 'down' }}">{{ fa(ind.macd_hist) }}</span>{% else %}—{% endif %}</td></tr>
+            <tr><td class="mname">میانگین ۲۰ روزه</td><td class="num">{{ fa(ind.sma20) }}</td></tr>
+            <tr><td class="mname">میانگین ۵۰ روزه</td><td class="num">{{ fa(ind.sma50) }}</td></tr>
+            <tr><td class="mname">میانگین ۲۰۰ روزه</td><td class="num">{{ fa(ind.sma200) }}</td></tr>
+            <tr><td class="mname">باند بولینگر (پایین/بالا)</td><td class="num">{{ fa(ind.boll_lo) }} / {{ fa(ind.boll_up) }}</td></tr>
+            <tr><td class="mname">سقف / کف ۵۲ هفته</td><td class="num">{{ fa(ind.hi_52w) }} / {{ fa(ind.lo_52w) }}</td></tr>
+            <tr><td class="mname">موقعیت در بازه</td><td class="num">{{ pc(ind.range_pos) }}</td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     {# ── risk metrics ── #}

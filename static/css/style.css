@@ -15,7 +15,48 @@
 @font-face{font-family:Vazirmatn;src:url('../fonts/Vazirmatn-ExtraBold.woff2') format('woff2');font-weight:800;font-style:normal;font-display:swap}
 @font-face{font-family:Vazirmatn;src:url('../fonts/Vazirmatn-Black.woff2') format('woff2');font-weight:900;font-style:normal;font-display:swap}
 
+/* ---------------------------------------------------------------------------
+   پوسته‌ها / THEMES
+   ---------------------------------------------------------------------------
+   `:root` below IS the light theme («روشن») — the warm cream + gold palette this
+   app has always had. It is deliberately NOT spelled `[data-theme="light"]`, for
+   two reasons: an unknown or missing `data-theme` then renders as the theme
+   everyone already knows (prefs.family_of() answers 'light' for exactly the same
+   reason), and a page loaded with JavaScript disabled still has a full palette.
+
+   Adding a theme is three steps, and the first is the one that bites:
+
+   1. Add a `[data-theme="<id>"]` block that redefines EVERY custom property
+      `:root` defines below. A block that redefines half of them inherits the
+      rest from `:root` and renders as a broken light theme — dark panels with
+      pale hover states, pills nobody can read. verify_order09.py diffs the
+      property names of every block against `:root`, so this cannot ship
+      half-finished.
+   2. Register it in `prefs.THEMES` (id, label, family, swatch). The settings
+      picker and the light/dark toggle both read that list: a theme present only
+      in this stylesheet is invisible, and one present only in that list paints
+      nothing.
+   3. `--radius` is geometry rather than colour, so every block repeats it
+      unchanged; it is listed only to keep the "redefine everything" rule
+      mechanical.
+
+   Two rules about the numbers themselves:
+
+   * `--up` / `--down` keep their meaning in every theme (green rises, red
+     falls) but need more luminance on a dark surface to stay legible, and
+     `--up-bg` / `--down-bg` become dark tints rather than the light ones. A red
+     an investor has to squint at is a number they will misread.
+   * `--on-brand` is the text colour ON a filled accent (buttons, tags, the
+     selected calendar day): white over the light themes' deep gold, dark ink
+     over the dark themes' pale gold. Left at #fff everywhere it would put white
+     text on a light-gold button.
+
+   `color-scheme` is declared per family so the browser's own furniture — native
+   scrollbars, `<select>` popups, form controls, the canvas behind an overscroll
+   — follows the theme instead of staying stubbornly light.
+   --------------------------------------------------------------------------- */
 :root{
+  color-scheme:light;
   /* filmnegar-inspired palette: warm cream surfaces + gold accent, on a
      dark slate-navy header/hero. */
   --bg:#f4f2ea; --panel:#ffffff; --ink:#1c2830;
@@ -25,10 +66,147 @@
   --up:#1a9d63; --up-bg:#e3f6ec; --down:#e5484d; --down-bg:#fdecec;
   --gold-grad:linear-gradient(135deg,#d4b85b 0%,#c4a749 55%,#a98d2c 100%);
   --shadow:0 1px 2px rgba(30,35,20,.05),0 6px 16px rgba(30,35,20,.07);
+  /* Tokens lifted out of the literals that used to sit inline in the rules
+     below. Each holds exactly the value its rule carried before, so the light
+     theme is unchanged to the pixel; they exist so a theme block has something
+     to move. */
+  --on-brand:#ffffff;       /* text on a filled accent (button, tag, chip)     */
+  --on-header:#ffffff;      /* text on the dark header / hero gradient         */
+  --on-gold:#1c2830;        /* text on --gold-grad (the hero primary button)   */
+  --hero-badge:#e7d38f;     /* the small pill on the landing hero              */
+  --code-bg:#f0ece0;
+  --input-bg:#ffffff;       /* select / text input / date field surface        */
+  --hover:#f6f2e6;          /* table row and tile hover                        */
+  --total-bg:#fff7f0;       /* the total row of a table                        */
+  --star:#f0b429;           /* دیده‌بان star, and the pinned-row rule           */
+  --star-bg:#fff8e6;
+  --pin-bg:#fff7e8;
+  --pin-bg-hover:#fff2d6;
+  --down-strong:#b83636;    /* hover state of a destructive button             */
+  --mute-fill:#cfd4da;      /* a bar with no signal in it                      */
+  --mid:#d19a2e; --mid-bg:#fbf1da;  /* the neutral verdict, between up & down  */
+  --sbar-track:#efeade;     /* table scrollbars — see «نوار پیمایش» below      */
+  --sbar-thumb:#c9bfa4;
+  --sbar-thumb-hover:#a2811f;
   --radius:14px;
+}
+
+/* سپیا — warmer paper, for long reading sessions under artificial light. */
+[data-theme="sepia"]{
+  color-scheme:light;
+  --bg:#efe3cd; --panel:#f9f2e4; --ink:#2b2118;
+  --muted:#6f6353; --line:#ddcdb0; --brand:#a8781f; --brand2:#8d6316;
+  --brand-soft:#eadcbe;
+  --header1:#3b2c1c; --header2:#4a3927; --header3:#6b563b;
+  --up:#1a7f52; --up-bg:#dfeede; --down:#c33f43; --down-bg:#f3dcd8;
+  --gold-grad:linear-gradient(135deg,#c9a95e 0%,#b8934a 55%,#8d6316 100%);
+  --shadow:0 1px 2px rgba(60,45,20,.07),0 6px 16px rgba(60,45,20,.10);
+  --on-brand:#fdf8ef; --on-header:#fdf8ef; --on-gold:#2b2118;
+  --hero-badge:#e8d3a2; --code-bg:#e6d8bd; --input-bg:#fdf8ef;
+  --hover:#e9dcc2; --total-bg:#f2e6d0; --star:#c98a12; --star-bg:#f0e0bd;
+  --pin-bg:#f1e2c1; --pin-bg-hover:#e8d5ad; --down-strong:#a53337;
+  --mute-fill:#c3b69c; --mid:#b8871f; --mid-bg:#f0e3c6;
+  --sbar-track:#e3d4b7; --sbar-thumb:#bfa87e; --sbar-thumb-hover:#8d6316;
+  --radius:14px;
+}
+
+/* کاغذ سفید — a cool, neutral white for panels that render the cream cast badly
+   (many IPS screens do) and for anyone printing a screenshot. */
+[data-theme="paper"]{
+  color-scheme:light;
+  --bg:#f4f5f7; --panel:#ffffff; --ink:#1a1f26;
+  --muted:#6b7480; --line:#e2e5ea; --brand:#b08e24; --brand2:#94761a;
+  --brand-soft:#f2ead2;
+  --header1:#1b2430; --header2:#26313f; --header3:#3e4c5d;
+  --up:#12855a; --up-bg:#e2f5ec; --down:#d93b41; --down-bg:#fdeaea;
+  --gold-grad:linear-gradient(135deg,#d0b45f 0%,#bfa24b 55%,#94761a 100%);
+  --shadow:0 1px 2px rgba(20,25,35,.05),0 6px 16px rgba(20,25,35,.08);
+  --on-brand:#ffffff; --on-header:#ffffff; --on-gold:#1a1f26;
+  --hero-badge:#e6d49a; --code-bg:#eef0f3; --input-bg:#ffffff;
+  --hover:#f0f2f5; --total-bg:#f7f8fa; --star:#e0a51f; --star-bg:#fdf4dd;
+  --pin-bg:#fdf3da; --pin-bg-hover:#f8eac2; --down-strong:#b32f34;
+  --mute-fill:#ccd2da; --mid:#c4901f; --mid-bg:#faf0d8;
+  --sbar-track:#e8eaee; --sbar-thumb:#bcc3cc; --sbar-thumb-hover:#94761a;
+  --radius:14px;
+}
+
+/* تاریک — the slate-navy of the existing header extended over the whole page,
+   so dark mode looks like this product rather than a generic inversion. */
+[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#16232c; --panel:#1e2f3a; --ink:#e7eef3;
+  --muted:#93a6b3; --line:#2d4250; --brand:#c7ab4d; --brand2:#ddc069;
+  --brand-soft:#33402f;
+  --header1:#0f1a21; --header2:#16232c; --header3:#25394a;
+  --up:#3ddc97; --up-bg:#123528; --down:#ff6b6b; --down-bg:#3b1e20;
+  --gold-grad:linear-gradient(135deg,#d4b85b 0%,#c4a749 55%,#a98d2c 100%);
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 6px 18px rgba(0,0,0,.45);
+  --on-brand:#16232c; --on-header:#ffffff; --on-gold:#16232c;
+  --hero-badge:#e7d38f; --code-bg:#243642; --input-bg:#223440;
+  --hover:#26404f; --total-bg:#24384a; --star:#f0b429; --star-bg:#3a3220;
+  --pin-bg:#33301d; --pin-bg-hover:#403a23; --down-strong:#c9524f;
+  --mute-fill:#46596a; --mid:#e3b45a; --mid-bg:#3a3220;
+  --sbar-track:#1a2b36; --sbar-thumb:#48606f; --sbar-thumb-hover:#c7ab4d;
+  --radius:14px;
+}
+
+/* نیمه‌شب — near-black navy, for trading after dark and for OLED panels, where
+   a lower black point is the difference between comfortable and glaring. */
+[data-theme="midnight"]{
+  color-scheme:dark;
+  --bg:#0b1020; --panel:#141c31; --ink:#e6e9f5;
+  --muted:#8e97b5; --line:#242e4c; --brand:#c8b06a; --brand2:#dcc47f;
+  --brand-soft:#2b2f45;
+  --header1:#070b16; --header2:#0f1527; --header3:#1d2640;
+  --up:#46e0a1; --up-bg:#0f3327; --down:#ff7079; --down-bg:#3a1725;
+  --gold-grad:linear-gradient(135deg,#d8c274 0%,#c8b06a 55%,#a08a45 100%);
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 6px 20px rgba(0,0,0,.55);
+  --on-brand:#0b1020; --on-header:#ffffff; --on-gold:#0b1020;
+  --hero-badge:#e3d29a; --code-bg:#1b2340; --input-bg:#182142;
+  --hover:#1e2947; --total-bg:#1b2440; --star:#f2bd45; --star-bg:#332a1c;
+  --pin-bg:#2c2718; --pin-bg-hover:#39321f; --down-strong:#c9525c;
+  --mute-fill:#3e4870; --mid:#e6bb63; --mid-bg:#332a1c;
+  --sbar-track:#101733; --sbar-thumb:#39456e; --sbar-thumb-hover:#c8b06a;
+  --radius:14px;
+}
+
+/* ذغالی — neutral grey with no colour cast, for anyone who finds a tinted dark
+   theme tiring, and the calmest backdrop for a table full of red and green. */
+[data-theme="graphite"]{
+  color-scheme:dark;
+  --bg:#1b1c1e; --panel:#252729; --ink:#e8e8e9;
+  --muted:#9a9da1; --line:#37393c; --brand:#c7ab4d; --brand2:#dcc069;
+  --brand-soft:#3a3527;
+  --header1:#121314; --header2:#1d1e20; --header3:#2e3033;
+  --up:#41d68e; --up-bg:#16301f; --down:#f76b6b; --down-bg:#361d1d;
+  --gold-grad:linear-gradient(135deg,#d4b85b 0%,#c4a749 55%,#a98d2c 100%);
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.5);
+  --on-brand:#1b1c1e; --on-header:#ffffff; --on-gold:#1b1c1e;
+  --hero-badge:#e2d29b; --code-bg:#2d2f31; --input-bg:#2b2d30;
+  --hover:#303336; --total-bg:#2c2e31; --star:#eeb42c; --star-bg:#37301e;
+  --pin-bg:#332e1e; --pin-bg-hover:#3d3724; --down-strong:#c25151;
+  --mute-fill:#4d5155; --mid:#e0b155; --mid-bg:#37301e;
+  --sbar-track:#232527; --sbar-thumb:#4a4d51; --sbar-thumb-hover:#c7ab4d;
+  --radius:14px;
+}
+
+/* رنگ صعود و نزول — the colour-blind alternative, layered on top of whichever
+   theme is active. Blue rises, orange falls: that pair stays distinguishable
+   under deuteranopia and protanopia, where green and red collapse into one
+   colour — and roughly ۸٪ of men see them that way. It overrides only the four
+   semantic tokens, so it composes with every theme instead of doubling the
+   number of palettes to maintain. */
+[data-updown="colorblind"]{
+  --up:#2f7fd1; --down:#e0761c; --up-bg:#e2eefa; --down-bg:#fcecdc;
+}
+[data-updown="colorblind"][data-theme="dark"],
+[data-updown="colorblind"][data-theme="midnight"],
+[data-updown="colorblind"][data-theme="graphite"]{
+  --up:#5aa9ee; --down:#f2933c; --up-bg:#152c40; --down-bg:#3a2717;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
+html{background:var(--bg)}
 body{
   font-family:"Vazirmatn",Tahoma,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink);
   font-size:14px; line-height:1.6;
@@ -61,7 +239,7 @@ a{color:inherit;text-decoration:none}
 
 /* ---------- landing / home page ---------- */
 .landing-hero{
-  position:relative;overflow:hidden;text-align:center;color:#fff;
+  position:relative;overflow:hidden;text-align:center;color:var(--on-header);
   background:linear-gradient(135deg,var(--header1),var(--header3));
   border-radius:calc(var(--radius) + 4px);
   padding:72px 32px;margin-top:8px;box-shadow:var(--shadow);
@@ -74,7 +252,7 @@ a{color:inherit;text-decoration:none}
 .landing-hero::after{width:260px;height:260px;bottom:-130px;inset-inline-end:-80px}
 .landing-hero-inner{position:relative;z-index:1;max-width:720px;margin:0 auto}
 .landing-badge{
-  display:inline-block;background:rgba(199,171,77,.20);color:#e7d38f;
+  display:inline-block;background:rgba(199,171,77,.20);color:var(--hero-badge);
   border:1px solid rgba(199,171,77,.35);
   padding:6px 15px;border-radius:30px;font-size:13px;font-weight:700;margin-bottom:20px;
 }
@@ -82,9 +260,9 @@ a{color:inherit;text-decoration:none}
 .landing-sub{font-size:16px;line-height:1.95;opacity:.92;margin:0 auto 30px;max-width:58ch}
 .landing-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
 .landing-cta .btn{padding:12px 26px;font-size:15px}
-.hero-primary{background:var(--gold-grad);color:#1c2830;box-shadow:0 6px 18px rgba(180,150,55,.32)}
-.hero-primary:hover{filter:brightness(1.05);color:#1c2830}
-.hero-secondary{background:transparent;color:#fff;border:1.5px solid rgba(255,255,255,.6)}
+.hero-primary{background:var(--gold-grad);color:var(--on-gold);box-shadow:0 6px 18px rgba(180,150,55,.32)}
+.hero-primary:hover{filter:brightness(1.05);color:var(--on-gold)}
+.hero-secondary{background:transparent;color:var(--on-header);border:1.5px solid rgba(255,255,255,.6)}
 .hero-secondary:hover{background:rgba(255,255,255,.14)}
 
 .landing-section{margin-top:52px}
@@ -112,15 +290,15 @@ a{color:inherit;text-decoration:none}
 .landing-welcome h2{margin:0 0 4px;font-size:19px}
 .landing-welcome-cta{display:flex;gap:12px;flex-wrap:wrap}
 .landing-welcome .hero-secondary{background:transparent;color:var(--brand);border:1.5px solid var(--brand)}
-.landing-welcome .hero-secondary:hover{background:var(--brand);color:#fff}
+.landing-welcome .hero-secondary:hover{background:var(--brand);color:var(--on-brand)}
 @media (max-width:560px){.landing-hero h1{font-size:29px}.landing-hero{padding:52px 22px}}
-code{background:#f0ece0;padding:1px 6px;border-radius:6px;direction:ltr;display:inline-block}
+code{background:var(--code-bg);padding:1px 6px;border-radius:6px;direction:ltr;display:inline-block}
 
 /* topbar */
 .topbar{
   display:flex;align-items:center;justify-content:space-between;gap:20px;
   background:linear-gradient(120deg,var(--header1),var(--header2));
-  color:#fff;padding:12px 26px;box-shadow:var(--shadow);position:sticky;top:0;z-index:50;
+  color:var(--on-header);padding:12px 26px;box-shadow:var(--shadow);position:sticky;top:0;z-index:50;
 }
 .brand a{display:flex;align-items:center;gap:9px}
 .logo{font-size:24px}
@@ -129,23 +307,23 @@ code{background:#f0ece0;padding:1px 6px;border-radius:6px;direction:ltr;display:
 .search-wrap{position:relative;width:min(320px,36vw)}
 #search{
   width:100%;padding:9px 14px;border:none;border-radius:10px;font-family:inherit;
-  font-size:14px;background:rgba(255,255,255,.16);color:#fff;
+  font-size:14px;background:rgba(255,255,255,.16);color:var(--on-header);
 }
 #search::placeholder{color:rgba(255,255,255,.75)}
-#search:focus{outline:none;background:#fff;color:var(--ink)}
+#search:focus{outline:none;background:var(--input-bg);color:var(--ink)}
 .topnav{display:flex;gap:6px;margin-inline-start:auto}
-.topnav a{padding:7px 14px;border-radius:9px;font-size:13.5px;font-weight:700;color:#fff;background:rgba(255,255,255,.14);transition:background .12s}
+.topnav a{padding:7px 14px;border-radius:9px;font-size:13.5px;font-weight:700;color:var(--on-header);background:rgba(255,255,255,.14);transition:background .12s}
 .topnav a:hover,.topnav a.on{background:rgba(255,255,255,.30)}
 .nav-badge{display:inline-block;min-width:16px;padding:0 5px;border-radius:9px;background:rgba(255,255,255,.30);font-size:11px;font-weight:700;line-height:16px;text-align:center}
 
 /* watchlist star toggle */
 .watch-star{border:none;background:none;cursor:pointer;padding:0 6px 0 0;font-size:16px;line-height:1;color:var(--line);transition:color .12s,transform .12s;vertical-align:middle}
-.watch-star:hover{color:#f0b429;transform:scale(1.18)}
-.watch-star.on{color:#f0b429}
+.watch-star:hover{color:var(--star);transform:scale(1.18)}
+.watch-star.on{color:var(--star)}
 .watch-star.big{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;margin-inline-start:12px;border:1.5px solid var(--line);border-radius:10px;font-size:14px;font-weight:700;color:var(--muted);vertical-align:middle}
 .watch-star.big .star-glyph{font-size:16px}
-.watch-star.big:hover{border-color:#f0b429;color:#f0b429;transform:none}
-.watch-star.big.on{border-color:#f0b429;color:#f0b429;background:#fff8e6}
+.watch-star.big:hover{border-color:var(--star);color:var(--star);transform:none}
+.watch-star.big.on{border-color:var(--star);color:var(--star);background:var(--star-bg)}
 .watch-star.big.on .star-label::before{content:"در "}
 
 /* watchlist empty state */
@@ -154,19 +332,20 @@ code{background:#f0ece0;padding:1px 6px;border-radius:6px;direction:ltr;display:
 .empty-state h2{margin:0 0 8px}
 .empty-state a{color:var(--brand2);font-weight:700}
 
-.user-box{display:flex;align-items:center;gap:10px;color:#fff}
-.user-box .user-name{font-size:13px;font-weight:700;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.logout-btn{padding:6px 13px;border:none;border-radius:9px;font-family:inherit;font-size:13px;font-weight:700;color:#fff;background:rgba(255,255,255,.16);cursor:pointer;transition:background .12s}
-.logout-btn:hover{background:rgba(255,255,255,.32)}
+/* The bare .user-box + .logout-btn pair became the user menu in order 09
+   (.user-menu / .user-trigger / .user-pop, further down). What survives from it
+   is this: a display name long enough to wrap the header must still be clipped,
+   or the nav reflows onto a second row for one user with a long name. */
+.user-name{font-size:13px;font-weight:700;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .search-results{
-  position:absolute;top:44px;inset-inline:0;background:#fff;border-radius:10px;
+  position:absolute;top:44px;inset-inline:0;background:var(--panel);border-radius:10px;
   box-shadow:var(--shadow);overflow:hidden;display:none;max-height:60vh;overflow-y:auto;z-index:60;
 }
 .search-results a{display:flex;justify-content:space-between;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);color:var(--ink)}
 .search-results a:hover{background:var(--bg)}
 .search-results .sr-sym{font-weight:700;color:var(--brand)}
 .search-results .sr-sec{color:var(--muted);font-size:12px}
-.search-results .sr-kind{font-size:11px;color:#fff;background:var(--brand2);border-radius:6px;padding:1px 7px}
+.search-results .sr-kind{font-size:11px;color:var(--on-brand);background:var(--brand2);border-radius:6px;padding:1px 7px}
 .search-results .sr-kind.etf{background:var(--up)}
 
 .container{max-width:1120px;margin:0 auto;padding:22px 20px 60px}
@@ -212,7 +391,7 @@ code{background:#f0ece0;padding:1px 6px;border-radius:6px;direction:ltr;display:
 .grid tbody td{padding:9px 12px;border-bottom:1px solid var(--line)}
 .grid tbody tr:last-child td{border-bottom:none}
 .clickable{cursor:pointer;transition:background .12s}
-.clickable:hover{background:#f6f2e6}
+.clickable:hover{background:var(--hover)}
 .num{text-align:center;font-variant-numeric:tabular-nums}
 .grid td.num[data-v]{text-align:center}
 .sym,.sym-big{font-weight:700;color:var(--brand)}
@@ -220,7 +399,7 @@ code{background:#f0ece0;padding:1px 6px;border-radius:6px;direction:ltr;display:
 .rtl-name{font-weight:600}
 .chev{color:var(--muted);text-align:left;font-size:18px}
 .mname{font-weight:600;white-space:nowrap}
-.total-row td{font-weight:800;background:#fff7f0;border-top:2px solid var(--line)}
+.total-row td{font-weight:800;background:var(--total-bg);border-top:2px solid var(--line)}
 .table-scroll{overflow-x:auto}
 
 /* mirror scrollbar shown above a wide table (synced via JS) so it's reachable
@@ -245,13 +424,13 @@ code{background:#f0ece0;padding:1px 6px;border-radius:6px;direction:ltr;display:
   box-shadow:-1px 0 0 var(--line);
 }
 .perf-grid thead tr:first-child th:first-child{z-index:3}
-.perf-grid tbody tr:hover td:first-child{background:#f6f2e6}
+.perf-grid tbody tr:hover td:first-child{background:var(--hover)}
 .perf-tops{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px}
 .perf-tops .stat-card{padding:12px 14px}
 .perf-tops .stat-num{font-size:16px}
 
 /* tag (etf type) */
-.tag{display:inline-block;color:#fff;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;white-space:nowrap}
+.tag{display:inline-block;color:var(--on-brand);font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;white-space:nowrap}
 
 /* pills */
 .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:700;direction:ltr}
@@ -260,12 +439,12 @@ code{background:#f0ece0;padding:1px 6px;border-radius:6px;direction:ltr;display:
 
 /* buttons + selects + forms */
 .btn{
-  display:inline-block;background:var(--brand);color:#fff;padding:8px 15px;border-radius:10px;
+  display:inline-block;background:var(--brand);color:var(--on-brand);padding:8px 15px;border-radius:10px;
   font-size:13px;font-weight:700;transition:background .12s;border:none;cursor:pointer
 }
 .btn:hover{background:var(--brand2)}
 .btn:disabled{opacity:.6;cursor:default}
-select,input[type=text]{padding:7px 12px;border:1px solid var(--line);border-radius:9px;background:#fff;font-size:13px;font-family:inherit;color:var(--ink)}
+select,input[type=text]{padding:7px 12px;border:1px solid var(--line);border-radius:9px;background:var(--input-bg);font-size:13px;font-family:inherit;color:var(--ink)}
 .filterbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;font-size:13px}
 .filterbar #tablefilter{margin-inline-start:auto;min-width:180px}
 .update-form{margin-top:8px}
@@ -324,7 +503,7 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
   background:var(--panel);border:1px solid var(--line);border-radius:8px;
   padding:5px 11px;cursor:pointer;transition:all .12s;line-height:1.4}
 .cbtn:hover{border-color:var(--brand2);color:var(--brand2)}
-.cbtn.on{background:var(--brand2);border-color:var(--brand2);color:#fff}
+.cbtn.on{background:var(--brand2);border-color:var(--brand2);color:var(--on-brand)}
 
 /* indicator dropdown menu */
 .bnc-menu{position:absolute;top:calc(100% + 8px);inset-inline-start:0;z-index:60;
@@ -335,7 +514,7 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
 .bnc-mi{display:flex;align-items:center;gap:8px;width:100%;text-align:start;font-family:inherit;
   font-size:13px;color:var(--ink);background:none;border:none;border-radius:8px;padding:7px 8px;cursor:pointer}
 .bnc-mi:hover{background:var(--bg)}
-.bnc-mi.on{background:#f4ecd2}
+.bnc-mi.on{background:var(--brand-soft)}
 .bnc-mi-check{width:15px;text-align:center;color:var(--brand2);opacity:0;font-weight:900;flex:none}
 .bnc-mi.on .bnc-mi-check{opacity:1}
 .bnc-mi-label{flex:1}
@@ -350,7 +529,7 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
 .toolbtn{position:relative;display:flex;align-items:center;justify-content:center;width:36px;height:34px;padding:0;flex:none;
   color:var(--muted);background:transparent;border:1px solid transparent;border-radius:6px;cursor:pointer;transition:all .12s}
 .toolbtn:hover{background:var(--panel);border-color:var(--line);color:var(--ink)}
-.toolbtn.on{background:#f4ecd2;border-color:var(--brand2);color:var(--brand)}
+.toolbtn.on{background:var(--brand-soft);border-color:var(--brand2);color:var(--brand)}
 .toolbtn.danger{color:var(--muted)}
 .toolbtn.danger:hover{background:var(--down-bg);border-color:var(--down);color:var(--down)}
 .tvi{width:20px;height:20px;display:block}
@@ -376,7 +555,7 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
   font-size:13.5px;font-weight:600;color:var(--ink);background:none;border:none;
   border-radius:8px;padding:9px 10px;cursor:pointer;position:relative}
 .tool-fly-item:hover{background:var(--bg)}
-.tool-fly-item.on{background:#f4ecd2;color:var(--brand)}
+.tool-fly-item.on{background:var(--brand-soft);color:var(--brand)}
 /* left accent bar on the selected row, like TradingView */
 .tool-fly-item.on::before{content:"";position:absolute;inset-inline-start:0;top:6px;bottom:6px;
   width:3px;border-radius:3px;background:var(--brand2)}
@@ -396,9 +575,9 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
 
 /* ---- TradingView-style chrome (scoped to the chart; app UI unchanged) ---- */
 :root{--tv-blue:#2962ff;--tv-line:#e0e3eb;--tv-ink:#131722;--tv-muted:#787b86;
-  --tv-hover:#f0f3fa;--tv-active:#e8f0fe}
+  --tv-hover:#f0f3fa;--tv-active:#e8f0fe;--tv-bg:#ffffff}
 .pro-chart{border:1px solid var(--tv-line);border-radius:8px}
-.pro-chart .bnc-top{background:#fff;border-bottom:1px solid var(--tv-line);
+.pro-chart .bnc-top{background:var(--tv-bg);border-bottom:1px solid var(--tv-line);
   border-radius:8px 8px 0 0;gap:6px 10px}
 .pro-chart .bnc-group::after{background:var(--tv-line)}
 .pro-chart .cbtn{background:transparent;border-color:transparent;color:var(--tv-ink);
@@ -406,7 +585,7 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
 .pro-chart .cbtn:hover{background:var(--tv-hover);color:var(--tv-ink);border-color:transparent}
 .pro-chart .cbtn.on{background:var(--tv-active);color:var(--tv-blue);border-color:transparent}
 .pro-chart .bnc-body{border-radius:0 0 8px 8px}
-.pro-chart .bnc-tools{background:#fff;border-inline-end:1px solid var(--tv-line)}
+.pro-chart .bnc-tools{background:var(--tv-bg);border-inline-end:1px solid var(--tv-line)}
 .pro-chart .toolbtn{color:var(--tv-muted);border-radius:6px}
 .pro-chart .toolbtn:hover{background:var(--tv-hover);border-color:transparent;color:var(--tv-ink)}
 .pro-chart .toolbtn.on{background:var(--tv-active);border-color:transparent;color:var(--tv-blue)}
@@ -420,6 +599,19 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
 .pro-chart .bnc-mi.on{background:var(--tv-active)}
 .pro-chart .bnc-mi-check{color:var(--tv-blue)}
 .pro-chart .inds-btn.on,.pro-chart [data-role="inds-btn"].on{background:var(--tv-active);color:var(--tv-blue)}
+
+/* The --tv-* palette above is the chart widget's own, and .claude/PORT_CONTRACT.md
+   asks for it to be left alone. It is left alone in the light themes. On the
+   three dark ones it has to move: a pure-white toolbar and a #e0e3eb rule
+   around a chart on a #0b1020 page is not neutrality, it is a hole in the page.
+   Only the surfaces and rules change — --tv-blue stays, because it is the
+   selection colour the widget's own icons are drawn to match, and the candle
+   colours (static/js/chart.js) stay too, so a gain is the same green in every
+   theme. */
+[data-theme="dark"],[data-theme="midnight"],[data-theme="graphite"]{
+  --tv-line:#2a3946; --tv-ink:#e7eef3; --tv-muted:#8f9bab;
+  --tv-hover:#22323d; --tv-active:#1d3348; --tv-bg:#1b2932;
+}
 
 /* ---- TradingView Advanced Charts container ---- */
 .tv-chart{height:calc(100vh - 200px);min-height:720px;border:1px solid var(--line);
@@ -452,7 +644,7 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
 
 /* update progress */
 .btn.danger{background:var(--down)}
-.btn.danger:hover{background:#b83636}
+.btn.danger:hover{background:var(--down-strong)}
 .now-updating{display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--line);
   border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:14px}
 .now-updating b{color:var(--brand);font-size:16px}
@@ -460,7 +652,7 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
   border-radius:50%;display:inline-block;animation:spin .8s linear infinite;flex:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 /* jalali datepicker */
-[data-jdate]{cursor:pointer;background:#fff}
+[data-jdate]{cursor:pointer;background:var(--input-bg)}
 .jdp{position:absolute;z-index:200;width:250px;background:var(--panel);border:1px solid var(--line);
   border-radius:12px;box-shadow:var(--shadow);padding:10px;direction:rtl;font-family:Tahoma}
 .jdp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
@@ -470,7 +662,7 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
    the right and ‹ as "<" on the left in every calendar. */
 .jdp-nav{border:none;background:var(--bg);color:var(--brand);width:28px;height:28px;border-radius:8px;
   cursor:pointer;font-size:18px;line-height:1;direction:ltr;unicode-bidi:isolate}
-.jdp-nav:hover{background:var(--brand);color:#fff}
+.jdp-nav:hover{background:var(--brand);color:var(--on-brand)}
 .jdp-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
 .jdp-wd{text-align:center;font-size:11px;color:var(--muted);padding:4px 0;font-weight:700}
 .jdp-empty{height:30px}
@@ -478,11 +670,11 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
   font-size:13px;color:var(--ink)}
 .jdp-day:hover{background:var(--bg)}
 .jdp-day.today{border:1px solid var(--brand2)}
-.jdp-day.sel{background:var(--brand);color:#fff;font-weight:700}
+.jdp-day.sel{background:var(--brand);color:var(--on-brand);font-weight:700}
 .jdp-foot{margin-top:8px;text-align:center}
 .jdp-today{border:none;background:var(--bg);color:var(--brand);padding:5px 14px;border-radius:8px;
   cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:700}
-.jdp-today:hover{background:var(--brand);color:#fff}
+.jdp-today:hover{background:var(--brand);color:var(--on-brand)}
 /* clickable month/year title + the month & year picker grids */
 .jdp-tbtn{border:none;background:none;cursor:pointer;font-family:inherit;font-weight:700;
   font-size:14px;color:var(--brand);padding:2px 6px;border-radius:6px}
@@ -492,12 +684,12 @@ button.jdp-title:hover{color:var(--brand2)}
 .jdp-mgrid{grid-template-columns:repeat(3,1fr);gap:6px}
 .jdp-cell{height:44px;border:none;background:var(--bg);border-radius:8px;cursor:pointer;
   font-family:inherit;font-size:13px;color:var(--ink);font-weight:600}
-.jdp-cell:hover{background:var(--brand);color:#fff}
-.jdp-cell.sel{background:var(--brand);color:#fff;font-weight:800}
+.jdp-cell:hover{background:var(--brand);color:var(--on-brand)}
+.jdp-cell.sel{background:var(--brand);color:var(--on-brand);font-weight:800}
 
 .prog-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
 .tile-btn{cursor:pointer;transition:border-color .12s,background .12s}
-.tile-btn:hover{border-color:var(--brand2);background:#f6f2e6}
+.tile-btn:hover{border-color:var(--brand2);background:var(--hover)}
 .list-box{margin-top:14px;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 .list-box h3{margin:0 0 10px;font-size:14px}
 .chips{display:flex;flex-wrap:wrap;gap:6px;max-height:230px;overflow-y:auto}
@@ -509,10 +701,10 @@ button.jdp-title:hover{color:var(--brand2)}
 .list-head h3{margin:0}
 .chip.retry{font-family:inherit;cursor:pointer;transition:background .12s,box-shadow .12s}
 .chip.retry::before{content:"↻ ";font-weight:800}
-.chip.retry:hover{background:var(--down);color:#fff;box-shadow:0 1px 4px rgba(214,69,69,.35)}
+.chip.retry:hover{background:var(--down);color:var(--on-brand);box-shadow:0 1px 4px rgba(214,69,69,.35)}
 .chip.retry:disabled{opacity:.5;cursor:default;box-shadow:none;background:var(--down-bg);color:var(--down)}
 .btn.ghost{background:transparent;color:var(--down);border:1px solid var(--down)}
-.btn.ghost:hover:not(:disabled){background:var(--down);color:#fff}
+.btn.ghost:hover:not(:disabled){background:var(--down);color:var(--on-brand)}
 .btn.small{padding:5px 11px;font-size:12px}
 /* delete panel */
 .danger-zone{border:1px solid var(--down-bg)}
@@ -552,8 +744,8 @@ button.jdp-title:hover{color:var(--brand2)}
 .calc-all>summary::before{content:"▾ ";color:var(--muted)}
 .calc-all[open]>summary::before{content:"▴ "}
 .calc-all>summary:hover{color:var(--brand2)}
-tr.pinned>td{background:#fff7e8;border-top:2px solid #f0b429;border-bottom:2px solid #f0b429}
-tr.pinned:hover>td{background:#fff2d6}
+tr.pinned>td{background:var(--pin-bg);border-top:2px solid var(--star);border-bottom:2px solid var(--star)}
+tr.pinned:hover>td{background:var(--pin-bg-hover)}
 
 /* ── امتیاز و سیگنال — score, verdict, sub-scores, reasons, risk ───────────── */
 :root{--mid:#d19a2e;--mid-bg:#fbf1da}
@@ -586,7 +778,7 @@ tr.pinned:hover>td{background:#fff2d6}
 .ss-track{height:8px;border-radius:6px;background:var(--line);overflow:hidden}
 .ss-fill{height:100%;border-radius:6px}
 .ss-fill.t-pos{background:var(--up)}.ss-fill.t-mid{background:var(--mid)}
-.ss-fill.t-neg{background:var(--down)}.ss-fill.t-mute{background:#cfd4da}
+.ss-fill.t-neg{background:var(--down)}.ss-fill.t-mute{background:var(--mute-fill)}
 
 .rn-head{font-size:13px;margin:0 0 8px}
 .rn-head.pos{color:var(--up)}.rn-head.neg{color:var(--down)}
@@ -663,3 +855,431 @@ tr.pivot-s>td:first-child{color:var(--up)}
    the whole width, and sticking it to the inline start would paint an empty
    band over the columns as the table scrolls sideways. */
 .perf-grid tbody tr.vpad td{position:static;background:none;box-shadow:none}
+
+
+/* ===========================================================================
+   نوار پیمایش جدول‌ها — TABLE SCROLLBARS (order 09)
+   ---------------------------------------------------------------------------
+   Two problems with the old arrangement, both reported as "I can't scroll the
+   table sideways":
+
+   1. The only horizontal scrollbar was the browser default at the BOTTOM of the
+      scroller. On /performance and /stocks the table is hundreds of rows tall,
+      so reaching that bar means scrolling to the end of the list first — the
+      control that moves the table is off-screen exactly while you are looking
+      at the table. static/js/tables.js now mirrors it ABOVE every wide table
+      (`.table-scroll-top`), synced both ways, and makes it sticky under the
+      header so it stays reachable no matter how far down the rows you are.
+   2. The default bar is ~۸px tall, which is a small target on a touchpad and a
+      smaller one on a touchscreen. `--sbar-h` sets the height for both bars and
+      the تنظیمات screen exposes three sizes; the default («ضخیم») is 20px.
+
+   Firefox only understands `scrollbar-width: auto | thin | none` — it cannot be
+   given a pixel height — so there the bars keep the platform thickness and only
+   the colours and the mirrored position apply. That is a browser limitation, not
+   something to work around with a JS-drawn fake scrollbar: a real scrollbar
+   keeps keyboard, wheel-tilt and accessibility behaviour that a div cannot.
+   =========================================================================== */
+:root{ --sbar-h:20px; --topbar-h:56px; }
+[data-sbar="md"]{ --sbar-h:14px }
+[data-sbar="lg"]{ --sbar-h:20px }
+[data-sbar="xl"]{ --sbar-h:28px }
+
+/*  Firefox ONLY.
+    `scrollbar-color` and `::-webkit-scrollbar` are mutually exclusive in
+    Chromium ≥121: the moment the standard property is set on an element,
+    Chrome ignores every ::-webkit-scrollbar rule for it — including the height.
+    Setting both (the obvious "cover all engines" move) is therefore what makes
+    the bars ۰px tall in Chrome, which is exactly the bug this rule used to
+    cause: the mirror element measured 5px on screen and nothing was drawn in it.
+    So the standard property is scoped to engines that have no ::-webkit-
+    scrollbar at all, i.e. Firefox, where it is the only thing that works.
+    Firefox cannot be given a pixel thickness (scrollbar-width takes only
+    auto | thin | none), so there the bars keep the platform height and only the
+    colours and the mirrored position apply.  */
+@supports not selector(::-webkit-scrollbar){
+  .table-scroll,.table-scroll-top,.hist-scroll,.chips,.bnc-menu,.search-results{
+    scrollbar-color:var(--sbar-thumb) var(--sbar-track);
+    scrollbar-width:auto;
+  }
+}
+.table-scroll::-webkit-scrollbar,
+.table-scroll-top::-webkit-scrollbar,
+.hist-scroll::-webkit-scrollbar{height:var(--sbar-h);width:var(--sbar-h)}
+.table-scroll::-webkit-scrollbar-track,
+.table-scroll-top::-webkit-scrollbar-track,
+.hist-scroll::-webkit-scrollbar-track{background:var(--sbar-track);border-radius:999px}
+.table-scroll::-webkit-scrollbar-thumb,
+.table-scroll-top::-webkit-scrollbar-thumb,
+.hist-scroll::-webkit-scrollbar-thumb{
+  background:var(--sbar-thumb);border-radius:999px;
+  /* The border is what stops a 28px thumb from looking like a slab: it paints
+     the panel colour, so the thumb reads as a rounded bar inside its track. */
+  border:3px solid var(--panel);background-clip:padding-box;
+}
+.table-scroll::-webkit-scrollbar-thumb:hover,
+.table-scroll-top::-webkit-scrollbar-thumb:hover,
+.hist-scroll::-webkit-scrollbar-thumb:hover{background:var(--sbar-thumb-hover);background-clip:padding-box}
+
+/* The mirror bar itself. `position:sticky` keeps it under the site header while
+   the page scrolls past a long table; --topbar-h is measured and written by
+   tables.js, because the header wraps to two rows on a narrow window and a
+   hard-coded height would leave the bar either floating or hidden. */
+.table-scroll-top{
+  overflow-x:auto;overflow-y:hidden;position:sticky;top:var(--topbar-h);z-index:12;
+  background:var(--panel);padding-block:2px;margin-bottom:2px;border-radius:8px;
+  /* The box must reserve the bar's height itself. Its content is a 1px spacer,
+     so on any engine that draws OVERLAY scrollbars (headless Chrome, macOS,
+     Firefox on a trackpad) the element would otherwise collapse to ~5px and the
+     bar would have nothing to be drawn in. */
+  min-height:calc(var(--sbar-h) + 4px);
+}
+.table-scroll-top>div{height:1px}
+/* A table that fits needs no mirror; tables.js sets this rather than removing
+   the element, so nothing has to be rebuilt when the window is resized back. */
+.table-scroll-top[hidden]{display:none}
+
+/* ابزار جدول — the small toolbar tables.js puts beside the mirror bar.
+   Full-screen, CSV and print are the three things every market site offers over
+   a wide table, and all three work on what is already in the DOM, so they apply
+   equally to the server-rendered tables and to the Vue islands. */
+.tbl-tools{display:flex;align-items:center;gap:6px;margin-inline-start:auto}
+.tbl-bar{display:flex;align-items:flex-end;gap:10px;position:sticky;top:var(--topbar-h);z-index:13}
+.tbl-bar .table-scroll-top{flex:1;min-width:0;position:static}
+.tbl-btn{
+  display:inline-flex;align-items:center;gap:5px;flex:none;
+  font-family:inherit;font-size:12px;font-weight:700;line-height:1.6;
+  color:var(--muted);background:var(--panel);border:1px solid var(--line);
+  border-radius:8px;padding:4px 9px;cursor:pointer;transition:color .12s,border-color .12s;
+}
+.tbl-btn:hover{color:var(--brand2);border-color:var(--brand2)}
+
+/* تمام‌صفحه — a table promoted to fill the window. Implemented as fixed
+   positioning rather than the Fullscreen API on purpose: the API takes the
+   element out of the page, which drops the sticky header, the site font-size
+   and (in Chrome) the custom scrollbar styling with it. */
+.tbl-fs{
+  position:fixed;inset:0;z-index:900;background:var(--panel);
+  padding:14px 16px 8px;overflow:auto;box-shadow:var(--shadow);
+}
+.tbl-fs .table-scroll{max-height:calc(100vh - 96px)}
+.tbl-fs-close{position:fixed;top:12px;inset-inline-start:16px;z-index:901}
+body.tbl-fs-on{overflow:hidden}
+
+/* ===========================================================================
+   تنظیمات نمایش — the preference modifiers
+   ---------------------------------------------------------------------------
+   Every one of these is driven by an attribute on <html> written by
+   static/js/theme.js from the saved settings. They are attribute selectors
+   rather than classes so the pre-paint inline script can set them all in one
+   pass before the first frame, with no risk of a class list being overwritten
+   by another script later.
+   =========================================================================== */
+/* اندازهٔ قلم. Only the two sizes that carry the reading load are scaled — body
+   text and table cells. Scaling every heading too made the page jump around
+   without making anything easier to read. */
+:root{ --font-scale:1 }
+[data-font="sm"]{ --font-scale:.93 }
+[data-font="lg"]{ --font-scale:1.1 }
+body{font-size:calc(14px * var(--font-scale))}
+.grid{font-size:calc(13.5px * var(--font-scale))}
+
+/* چگالی — compact trades white space for rows on screen. The numbers are the
+   comfortable padding minus a third, which keeps the digits from touching the
+   row rule above them. */
+[data-density="compact"] .grid tbody td{padding:5px 8px}
+[data-density="compact"] .grid thead th{padding:6px 8px}
+[data-density="compact"] .panel{padding:14px 16px}
+[data-density="compact"] .tile{padding:8px 11px}
+
+/* راه‌راه — zebra striping. A neutral grey wash rather than a themed token: it
+   has to darken a white panel and lighten a near-black one, and one rgba grey
+   does both without adding a colour to all six palettes. */
+[data-zebra="on"] .grid tbody tr:nth-child(even)>td{background:rgba(128,128,128,.06)}
+[data-zebra="on"] .grid tbody tr.pinned>td{background:var(--pin-bg)}
+
+/* سرستون چسبان.
+   ---------------------------------------------------------------------------
+   The offset here MUST be 0, and the reason is a CSS rule that is easy to miss:
+   `.table-scroll` sets `overflow-x:auto`, and when one axis is auto the other
+   («visible») computes to auto as well — so the scroller is a scroll container
+   in BOTH axes, and a sticky header inside it is positioned against the
+   scroller's own box, not against the viewport. A first attempt used
+   `top: calc(var(--topbar-h) + …)` to clear the site header, and the header row
+   duly moved 137px DOWN, printing itself over the first five rows of data.
+
+   With `top:0` the header stays where it belongs and sticks whenever its
+   container really does scroll vertically — which is the case for
+   `.hist-scroll` (the OHLCV history, ۵۲۰px tall over hundreds of rows), where
+   this setting earns its place. On the long market tables the page itself
+   scrolls, so no CSS-only sticky header is possible there; that would need a
+   cloned header row, which is a separate piece of work.
+
+   .perf-grid is excluded: it has a two-row header whose second row would need
+   its own offset, and its first column is already sticky in the other axis. */
+[data-stickyhead="on"] .table-scroll .grid:not(.perf-grid) thead th{
+  position:sticky;top:0;z-index:4;background:var(--panel);
+}
+/* …and the switch has to be able to turn the existing one OFF, or it is a
+   setting that only ever adds. */
+[data-stickyhead="off"] .hist-table thead th{position:static}
+
+/* حرکت کمتر. Also honoured without the setting when the OS asks for it — the
+   two are independent: a user may want the OS-wide setting off but this app
+   still calm, and prefers-reduced-motion is not something a website may
+   override in the other direction. */
+[data-motion="reduce"] *,
+[data-motion="reduce"] *::before,
+[data-motion="reduce"] *::after{
+  animation-duration:.001ms !important;animation-iteration-count:1 !important;
+  transition-duration:.001ms !important;scroll-behavior:auto !important;
+}
+
+/* نمای عریض — on a wide monitor the ۱۱۲۰px column wastes half the screen on a
+   table with twenty numeric columns. */
+[data-wide="on"] .container,[data-wide="on"] .flash-wrap{max-width:1600px}
+
+/* ===========================================================================
+   منوی کاربر و کلید پوسته — user menu + theme toggle in the header
+   =========================================================================== */
+.icon-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:34px;height:34px;flex:none;border:none;border-radius:9px;cursor:pointer;
+  font-size:16px;line-height:1;color:var(--on-header);background:rgba(255,255,255,.16);
+  transition:background .12s;font-family:inherit;
+}
+.icon-btn:hover{background:rgba(255,255,255,.32)}
+.user-menu{position:relative}
+.user-trigger{
+  display:flex;align-items:center;gap:8px;border:none;cursor:pointer;font-family:inherit;
+  font-size:13px;font-weight:700;color:var(--on-header);background:rgba(255,255,255,.16);
+  border-radius:10px;padding:6px 11px;transition:background .12s;
+}
+.user-trigger:hover,.user-trigger[aria-expanded="true"]{background:rgba(255,255,255,.32)}
+.user-avatar{
+  width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;
+  background:var(--gold-grad);color:var(--on-gold);font-size:12px;font-weight:800;
+}
+.user-caret{font-size:9px;opacity:.8}
+.user-pop{
+  position:absolute;top:calc(100% + 8px);inset-inline-end:0;min-width:224px;z-index:80;
+  background:var(--panel);color:var(--ink);border:1px solid var(--line);
+  border-radius:12px;box-shadow:var(--shadow);padding:6px;
+}
+.user-pop[hidden]{display:none}
+.user-pop-head{padding:8px 10px 10px;border-bottom:1px solid var(--line);margin-bottom:4px}
+.user-pop-name{font-weight:800;font-size:13.5px}
+.user-pop-sub{color:var(--muted);font-size:11.5px;margin-top:2px}
+.user-pop a,.user-pop button.menu-item{
+  display:flex;align-items:center;gap:9px;width:100%;text-align:start;
+  font-family:inherit;font-size:13px;color:var(--ink);background:none;border:none;
+  border-radius:8px;padding:8px 10px;cursor:pointer;
+}
+.user-pop a:hover,.user-pop button.menu-item:hover,
+.user-pop a:focus-visible,.user-pop button.menu-item:focus-visible{background:var(--hover);color:var(--brand2)}
+.user-pop .menu-sep{height:1px;background:var(--line);margin:4px 2px}
+.user-pop .menu-ico{width:18px;text-align:center;flex:none;opacity:.85}
+
+/* ===========================================================================
+   صفحهٔ تنظیمات — the settings screen
+   =========================================================================== */
+.set-section{margin-top:18px}
+.set-section h2{margin:0 0 4px;font-size:16px}
+.set-hint{color:var(--muted);font-size:12.5px;margin:0 0 14px}
+.set-row{
+  display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;
+  padding:13px 2px;border-bottom:1px solid var(--line);
+}
+.set-row:last-child{border-bottom:none}
+.set-label{font-weight:700;font-size:13.5px}
+.set-desc{color:var(--muted);font-size:12px;margin-top:2px;max-width:56ch;line-height:1.8}
+.set-control{flex:none;display:flex;align-items:center;gap:8px}
+
+/* گزینه‌های تکه‌ای — a segmented control. Radio inputs under the hood so the
+   keyboard and the screen reader get a real radio group, not a row of divs. */
+.seg{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px}
+.seg label{
+  position:relative;font-size:12.5px;font-weight:700;color:var(--muted);
+  padding:5px 12px;border-radius:8px;cursor:pointer;white-space:nowrap;transition:background .12s,color .12s;
+}
+.seg input{position:absolute;opacity:0;width:0;height:0}
+.seg label:hover{color:var(--brand2)}
+.seg input:checked + span{color:var(--on-brand)}
+.seg label:has(input:checked){background:var(--brand);color:var(--on-brand)}
+.seg input:focus-visible + span{outline:2px solid var(--brand2);outline-offset:3px;border-radius:4px}
+
+/* کلید روشن/خاموش */
+.switch{position:relative;display:inline-block;width:46px;height:26px;flex:none}
+.switch input{opacity:0;width:0;height:0}
+.switch .track{
+  position:absolute;inset:0;background:var(--line);border-radius:999px;cursor:pointer;transition:background .16s;
+}
+.switch .track::before{
+  content:"";position:absolute;width:20px;height:20px;top:3px;inset-inline-start:3px;
+  background:var(--panel);border-radius:50%;transition:transform .16s;box-shadow:0 1px 3px rgba(0,0,0,.25);
+}
+.switch input:checked + .track{background:var(--up)}
+/* RTL: the knob travels toward the inline end, which is leftwards here. */
+.switch input:checked + .track::before{transform:translateX(-20px)}
+html[dir="ltr"] .switch input:checked + .track::before{transform:translateX(20px)}
+.switch input:focus-visible + .track{outline:2px solid var(--brand2);outline-offset:2px}
+
+/* انتخاب پوسته — each swatch paints itself in its own theme, so the list is its
+   own legend: you choose by looking, not by reading a name you have to trust. */
+.theme-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:6px}
+.theme-swatch{
+  position:relative;display:block;cursor:pointer;border:2px solid var(--line);border-radius:12px;
+  padding:0;overflow:hidden;background:none;font-family:inherit;text-align:start;transition:border-color .14s,transform .14s;
+}
+.theme-swatch:hover{transform:translateY(-2px);border-color:var(--brand2)}
+.theme-swatch.active{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+.theme-swatch .sw-canvas{height:64px;padding:9px;display:flex;flex-direction:column;justify-content:space-between}
+.theme-swatch .sw-bar{height:9px;border-radius:5px;width:70%}
+.theme-swatch .sw-dots{display:flex;gap:5px}
+.theme-swatch .sw-dot{width:12px;height:12px;border-radius:50%}
+.theme-swatch .sw-name{display:flex;align-items:center;justify-content:space-between;gap:6px;
+  padding:7px 10px;font-size:12.5px;font-weight:700;background:var(--panel);color:var(--ink);
+  border-top:1px solid var(--line)}
+.theme-swatch .sw-check{color:var(--brand);font-weight:900;opacity:0}
+.theme-swatch.active .sw-check{opacity:1}
+.theme-family{font-size:11px;color:var(--muted);font-weight:600}
+
+.set-anon{
+  display:flex;align-items:center;gap:10px;background:var(--brand-soft);color:var(--ink);
+  border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:8px;
+}
+.set-saved{font-size:12px;font-weight:700;color:var(--up);opacity:0;transition:opacity .2s}
+.set-saved.on{opacity:1}
+
+/* غربالگرهای ذخیره‌شده */
+.screen-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.screen-item{
+  display:flex;align-items:center;gap:10px;justify-content:space-between;
+  border:1px solid var(--line);border-radius:10px;padding:9px 13px;background:var(--bg);
+}
+.screen-item .s-name{font-weight:700;font-size:13.5px}
+.screen-item .s-meta{color:var(--muted);font-size:11.5px;margin-top:2px;direction:ltr;text-align:start;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46ch}
+.screen-del{border:none;background:none;color:var(--muted);cursor:pointer;font-size:15px;padding:4px 6px;border-radius:7px}
+.screen-del:hover{color:var(--down);background:var(--down-bg)}
+
+/* ===========================================================================
+   نبض بازار — the market-breadth panel
+   ---------------------------------------------------------------------------
+   The one figure a list sorted by return cannot give you: how MANY symbols rose
+   against how many fell. A green headline built on three heavyweight symbols
+   and a green headline built on four hundred symbols are different markets.
+   =========================================================================== */
+.breadth{display:grid;grid-template-columns:minmax(240px,1.1fr) 2fr;gap:20px;align-items:center}
+@media(max-width:860px){.breadth{grid-template-columns:1fr}}
+.breadth-nums{display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
+.breadth-big{font-size:30px;font-weight:900;direction:ltr;line-height:1.1}
+.breadth-big.up{color:var(--up)}.breadth-big.down{color:var(--down)}
+.breadth-cap{color:var(--muted);font-size:12.5px}
+.breadth-bar{display:flex;height:26px;border-radius:8px;overflow:hidden;background:var(--line)}
+.breadth-bar>span{display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:800;
+  color:var(--on-brand);min-width:0;transition:flex-basis .3s}
+.breadth-bar .b-up{background:var(--up)}
+.breadth-bar .b-flat{background:var(--mute-fill);color:var(--ink)}
+.breadth-bar .b-down{background:var(--down)}
+.breadth-legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:9px;font-size:12.5px;color:var(--muted)}
+.breadth-legend b{font-weight:800}
+.breadth-legend .l-up{color:var(--up)}.breadth-legend .l-down{color:var(--down)}
+.breadth-lists{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px}
+@media(max-width:600px){.breadth-lists{grid-template-columns:1fr}}
+.mini-list{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:11px 13px}
+.mini-list h3{margin:0 0 8px;font-size:12.5px;color:var(--muted)}
+.mini-list a{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0;font-size:13px}
+.mini-list a:hover .sym{color:var(--brand2)}
+
+/* ===========================================================================
+   نقشهٔ بازار — the market heat map
+   ---------------------------------------------------------------------------
+   Grouped by صنعت (stocks) / نوع (ETFs). Tile area follows traded VALUE, not
+   symbol count, so the map reads like the session did: a ۵٪ move in a symbol
+   nobody traded should not occupy the same space as a ۵٪ move in the most
+   traded symbol of the day. flex-grow carries the weight — a real treemap
+   algorithm would give exact areas, but it needs a layout pass per resize and
+   this stays legible at every width without one.
+   =========================================================================== */
+.hm-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.hm-scale{display:flex;align-items:center;gap:3px;margin-inline-start:auto;font-size:11px;color:var(--muted)}
+.hm-scale i{width:26px;height:11px;display:block;border-radius:2px}
+.hm-groups{display:flex;flex-direction:column;gap:14px}
+.hm-group{border:1px solid var(--line);border-radius:12px;padding:10px 12px 12px;background:var(--bg)}
+.hm-group-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:9px}
+.hm-group-head h3{margin:0;font-size:14px}
+.hm-group-head .g-avg{font-weight:800;direction:ltr;font-size:13px}
+.hm-group-head .g-meta{color:var(--muted);font-size:11.5px;margin-inline-start:auto}
+.hm-tiles{display:flex;flex-wrap:wrap;gap:5px}
+.hm-tile{
+  display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;
+  min-width:78px;min-height:56px;flex:1 1 78px;padding:6px 7px;border-radius:8px;
+  background:var(--tint,var(--panel));color:var(--tint-ink,var(--ink));
+  border:1px solid rgba(128,128,128,.16);overflow:hidden;transition:transform .1s;
+}
+.hm-tile:hover{transform:scale(1.04);z-index:2;box-shadow:var(--shadow)}
+.hm-tile .t-sym{font-weight:800;font-size:12.5px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.hm-tile .t-chg{font-size:12px;font-weight:700;direction:ltr}
+.hm-tile.big{min-width:118px;min-height:74px}
+.hm-tile.big .t-sym{font-size:15px}
+.hm-empty{color:var(--muted);padding:22px;text-align:center}
+
+/* ===========================================================================
+   بازدیدهای اخیر، بازگشت به بالا، میان‌برها — recents strip, back-to-top,
+   keyboard-shortcut sheet
+   =========================================================================== */
+.recents{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:14px}
+.recents .r-label{color:var(--muted);font-size:12px;font-weight:700}
+.recents a{
+  display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;
+  background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:4px 12px;
+}
+.recents a:hover{border-color:var(--brand2);color:var(--brand2)}
+.recents .r-kind{font-size:10px;color:var(--muted);font-weight:600}
+
+.to-top{
+  position:fixed;inset-inline-end:22px;bottom:22px;z-index:40;width:44px;height:44px;
+  border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--brand);
+  font-size:19px;cursor:pointer;box-shadow:var(--shadow);
+  opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;transform:translateY(8px);
+}
+.to-top.on{opacity:1;pointer-events:auto;transform:none}
+.to-top:hover{color:var(--brand2);border-color:var(--brand2)}
+
+.kbd-sheet{
+  position:fixed;inset:0;z-index:950;display:none;align-items:center;justify-content:center;
+  background:rgba(10,15,25,.45);backdrop-filter:blur(2px);padding:20px;
+}
+.kbd-sheet.on{display:flex}
+.kbd-card{
+  background:var(--panel);color:var(--ink);border-radius:var(--radius);box-shadow:var(--shadow);
+  padding:22px 26px;max-width:520px;width:100%;max-height:80vh;overflow:auto;
+}
+.kbd-card h2{margin:0 0 14px;font-size:17px}
+.kbd-list{display:flex;flex-direction:column;gap:9px}
+.kbd-list div{display:flex;align-items:center;justify-content:space-between;gap:14px;font-size:13.5px}
+kbd{
+  display:inline-block;min-width:22px;text-align:center;font-family:inherit;font-size:11.5px;font-weight:800;
+  background:var(--bg);border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;
+  padding:2px 7px;direction:ltr;color:var(--ink);
+}
+
+/* ===========================================================================
+   راهنما و درباره — the help and about pages
+   =========================================================================== */
+.doc-wrap{display:grid;grid-template-columns:220px 1fr;gap:22px;align-items:start}
+@media(max-width:860px){.doc-wrap{grid-template-columns:1fr}.doc-toc{position:static !important}}
+.doc-toc{position:sticky;top:calc(var(--topbar-h) + 16px);background:var(--panel);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:14px 16px}
+.doc-toc h2{margin:0 0 8px;font-size:13px;color:var(--muted)}
+.doc-toc a{display:block;padding:5px 8px;border-radius:7px;font-size:13px}
+.doc-toc a:hover{background:var(--hover);color:var(--brand2)}
+.doc-sec{scroll-margin-top:calc(var(--topbar-h) + 18px)}
+.doc-sec h2{font-size:17px;margin:0 0 6px}
+.doc-sec p{line-height:2;margin:0 0 10px}
+.doc-sec ul{line-height:2.1;padding-inline-start:20px;margin:0 0 10px}
+.doc-sec dl{margin:0}
+.doc-sec dt{font-weight:800;margin-top:12px;color:var(--brand)}
+.doc-sec dd{margin:4px 0 0;color:var(--ink);line-height:1.95}
+.about-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:6px}

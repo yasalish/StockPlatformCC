@@ -1,0 +1,34 @@
+{#  The two form controls the تنظیمات screen is built from, as macros so a
+    preference row is one line and the markup cannot drift between rows.
+
+    They live in their own file, imported «with context», rather than being
+    defined inside settings.html: a macro defined AFTER the {% block %} that
+    calls it is not available when the block renders, and defining them above
+    the block puts twenty lines of plumbing before the page itself. `P` is
+    prefs.py, handed to the template by settings_page().  #}
+
+{#  A segmented control. Real <input type="radio"> elements under the labels, so
+    the arrow keys, the tab order and the screen reader all get a genuine radio
+    group instead of a row of clickable <div>s.  #}
+{% macro seg(key, choices, current, numeric=False) %}
+<span class="seg" role="radiogroup" aria-label="{{ P.LABELS[key] }}">
+  {% for c in choices %}
+  <label>
+    <input type="radio" name="{{ key }}" value="{{ c }}" data-pref="{{ key }}"
+           {{ 'checked' if (c|string) == (current|string) }}>
+    <span>{{ P.option_label(key, c) }}</span>
+  </label>
+  {% endfor %}
+</span>
+{% endmacro %}
+
+{#  An on/off switch. Also a real checkbox — the visible track and knob are
+    drawn from its ::before, so keyboard focus and the space bar work without a
+    line of JavaScript.  #}
+{% macro toggle(key, current) %}
+<label class="switch">
+  <input type="checkbox" data-pref="{{ key }}" {{ 'checked' if current }}
+         aria-label="{{ P.LABELS[key] }}">
+  <span class="track"></span>
+</label>
+{% endmacro %}

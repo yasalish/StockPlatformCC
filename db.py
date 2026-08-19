@@ -2636,6 +2636,22 @@ def _utcnow():
     return datetime.now(timezone.utc).isoformat()
 
 
+# Every user_prefs column beyond the original seven, as (name, DDL). Kept as a
+# list rather than inline ALTERs so adding a preference is a one-line change in
+# exactly two files (prefs.DEFAULTS and here) plus the migration — and so the
+# migration and the boot-time ensure cannot disagree about a column's default.
+_PREF_COLUMNS = [
+    ("font_scale",     "TEXT NOT NULL DEFAULT 'md'"),
+    ("top_scrollbar",  "BOOLEAN NOT NULL DEFAULT TRUE"),
+    ("scrollbar_size", "TEXT NOT NULL DEFAULT 'lg'"),
+    ("sticky_head",    "BOOLEAN NOT NULL DEFAULT TRUE"),
+    ("zebra",          "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("updown_scheme",  "TEXT NOT NULL DEFAULT 'classic'"),
+    ("auto_refresh",   "INTEGER NOT NULL DEFAULT 0"),
+    ("wide",           "BOOLEAN NOT NULL DEFAULT FALSE"),
+]
+
+
 def init_db():
     """Create the `users` table if it does not yet exist. Safe to call on every
     boot (idempotent). Adds the OAuth / role columns to pre-existing tables."""
@@ -2678,6 +2694,67 @@ def init_db():
                 """
             )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)")
+            # Per-user settings («تنظیمات») — one row, updated in place, never an
+            # event log: nothing is ever asked of this table except "what does
+            # this user see right now". The column defaults MUST equal
+            # prefs.DEFAULTS; if they drift, a fresh account and an account that
+            # saved-then-reset render differently, which is the kind of bug that
+            # is reported as "the site looks different on my laptop".
+            #
+            # The DDL is duplicated in migrations/versions/0005_user_prefs_and_
+            # screens.py on purpose, exactly as jobs.ensure_tables() duplicates
+            # the order-06 tables: this keeps `python app.py` working against a
+            # database nobody has run Alembic on, which is every developer
+            # laptop and the first boot of a fresh deployment.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_prefs (
+                    user_id        BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                    theme          TEXT    NOT NULL DEFAULT 'light',
+                    digits         TEXT    NOT NULL DEFAULT 'fa',
+                    default_kind   TEXT    NOT NULL DEFAULT 'stock',
+                    rows_per_page  INTEGER NOT NULL DEFAULT 50,
+                    default_period TEXT    NOT NULL DEFAULT 'p20',
+                    density        TEXT    NOT NULL DEFAULT 'comfortable',
+                    reduce_motion  BOOLEAN NOT NULL DEFAULT FALSE,
+                    font_scale     TEXT    NOT NULL DEFAULT 'md',
+                    top_scrollbar  BOOLEAN NOT NULL DEFAULT TRUE,
+                    scrollbar_size TEXT    NOT NULL DEFAULT 'lg',
+                    sticky_head    BOOLEAN NOT NULL DEFAULT TRUE,
+                    zebra          BOOLEAN NOT NULL DEFAULT FALSE,
+                    updown_scheme  TEXT    NOT NULL DEFAULT 'classic',
+                    auto_refresh   INTEGER NOT NULL DEFAULT 0,
+                    wide           BOOLEAN NOT NULL DEFAULT FALSE,
+                    updated_at     TEXT    NOT NULL
+                )
+                """
+            )
+            # Columns for databases created before a preference existed. Adding a
+            # preference is: one key in prefs.DEFAULTS, one line here, one line in
+            # the migration — never a backfill, because db.get_prefs() merges the
+            # stored row UNDER prefs.DEFAULTS.
+            for _col, _ddl in _PREF_COLUMNS:
+                cur.execute(f"ALTER TABLE user_prefs ADD COLUMN IF NOT EXISTS {_col} {_ddl}")
+            # Saved filter presets («غربالگرهای ذخیره‌شده»). The query string is
+            # stored verbatim rather than parsed into columns: the filters on
+            # those pages change shape as the platform grows, and a preset that
+            # is just "the URL that worked" cannot go stale in a way that needs a
+            # migration.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS saved_screens (
+                    id         BIGSERIAL PRIMARY KEY,
+                    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name       TEXT NOT NULL,
+                    kind       TEXT NOT NULL,
+                    page       TEXT NOT NULL,
+                    query      TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    UNIQUE (user_id, name)
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_screens_user ON saved_screens(user_id, id DESC)")
         conn.commit()
     finally:
         release(conn)
@@ -2835,3 +2912,287 @@ def watch_count(user_id):
             return int(cur.fetchone()[0])
     finally:
         release(conn)
+
+
+# ===========================================================================
+# تنظیمات کاربر و غربالگرهای ذخیره‌شده — prefs, saved screens
+# ---------------------------------------------------------------------------
+# `prefs.py` decides what a preference MAY be; this section only stores it. The
+# import is safe and intended: prefs.py is pure (no Flask, no db, no network),
+# so there is no import cycle to create.
+# ===========================================================================
+import prefs as _prefs                      # noqa: E402  (bottom-of-file section)
+
+# The stored preference columns, taken from prefs.DEFAULTS so the two cannot
+# drift: a SELECT * here must never hand `updated_at` to the browser, and adding
+# a preference must not mean remembering to extend a second list.
+_PREF_KEYS = tuple(_prefs.DEFAULTS.keys())
+
+
+def get_prefs(user_id):
+    """This user's settings, merged UNDER prefs.DEFAULTS.
+
+    A user with no row gets the defaults — not None, and not an empty dict.
+    That is what makes adding a preference a one-line change: every account,
+    including ones created long before the preference existed, answers with the
+    default until they save something else.
+    """
+    row = _user_row("SELECT * FROM user_prefs WHERE user_id = %s", (user_id,))
+    stored = {k: row[k] for k in _PREF_KEYS if row and k in row} if row else {}
+    return _prefs.payload(stored)
+
+
+def set_prefs(user_id, values):
+    """UPSERT the settings this call carries and return the full merged payload.
+
+    Only the keys present in `values` are written. The settings screen saves one
+    control at a time (each switch PATCHes on change), and a whole-row write
+    would let two tabs open on that screen overwrite each other with whatever
+    each had on display when it loaded.
+    """
+    clean = _prefs.normalize(values)
+    if not clean:                            # nothing recognised → nothing to write
+        return get_prefs(user_id)
+    cols = list(clean.keys())
+    placeholders = ", ".join(["%s"] * len(cols))
+    updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols)
+    sql = (f"INSERT INTO user_prefs (user_id, {', '.join(cols)}, updated_at) "
+           f"VALUES (%s, {placeholders}, %s) "
+           f"ON CONFLICT (user_id) DO UPDATE SET {updates}, updated_at = EXCLUDED.updated_at")
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, (user_id, *[clean[c] for c in cols], _utcnow()))
+        conn.commit()
+    finally:
+        release(conn)
+    return get_prefs(user_id)
+
+
+def reset_prefs(user_id):
+    """Forget this user's settings entirely (back to prefs.DEFAULTS).
+
+    Deleting the row rather than writing today's defaults into it matters: if a
+    default changes later it should reach an account that never expressed a
+    preference, and a row full of the old defaults would freeze the old look in
+    place forever.
+    """
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM user_prefs WHERE user_id = %s", (user_id,))
+        conn.commit()
+    finally:
+        release(conn)
+    return get_prefs(user_id)
+
+
+def list_screens(user_id):
+    """The user's saved filter presets, newest first."""
+    return _rows(
+        "SELECT id, name, kind, page, query, created_at FROM saved_screens "
+        "WHERE user_id = %s ORDER BY id DESC", (user_id,))
+
+
+def get_screen(screen_id):
+    return _user_row("SELECT * FROM saved_screens WHERE id = %s", (screen_id,))
+
+
+def create_screen(user_id, name, kind, page, query):
+    """Save a preset. Returns the new row, or None if the name is already taken.
+
+    None rather than an exception because "you already have a preset with this
+    name" is something the user acts on, not a failure: the caller turns it into
+    a 409 carrying that sentence.
+    """
+    conn = get_db()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "INSERT INTO saved_screens (user_id, name, kind, page, query, created_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s) RETURNING *",
+                (user_id, name, kind, page, query or "", _utcnow()))
+            row = dict(cur.fetchone())
+        conn.commit()
+        return row
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return None
+    finally:
+        release(conn)
+
+
+def delete_screen(screen_id):
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM saved_screens WHERE id = %s", (screen_id,))
+            gone = bool(cur.rowcount)
+        conn.commit()
+        return gone
+    finally:
+        release(conn)
+
+
+def count_screens(user_id):
+    row = _one("SELECT COUNT(*) AS n FROM saved_screens WHERE user_id = %s", (user_id,))
+    return int(row["n"]) if row else 0
+
+
+# ===========================================================================
+# نقشهٔ بازار و نبض بازار — market map (heat map) and breadth
+# ---------------------------------------------------------------------------
+# Both read the SAME cached gainer rows every other screen reads, plus one extra
+# query for the last session's volume/value. Nothing here adds a materialized
+# view: the percentages already exist, and the only thing missing was a measure
+# of SIZE — a heat map whose tiles are all the same size ranks nothing, because
+# a ۵٪ move in a symbol nobody traded is not the same event as a ۵٪ move in the
+# most-traded symbol of the day.
+# ===========================================================================
+def last_session(kind, as_of=None):
+    """{ticker: {"jdate","value","volume","chg"}} for the most recent session
+    at/at-or-before `as_of`.
+
+    `chg` is the ONE-DAY change, which nothing else in this module reports:
+    PERIODS starts at five trading days. It is computed here from the two most
+    recent bars instead of being added to PERIODS on purpose — a new period key
+    changes the column list of mv_market_gainer_*, and until those views were
+    rebuilt every market page would fail on a missing column. This query touches
+    no view at all, so it is safe to add to a running deployment.
+
+    The window is 30 calendar days rather than the two years the gainer scan
+    uses: the answer needs two rows per ticker, and a two-year slice would read
+    ~۵۰۰ برابر the rows to find them. Thirty days clears the longest تعطیلات
+    (نوروز) with room to spare, so the second bar is always inside it.
+    """
+    tbl = "stockpricehistory" if kind == "stock" else "etfpricehistory"
+    if as_of is None:
+        as_of = latest_date(kind)
+    if as_of is None:
+        return {}
+
+    def build():
+        hi = _date_for(kind, as_of, "hi")
+        if hi is None:
+            return {}
+        rows = _rows(
+            f"""
+            WITH ranked AS (
+                SELECT ticker, j_date, adj_final::float8 AS v,
+                       COALESCE(volume, 0)::float8 AS vol,
+                       COALESCE(value, 0)::float8   AS val,
+                       ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) rn
+                FROM {tbl}
+                WHERE adj_final > 0 AND date <= %s AND date >= %s::date - INTERVAL '30 days'
+            )
+            SELECT ticker,
+                   MAX(j_date) FILTER (WHERE rn = 1) AS jdate,
+                   MAX(v)      FILTER (WHERE rn = 1) AS last_v,
+                   MAX(v)      FILTER (WHERE rn = 2) AS prev_v,
+                   MAX(vol)    FILTER (WHERE rn = 1) AS volume,
+                   MAX(val)    FILTER (WHERE rn = 1) AS value
+            FROM ranked
+            WHERE rn <= 2
+            GROUP BY ticker
+            """, (hi, hi))
+        out = {}
+        for r in rows:
+            last_v, prev_v = r["last_v"], r["prev_v"]
+            out[r["ticker"]] = {
+                "jdate": r["jdate"],
+                "value": r["value"] or 0.0,
+                "volume": r["volume"] or 0.0,
+                # None (not 0.0) when there is no previous bar: a symbol whose
+                # first ever session is this one has no change to report, and
+                # «۰٪» would be a claim the data does not support.
+                "chg": ((last_v - prev_v) / prev_v * 100.0) if (prev_v and last_v) else None,
+            }
+        return out
+
+    return cache.get_or_set("session", ("__session__", kind, as_of), build)
+
+
+def market_map(kind, as_of=None, period="p20", market=None, sector=None, etf_type=None):
+    """Rows for نقشهٔ بازار: every symbol with its group, its return over
+    `period` (or the one-session change when `period` is 'd1') and the traded
+    value that sizes its tile.
+
+    Returns (rows, as_of, groups). `groups` aggregates the same rows by
+    گروه (sector) for stocks / نوع for ETFs — the map draws a box per group, and
+    the group average is what makes a sector rotation visible at a glance.
+
+    That average is weighted by traded value, not by symbol count: a reading of
+    "how did این گروه do" that counts a symbol with ۱۰۰ میلیون تومان of turnover
+    the same as one with ۱۰۰ میلیارد describes a market nobody traded in.
+    """
+    rows, as_of = market_gainer(kind, as_of=as_of, market=market, sector=sector,
+                                etf_type=etf_type)
+    session = last_session(kind, as_of)
+    key = None if period == "d1" else period
+
+    out = []
+    for r in rows:
+        s = session.get(r["ticker"]) or {}
+        chg = s.get("chg") if key is None else r.get(key)
+        group = (r.get("sector") if kind == "stock" else r.get("type")) or "سایر"
+        out.append({
+            "id": r["id"], "ticker": r["ticker"], "name": r["name"],
+            "group": group, "market": r.get("market"),
+            "sub_sector": r.get("sub_sector"),
+            "latest": r["latest"], "chg": chg,
+            "value": s.get("value") or 0.0, "volume": s.get("volume") or 0.0,
+        })
+
+    groups = {}
+    for r in out:
+        g = groups.setdefault(r["group"], {"group": r["group"], "value": 0.0,
+                                           "count": 0, "up": 0, "down": 0,
+                                           "_w": 0.0, "_wv": 0.0})
+        g["count"] += 1
+        g["value"] += r["value"]
+        if r["chg"] is not None:
+            g["up" if r["chg"] >= 0 else "down"] += 1
+            # Weighted by traded value, but never by zero: a group whose symbols
+            # all had a quiet session must still report an average, so a symbol
+            # with no turnover falls back to a weight of 1.
+            w = r["value"] or 1.0
+            g["_w"] += w
+            g["_wv"] += w * r["chg"]
+    for g in groups.values():
+        g["avg"] = (g["_wv"] / g["_w"]) if g["_w"] else None
+        del g["_w"], g["_wv"]
+
+    glist = sorted(groups.values(), key=lambda g: -g["value"])
+    return out, as_of, glist
+
+
+def market_breadth(kind, as_of=None, period="p20"):
+    """«نبض بازار» — how many symbols advanced, declined and stood still over
+    `period` ('d1' = the last session), plus the extremes and the top groups.
+
+    Breadth is the one figure that says whether a green headline was the whole
+    market or three heavyweight symbols carrying it — precisely the question a
+    list sorted by return cannot answer, which is why every professional market
+    site leads with it.
+    """
+    rows, as_of, groups = market_map(kind, as_of=as_of, period=period)
+    known = [r for r in rows if r["chg"] is not None]
+    ranked = sorted(known, key=lambda r: -r["chg"])
+    weight = sum((r["value"] or 1.0) for r in known)
+    return {
+        "as_of": as_of,
+        "period": period,
+        "kind": kind,
+        "total": len(rows),
+        "measured": len(known),
+        "up": sum(1 for r in known if r["chg"] > 0),
+        "down": sum(1 for r in known if r["chg"] < 0),
+        "flat": sum(1 for r in known if r["chg"] == 0),
+        # Value-weighted: the market's return, not the average symbol's return.
+        "avg": (sum((r["value"] or 1.0) * r["chg"] for r in known) / weight) if known else None,
+        "median": (sorted(r["chg"] for r in known)[len(known) // 2]) if known else None,
+        "total_value": sum(r["value"] for r in rows),
+        "best": ranked[:5],
+        "worst": ranked[-5:][::-1],
+        "groups": groups[:12],
+    }

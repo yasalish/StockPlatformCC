@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · تنظیمات{% endblock %}
+
+{#  data-no-autorefresh: the «به‌روزرسانی خودکار» setting must not reload the very
+    screen you are using to change it — a reload mid-choice throws away the
+    control you were about to click.  #}
+{% block content %}
+{% from "_settings_controls.html" import seg, toggle with context %}
+<div data-no-autorefresh></div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h1>تنظیمات</h1>
+    <span class="set-saved" data-role="saved">ذخیره شد ✓</span>
+  </div>
+  <p class="set-hint">
+    هر تغییر بلافاصله اعمال و ذخیره می‌شود؛ دکمهٔ «ذخیره» لازم نیست.
+    {% if current_user.is_authenticated %}
+      تنظیمات به حساب شما گره خورده است و روی هر مرورگری که با آن وارد شوید اعمال می‌شود.
+    {% endif %}
+  </p>
+
+  {# ── پوسته ───────────────────────────────────────────────────────────── #}
+  <div class="set-section">
+    <h2>پوستهٔ نمایش</h2>
+    <p class="set-hint">
+      هر نمونه با رنگ‌های خودِ همان پوسته کشیده شده است؛ انتخاب با نگاه‌کردن انجام می‌شود، نه با خواندن نام.
+    </p>
+    <div class="theme-row" data-role="theme-row">
+      {% for t in themes %}
+      <button type="button" class="theme-swatch {{ 'active' if t.id == prefs.theme }}"
+              data-theme-id="{{ t.id }}" aria-pressed="{{ 'true' if t.id == prefs.theme else 'false' }}">
+        {#  The swatch paints itself: surface colour as the card, accent as the
+            bar and dots. That is why the two hex values live in prefs.THEMES —
+            a picker whose samples are approximations lies about the choice.  #}
+        <span class="sw-canvas" style="background:{{ t.swatch[0] }}">
+          <span class="sw-bar" style="background:{{ t.swatch[1] }}"></span>
+          <span class="sw-dots">
+            <span class="sw-dot" style="background:{{ t.swatch[1] }}"></span>
+            <span class="sw-dot" style="background:{{ '#1a9d63' if t.family == 'light' else '#3ddc97' }}"></span>
+            <span class="sw-dot" style="background:{{ '#e5484d' if t.family == 'light' else '#ff6b6b' }}"></span>
+          </span>
+        </span>
+        <span class="sw-name">
+          <span>{{ t.label }}</span>
+          <span class="theme-family">{{ 'روشن' if t.family == 'light' else 'تاریک' }}</span>
+          <span class="sw-check">✓</span>
+        </span>
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── جدول‌ها ─────────────────────────────────────────────────────────── #}
+  <div class="set-section">
+    <h2>جدول‌ها</h2>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['top_scrollbar'] }}</div>
+        <div class="set-desc">
+          یک نوار پیمایش افقی دوم، بالای هر جدول عریض، که با نوار پایین هماهنگ است و
+          هنگام اسکرول زیر نوار بالای سایت می‌ماند. بدون آن، برای حرکت افقی جدول باید
+          تا انتهای فهرست پایین بروید.
+        </div>
+      </div>
+      <div class="set-control">{{ toggle('top_scrollbar', prefs.top_scrollbar) }}</div>
+    </div>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['scrollbar_size'] }}</div>
+        <div class="set-desc">ضخامت هر دو نوار پیمایش جدول. در فایرفاکس ضخامت را خودِ مرورگر تعیین می‌کند.</div>
+      </div>
+      <div class="set-control">{{ seg('scrollbar_size', P.SCROLLBAR_SIZES, prefs.scrollbar_size) }}</div>
+    </div>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['sticky_head'] }}</div>
+        <div class="set-desc">
+          در جدول‌هایی که خودشان اسکرول عمودی دارند — مثل «سابقهٔ داده‌ها» در صفحهٔ هر نماد —
+          عنوان ستون‌ها هنگام پیمایش بالای جدول می‌ماند.
+        </div>
+      </div>
+      <div class="set-control">{{ toggle('sticky_head', prefs.sticky_head) }}</div>
+    </div>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['zebra'] }}</div>
+        <div class="set-desc">یک‌درمیان کردن رنگ ردیف‌ها برای دنبال‌کردن آسان‌ترِ یک سطر در جدول‌های عریض.</div>
+      </div>
+      <div class="set-control">{{ toggle('zebra', prefs.zebra) }}</div>
+    </div>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['density'] }}</div>
+        <div class="set-desc">حالت فشرده ردیف‌های بیشتری را در یک صفحه جا می‌دهد.</div>
+      </div>
+      <div class="set-control">{{ seg('density', P.DENSITIES, prefs.density) }}</div>
+    </div>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['rows_per_page'] }}</div>
+        <div class="set-desc">تعداد ردیف‌های جدول «سابقهٔ داده‌ها» در صفحهٔ هر نماد، و گام دکمهٔ «نمایش بیشتر».</div>
+      </div>
+      <div class="set-control">{{ seg('rows_per_page', P.ROWS_CHOICES, prefs.rows_per_page, numeric=True) }}</div>
+    </div>
+  </div>
+
+  {# ── نمایش ───────────────────────────────────────────────────────────── #}
+  <div class="set-section">
+    <h2>نمایش</h2>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['digits'] }}</div>
+        <div class="set-desc">
+          ارقام لاتین برای وقتی که اعداد را در اکسل یا کنار صورت‌حساب کارگزاری می‌خوانید.
+          متن سایت فارسی می‌ماند؛ فقط شکل ارقام عوض می‌شود.
+        </div>
+      </div>
+      <div class="set-control">{{ seg('digits', P.DIGIT_MODES, prefs.digits) }}</div>
+    </div>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['updown_scheme'] }}</div>
+        <div class="set-desc">
+          گزینهٔ آبی/نارنجی برای کوررنگی سبز-قرمز است؛ این دو رنگ در نوع رایج کوررنگی هم از هم
+          قابل تشخیص می‌مانند.
+        </div>
+      </div>
+      <div class="set-control">{{ seg('updown_scheme', P.UPDOWN_SCHEMES, prefs.updown_scheme) }}</div>
+    </div>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['font_scale'] }}</div>
+        <div class="set-desc">اندازهٔ متن صفحه و سلول‌های جدول.</div>
+      </div>
+      <div class="set-control">{{ seg('font_scale', P.FONT_SCALES, prefs.font_scale) }}</div>
+    </div>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['wide'] }}</div>
+        <div class="set-desc">استفاده از تمام عرض نمایشگر برای جدول‌های پرستون.</div>
+      </div>
+      <div class="set-control">{{ toggle('wide', prefs.wide) }}</div>
+    </div>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['reduce_motion'] }}</div>
+        <div class="set-desc">حذف انیمیشن‌ها و گذارها.</div>
+      </div>
+      <div class="set-control">{{ toggle('reduce_motion', prefs.reduce_motion) }}</div>
+    </div>
+  </div>
+
+  {# ── داده‌ها ─────────────────────────────────────────────────────────── #}
+  <div class="set-section">
+    <h2>داده‌ها</h2>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['default_kind'] }}</div>
+        <div class="set-desc">بازاری که «نقشهٔ بازار» و «نبض بازار» با آن باز می‌شوند.</div>
+      </div>
+      <div class="set-control">{{ seg('default_kind', P.KINDS, prefs.default_kind) }}</div>
+    </div>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['default_period'] }}</div>
+        <div class="set-desc">دورهٔ پیش‌فرض «نقشهٔ بازار» و «نبض بازار» در داشبورد.</div>
+      </div>
+      <div class="set-control">
+        <select data-pref="default_period">
+          {% for p in periods %}
+          <option value="{{ p.key }}" {{ 'selected' if p.key == prefs.default_period }}>{{ p.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="set-row">
+      <div>
+        <div class="set-label">{{ P.LABELS['auto_refresh'] }}</div>
+        <div class="set-desc">
+          بارگذاری دوبارهٔ صفحه در فاصله‌های زمانی مشخص. فقط وقتی زبانه در دید باشد اجرا می‌شود
+          و صفحهٔ تنظیمات و کنسول به‌روزرسانی را دست‌نخورده می‌گذارد.
+        </div>
+      </div>
+      <div class="set-control">
+        <select data-pref="auto_refresh">
+          {% for v in P.AUTO_REFRESH_CHOICES %}
+          <option value="{{ v }}" {{ 'selected' if v == prefs.auto_refresh }}>{{ P.option_label('auto_refresh', v) }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="set-section">
+    <button type="button" class="btn ghost small" data-role="reset-prefs">بازگرداندن همهٔ تنظیمات به حالت اولیه</button>
+  </div>
+</section>
+
+{# ── غربالگرهای ذخیره‌شده ─────────────────────────────────────────────── #}
+{% if current_user.is_authenticated %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>غربالگرهای ذخیره‌شده</h2>
+    <span class="muted small">نشانی صفحه‌های فیلترشده‌ای که ذخیره کرده‌اید</span>
+  </div>
+  <p class="muted small" data-role="screens-empty" hidden>هنوز غربالگری ذخیره نکرده‌اید.</p>
+  <div class="screen-list" data-role="screens"></div>
+  <p class="muted small note">
+    برای ذخیرهٔ یک غربالگر، در هر صفحهٔ فیلترشده کلید <kbd>ذخیرهٔ غربالگر</kbd> را بزنید یا نشانی صفحه را
+    از همین‌جا دوباره باز کنید.
+  </p>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/account.js') }}?v={{ asset_version('js/account.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · نقشهٔ بازار{% endblock %}
+
+{% block content %}
+<div data-preset-page="heatmap" data-preset-kind="{{ kind }}"></div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h1>نقشهٔ بازار</h1>
+    <span class="muted small" data-role="hm-asof"></span>
+  </div>
+
+  {#  A plain GET form: the map is a page you link to and bookmark («نقشهٔ گروه
+      فلزات در یک ماه گذشته»), so the state belongs in the URL rather than in
+      JavaScript memory. It is also what makes «ذخیرهٔ این نما» work here for
+      free — that feature saves the query string.  #}
+  <form method="get" class="filterbar hm-toolbar">
+    <label>بازار:</label>
+    <select name="kind" onchange="this.form.submit()">
+      <option value="stock" {{ 'selected' if kind == 'stock' }}>سهام</option>
+      <option value="etf" {{ 'selected' if kind == 'etf' }}>صندوق‌ها</option>
+    </select>
+
+    <label>دوره:</label>
+    <select name="period" onchange="this.form.submit()">
+      {% for p in periods %}
+      <option value="{{ p.key }}" {{ 'selected' if p.key == period }}>{{ p.label }}</option>
+      {% endfor %}
+    </select>
+
+    <input type="text" id="hm-filter" placeholder="فیلتر نماد یا گروه…" autocomplete="off">
+
+    <div class="hm-scale" aria-hidden="true">
+      <span>−۵٪</span>
+      <i style="background:var(--down)"></i>
+      <i style="background:var(--down-bg)"></i>
+      <i style="background:var(--mute-fill)"></i>
+      <i style="background:var(--up-bg)"></i>
+      <i style="background:var(--up)"></i>
+      <span>+۵٪</span>
+    </div>
+  </form>
+
+  <p class="muted small">
+    اندازهٔ هر خانه بر پایهٔ <b>ارزش معاملات آخرین روز</b> و رنگ آن بر پایهٔ
+    <b>بازدهٔ دورهٔ انتخابی</b> است؛ گروه‌ها هم بر پایهٔ ارزش معاملات مرتب شده‌اند.
+    میانگین هر گروه وزنی است (به‌جای میانگین ساده)، چون میانگین ساده یک نماد کم‌معامله
+    را هم‌وزن یک نماد پرمعامله حساب می‌کند.
+  </p>
+
+  <div id="hm-root" class="hm-groups" data-kind="{{ kind }}" data-period="{{ period }}"
+       data-detail-base="{{ url_for('stock_detail', stock_id=0)[:-1] if kind == 'stock' else url_for('etf_detail', etf_id=0)[:-1] }}">
+    <p class="hm-empty">در حال بارگذاری نقشه…</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/heatmap.js') }}?v={{ asset_version('js/heatmap.js') }}"></script>
+{% endblock %}
