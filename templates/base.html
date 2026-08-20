@@ -75,7 +75,7 @@
       <a href="{{ url_for('strategies_page') }}" class="{{ 'on' if request.endpoint == 'strategies_page' }}">استراتژی‌ها</a>
       <a href="{{ url_for('filters_page') }}" class="{{ 'on' if request.endpoint == 'filters_page' }}">فیلترها</a>
       {% if current_user.is_authenticated %}
-      <a href="{{ url_for('watchlist_page') }}" class="{{ 'on' if request.endpoint == 'watchlist_page' }}">★ دیده‌بان{% if watch_count %} <span class="nav-badge">{{ fa(watch_count) }}</span>{% endif %}</a>
+      <a href="{{ url_for('watchlist_page') }}" class="{{ 'on' if request.endpoint == 'watchlist_page' }}">دیده‌بان{% if watch_count %} <span class="nav-badge">{{ fa(watch_count) }}</span>{% endif %}</a>
       {% endif %}
       {% if current_user.is_authenticated and current_user.is_admin %}
       <a href="{{ url_for('update_page') }}" class="{{ 'on' if request.endpoint == 'update_page' }}">به‌روزرسانی</a>

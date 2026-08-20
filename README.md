@@ -29,6 +29,74 @@ pip install -r requirements.txt
 python app.py            # http://127.0.0.1:5002
 ```
 
+That one command is the whole local stack. «به‌روزرسانی داده‌ها» needs four
+processes — Redis, two Celery workers and the web app — and `python app.py` now
+starts all of them and opens a browser once the port is accepting (see
+`dev_boot.py`). Cold start, nothing running: ~2.5 seconds.
+
+```
+redis started for this session   redis_port=6379
+celery worker starting           role=fetch        queues=updates
+celery worker starting           role=maintenance  queues=maintenance
+local services ready             redis=started  fetch=started  maintenance=started
+ * Running on http://127.0.0.1:5002
+analytics cache ready            backend=localhost:6379/0
+```
+
+| piece | what it is, and what its absence looks like |
+|---|---|
+| Redis | Celery's broker and result backend (DBs 1 and 2) plus the shared analytics cache (DB 0). Started from the bundled `.tools\redis\redis-server.exe` or a `redis-server` on `PATH`. If neither exists the app says so once, logs `analytics cache DEGRADED`, and no update can start. |
+| Celery worker — `fetch` | `--queues=updates`: the process that actually fetches from TSETMC. Without it a job is created and stays `queued` — no symbol name on the page and nothing fetched. `market.start_job()` restarts it if it died, so a dead worker no longer looks like a broken updater. |
+| Celery worker — `maintenance` | `--queues=maintenance`: the analytics rebuild, the finalize step and the reconciler. A SECOND process on purpose — see below. Without it a finished run stays in `finalizing` and the analytics keep serving the previous numbers. |
+| browser | opened on a background thread once the port accepts, so the tab lands on a served page rather than a connection error. |
+
+**Why two workers.** `--pool=solo` is the only pool Windows has, and it runs one
+task at a time. `db.refresh_analytics()` walks twenty materialized views and
+takes minutes (350 s at best, six measured). On one queue that rebuild blocks
+everything behind it, and the symptoms point nowhere near the cause: batches sit
+unclaimed so the page shows «در حال دریافت: …» with no symbol, «توقف» cannot take
+effect because the worker never reads the flag, and `tasks.reconcile` — the
+watchdog that recovers from both — is stuck in the same line. Splitting the
+queues (`celery_app.py`) keeps the slow, rare work away from the work the page
+depends on. Compose does not need a second service: its worker runs
+`--pool=prefork --concurrency=4` over both queues, so a rebuild occupies one
+child and three keep fetching.
+
+Knobs: `BN_AUTOSTART_REDIS=0`, `BN_AUTOSTART_WORKER=0`, `BN_OPEN_BROWSER=0`,
+`REDIS_SERVER_EXE`, `BN_WORKER_POOL`, `CELERY_FETCH_QUEUE`,
+`CELERY_MAINTENANCE_QUEUE`.
+
+All of it is limited to the `python app.py` path — under Gunicorn/Compose this
+file is *imported*, and there both are declared services with their own
+lifecycle. Everything it starts is detached, so Ctrl+C stops the app and leaves
+Redis and the worker (and any update running on them) alive.
+
+```powershell
+.\start_local.ps1            # the same four, explicitly
+.\start_local.ps1 -NoApp     # only the background services
+.\start_local.ps1 -Stop      # stop them again
+```
+
+`dev_boot.py` and `start_local.ps1` both write `.tools\celery-worker.pid` (fetch)
+and `.tools\celery-maintenance.pid` (maintenance), and both read them before
+starting a worker — those shared files are the only thing keeping the two paths
+from starting a second worker on the same queue. A Celery
+control ping cannot do that job: the first one in a process costs ~9 seconds of
+broker setup, and a `--pool=solo` worker cannot answer one at all while it is
+busy.
+
+The worker it starts uses `--pool=solo`, which is a requirement rather than a
+preference: Celery's default prefork pool needs `fork()`, which Windows does not
+have. That costs concurrency — one symbol at a time — so a **full** market run
+belongs on the Docker Compose stack, where the worker runs prefork with
+concurrency 4 (see `docker-compose.yml`).
+
+A stuck job from a run that started while Redis was down can be closed with:
+
+```python
+python -c "import jobs; jobs.finish_job(<id>, status='failed', result='broker unavailable')"
+```
+
 پایگاه داده از پیش موجود است (جداول `stocks`, `stockpricehistory`, `etf`,
 `etfpricehistory`). تنظیمات اتصال در `db.py` (`DB_SETTINGS`) و قابل بازنویسی با
 متغیرهای محیطی `STOCK_DB_*` است.

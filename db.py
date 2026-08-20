@@ -895,6 +895,19 @@ def delete_price_history(kind, ticker=None, start=None, end=None):
             cur.execute(f"DELETE FROM {tbl} WHERE " + " AND ".join(clauses), params)
             n = cur.rowcount
         conn.commit()
+        # Invalidate here, synchronously, rather than leaving it to the analytics
+        # refresh the caller schedules. Deleting the newest day changes
+        # db_summary()'s stock_latest/etf_latest immediately, and that entry
+        # lives in Redis for ANALYTICS_CACHE_TTL (6h) — so if the refresh does
+        # not run, «آخرین تاریخ سهام در پایگاه داده» keeps showing the date that
+        # was just deleted, with nothing in the log to explain it. The refresh
+        # is asynchronous because rebuilding the materialized views is slow;
+        # this is one INCR, so there is no reason to defer it and every reason
+        # not to. (The updater's per-ticker deletes in tse_fetch.py deliberately
+        # do NOT come through here — one bump per ticker would be pointless
+        # churn, and finalize_update() bumps once at the end of the job.)
+        if n:
+            clear_cache()
         return n
     finally:
         release(conn)

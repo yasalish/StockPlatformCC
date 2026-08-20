@@ -348,10 +348,19 @@ services:
     # exists to surface. Raise it only if the failure counts stay at zero.
     #
     # -Ofair stops a worker hoarding messages while one long batch runs.
+    #
+    # Both queues, unlike the local setup. celery_app.py splits fetching
+    # (updates) from maintenance — the analytics rebuild, the finalize step and
+    # the reconciler — because on Windows --pool=solo runs ONE task at a time, so
+    # a six-minute rebuild there blocks every fetch, the stop flag and the
+    # watchdog behind it. Here there are four children: a rebuild occupies one
+    # and the other three keep fetching, so one worker consuming both queues is
+    # the right shape. Raising CELERY_CONCURRENCY keeps that margin; dropping it
+    # to 1 would reintroduce exactly the blocking this split exists to remove.
     command: >
       celery -A celery_app worker
       --loglevel=${CELERY_LOGLEVEL:-info}
-      --queues=updates
+      --queues=updates,maintenance
       --pool=prefork
       --concurrency=${CELERY_CONCURRENCY:-4}
       -Ofair

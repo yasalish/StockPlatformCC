@@ -34,7 +34,7 @@ import time
 from celery.signals import worker_ready
 from celery.utils.log import get_task_logger
 
-from celery_app import app
+from celery_app import MAINTENANCE_QUEUE, app
 import jobs
 import tse_fetch
 
@@ -131,6 +131,12 @@ def fetch_batch(self, job_id, kind, tickers, start, end, full=False):
     jobs.heartbeat(job_id)
     log.info("job %s batch: ok=%s failed=%s skipped=%s", job_id, done, failed, skipped)
     _maybe_finalize(job_id)
+    # Belt and braces for the watchdog. The chain is normally armed at dispatch
+    # and then kept alive by reconcile() re-arming itself, and both of those can
+    # be lost with the worker that held the pending message. This is the one
+    # place guaranteed to run repeatedly while a job is alive, and the NX key
+    # inside _rearm() means it is a no-op whenever a chain already exists.
+    _rearm(job_id, STALE_AFTER)
     return {"job_id": job_id, "ok": done, "failed": failed, "skipped": skipped}
 
 
@@ -173,8 +179,44 @@ def finalize_update(job_id):
     order matters: bumping first would let a request repopulate the cache from
     the still-stale views."""
     import db
-    log.info("job %s: refreshing materialized analytics", job_id)
     timings = {}
+    # acks_late means this message can be redelivered — a worker killed between
+    # finishing the rebuild and acknowledging it gets handed the same job again,
+    # and kombu also restores a dead consumer's unacked messages when the next
+    # worker connects. Without this guard that costs another full pass over
+    # twenty materialized views (six minutes, measured, and longer under load)
+    # to produce byte-identical results, while the update page waits.
+    # 'finalizing' is NOT terminal, so reconcile's deliberate re-enqueue of a
+    # stuck tail still goes through.
+    already = jobs.get_job(job_id)
+    if already and already["status"] in ("done", "stopped", "failed") \
+            and already["finished_at"]:
+        log.info("job %s is already finished — skipping a duplicate finalize",
+                 job_id)
+        return {"job_id": job_id, "timings": timings, "duplicate": True,
+                **jobs.summary_counts(job_id)}
+
+    # A stopped run that got through nothing, or a run whose every symbol
+    # failed, wrote no prices — so there is nothing for the views to be stale
+    # against. Skipping the rebuild there is what makes «توقف» feel immediate
+    # instead of leaving the page on «در حال بازسازی تحلیل‌ها…» for six minutes
+    # to recompute identical numbers.
+    written = 0
+    try:
+        written = jobs.rows_written(job_id)
+    except Exception as e:
+        log.error("job %s: could not count written rows: %s", job_id, e)
+        written = 1                               # unknown → do the safe thing
+    if not written:
+        log.info("job %s: no rows written — skipping the analytics rebuild", job_id)
+        jobs.finish_job(job_id)
+        counts = jobs.summary_counts(job_id)
+        log.info("job %s finished: ok=%s failed=%s of %s",
+                 job_id, counts["ok"], counts["failed"], counts["total"])
+        return {"job_id": job_id, "timings": timings, "skipped_refresh": True,
+                **counts}
+
+    log.info("job %s: refreshing materialized analytics", job_id)
     try:
         timings = db.refresh_analytics()          # this already calls clear_cache()
     except Exception as e:
@@ -194,16 +236,42 @@ def finalize_update(job_id):
     return {"job_id": job_id, "timings": timings, **counts}
 
 
-@app.task(name="tasks.refresh_analytics_only", acks_late=True)
+# How long a refresh message stays worth running. A rebuild asked for at 09:38
+# because rows were deleted is not worth six minutes at 18:48 — by then any
+# update, and the next nightly run, has rebuilt the views anyway. Without an
+# expiry the message simply waits for a worker, however long that takes, which
+# is how a queue drained on the next `python app.py` began with a rebuild
+# nobody was waiting for.
+REFRESH_EXPIRES = int(os.environ.get("ANALYTICS_REFRESH_EXPIRES", "1800"))
+
+
+@app.task(name="tasks.refresh_analytics_only",
+          # NOT acks_late, and this is the one task where that is right.
+          # acks_late exists so a worker killed mid-task has its work redone —
+          # correct for a fetch, whose result is rows nobody else will write.
+          # This task's result is a rebuild that the next update, the next
+          # delete and the nightly run all redo anyway, and its cost is minutes
+          # of the only slot a solo worker has. Acknowledged on receipt, a
+          # killed rebuild is simply lost; with acks_late it came back on EVERY
+          # subsequent worker boot and blocked the fetch queue each time, which
+          # is precisely the failure this file was reported for.
+          acks_late=False,
+          expires=REFRESH_EXPIRES)
 def refresh_analytics_only(reason=""):
     """Rebuild the analytics without a data fetch — used after a manual row
     delete on the /update page, which changes the prices without a job."""
+    import cache
     import db
+    if not cache.claim_refresh(owner=f"task:{reason}"):
+        log.info("analytics are already being rebuilt elsewhere — skipping (%s)",
+                 reason)
+        return {"skipped": True, "reason": "already-refreshing"}
     log.info("refreshing analytics (%s)", reason)
     try:
         return db.refresh_analytics()
     finally:
         db.clear_cache()
+        cache.release_refresh()
 
 
 @app.task(name="tasks.nightly_update")
@@ -215,7 +283,10 @@ def nightly_update(kind="stock"):
     import db
     import market
 
-    active = jobs.active_job_id()
+    # blocking_job_id(), not active_job_id(): a job that is only rebuilding its
+    # analytics is not fetching anything, and skipping the night's fetch because
+    # of it would leave the database a day behind until the next night.
+    active = jobs.blocking_job_id()
     if active:
         log.warning("nightly %s skipped — job %s is still running", kind, active)
         return {"skipped": True, "active_job": active}
@@ -233,6 +304,21 @@ def nightly_update(kind="stock"):
 
 
 STALE_AFTER = int(os.environ.get("UPDATE_STALE_AFTER", "90"))
+
+# 'finalizing' needs its own, much longer threshold. A job in that state has no
+# symbol activity to measure — the single remaining task is a materialized-view
+# rebuild that legitimately takes minutes with nothing to report — so the 90s
+# rule would call a healthy finalize stalled and start a second one beside it.
+#
+# It has to exceed the slowest rebuild that can really happen. 900s was chosen
+# against a measured 350s; a stopped etf run then took 600s (21:57→22:07) with
+# 13 symbols written, which leaves a margin of 1.5x and none at all under load.
+# 1800s instead. Waiting half an hour to notice a rebuild whose worker died used
+# to be expensive because a 'finalizing' job blocked every new update; since
+# jobs.blocking_job_id() stopped treating it as a collision, the only cost is a
+# stale row on the page, and the alternative — a second six-to-ten-minute
+# rebuild started beside a healthy one — is worse.
+FINALIZE_STALE_AFTER = int(os.environ.get("UPDATE_FINALIZE_STALE_AFTER", "1800"))
 
 
 @app.task(name="tasks.reconcile")
@@ -264,13 +350,30 @@ def reconcile(job_id=None, stale_seconds=None):
     if not job or job["status"] in ("done", "stopped", "failed"):
         return {"reconciled": jid, "status": job["status"] if job else None}
 
+    if job["status"] == "finalizing":
+        # A worker killed DURING the rebuild leaves the job here for ever:
+        # claim_finalize() will not re-enter a job that is already 'finalizing',
+        # so nothing re-enqueues the tail and the only thing that ever would is
+        # the broker's visibility timeout — an hour, during which the page shows
+        # a running job and no new update can start. Re-enqueueing is safe:
+        # finalize_update() is a refresh plus finish_job(), both idempotent.
+        # NOT is_stalled(): it requires an outstanding symbol, and a
+        # 'finalizing' job has none by construction, so it answered False here
+        # every single time and this whole branch was unreachable. See
+        # jobs.finalize_stalled().
+        if jobs.finalize_stalled(jid, FINALIZE_STALE_AFTER):
+            log.warning("job %s stuck finalizing — re-enqueueing the tail", jid)
+            finalize_update.delay(jid)
+        _rearm(jid, stale_seconds, renew=True)
+        return {"reconciled": jid, "finalizing": True}
+
     if not jobs.is_stalled(jid, stale_seconds):
         # Either it is progressing, or everything is finished and finalize is
         # the only thing left to do. Check again later: a job that is healthy
         # NOW can be orphaned a second after this returns, and a single
         # boot-time check would miss exactly that.
         _maybe_finalize(jid)
-        _rearm(jid, stale_seconds)
+        _rearm(jid, stale_seconds, renew=True)
         return {"reconciled": jid, "stalled": False}
 
     jobs.release_stale(jid, older_than_seconds=0)
@@ -288,11 +391,11 @@ def reconcile(job_id=None, stale_seconds=None):
                 jid, len(remaining))
     dispatch_job(jid, job["kind"], remaining, job["start_date"],
                  job["end_date"], job["full_rebuild"])
-    _rearm(jid, stale_seconds)
+    _rearm(jid, stale_seconds, renew=True)
     return {"reconciled": jid, "redispatched": len(remaining)}
 
 
-def _rearm(job_id, delay):
+def _rearm(job_id, delay, renew=False):
     """Keep exactly one watchdog alive for as long as a job is running.
 
     Without this, recovery would depend entirely on Beat's five-minute schedule,
@@ -300,19 +403,31 @@ def _rearm(job_id, delay):
     Re-arming turns the reconciler into a watchdog that follows the job.
 
     The Redis SET NX is what keeps it to ONE chain: several workers all finishing
-    batches would otherwise each re-arm, and the chain would fan out. The key
-    expires a little after the delay, so a lost watchdog is replaced rather than
-    blocking future ones forever."""
+    batches would otherwise each re-arm, and the chain would fan out.
+
+    `renew` is for the caller that OWNS the chain — reconcile() passing the baton
+    to its own successor. Without it the chain could not survive its own worker
+    dying, and the order 06 kill test caught exactly that: worker A held the only
+    pending watchdog message and was killed, so the message went with it, while
+    the NX key it had set was still alive. Worker B's boot reconcile then found
+    the job progressing (other batches were running), correctly declined to
+    re-dispatch, and could not arm a successor because of that key — so when the
+    healthy batches finished, the one orphaned batch had nobody left to notice
+    it. The run sat at 53 of 60 symbols until the broker's 900-second visibility
+    timeout, which is the delay this whole mechanism exists to avoid."""
     try:
         import cache
         r = cache._client()
         if r is None:                      # no Redis → Beat is the only net
             return False
         key = f"{cache.PREFIX}:watchdog:{job_id}"
+        if renew:
+            # This caller is the chain. Handing the baton on is not fan-out.
+            r.delete(key)
         if not r.set(key, b"1", nx=True, ex=int(delay) + 30):
             return False
         reconcile.apply_async(kwargs={"job_id": job_id, "stale_seconds": delay},
-                              countdown=delay, queue="updates")
+                              countdown=delay, queue=MAINTENANCE_QUEUE)
         return True
     except Exception as e:
         log.error("job %s: could not re-arm the reconciler: %s", job_id, e)
@@ -332,7 +447,8 @@ def _reconcile_on_boot(sender=None, **kwargs):
     making progress, so a routine scale-up does not trigger a re-dispatch."""
     try:
         reconcile.apply_async(kwargs={"stale_seconds": BOOT_STALE_AFTER},
-                              countdown=BOOT_RECONCILE_DELAY, queue="updates")
+                              countdown=BOOT_RECONCILE_DELAY,
+                              queue=MAINTENANCE_QUEUE)
         log.info("worker ready — reconcile scheduled in %ss", BOOT_RECONCILE_DELAY)
     except Exception as e:
         log.error("could not schedule boot reconcile: %s", e)
@@ -350,4 +466,11 @@ def dispatch_job(job_id, kind, tickers, start, end, full=False):
     result = sig.apply_async()
     log.info("job %s: dispatched %s batches (%s symbols)",
              job_id, len(batches), len(tickers))
+    # Arm the watchdog HERE, at the only point where a job is known to have work
+    # in flight. It used to be armed only by reconcile() re-arming itself and by
+    # Beat's five-minute schedule — which means that on a laptop, where Beat is
+    # not running (start_local.ps1 starts a worker and nothing else), a job whose
+    # worker died had no recovery path at all: the boot-time reconcile had
+    # already run and found nothing, so nothing was ever scheduled again.
+    _rearm(job_id, STALE_AFTER)
     return result

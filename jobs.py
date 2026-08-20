@@ -29,6 +29,7 @@ and skips the ones already written. That, together with the idempotent write in
 tse_fetch.store(), is what "resumes without losing or duplicating tickers" means
 in practice.
 """
+import os
 import time
 
 import db
@@ -244,6 +245,28 @@ def is_stalled(job_id, seconds):
     return idle is None or idle >= seconds
 
 
+def finalize_stalled(job_id, seconds):
+    """Has the TAIL of this job been silent for `seconds`?
+
+    is_stalled() cannot answer this, and the difference is not academic — it is
+    why the "stuck finalizing" recovery in tasks.reconcile() could never fire.
+    is_stalled() begins by requiring an outstanding symbol, and a job in
+    'finalizing' has none BY DEFINITION: claim_finalize() only moves a job into
+    that state once every symbol is terminal. So it always answered False there,
+    the re-enqueue behind it was dead code, and a job whose rebuild died with
+    its worker stayed 'finalizing' for ever — which active_job_id() reports as
+    the active job, so every later «اجرای به‌روزرسانی» was refused with "one is
+    already running" and nothing in the UI could clear it. Seven such rows were
+    found in one afternoon.
+
+    The measure is the same one a healthy finalize would move: the last symbol's
+    timestamp. It stops advancing when the last symbol lands, which is exactly
+    when finalizing begins, so "idle for longer than the slowest rebuild" is the
+    honest reading of "the rebuild is gone"."""
+    idle = last_activity(job_id)
+    return idle is None or idle >= seconds
+
+
 def release_stale(job_id, older_than_seconds=900):
     """Return symbols left 'running' by a worker that died to the pending pool.
 
@@ -285,14 +308,30 @@ def claim_finalize(job_id):
     This asks the database instead: flip the job to 'finalizing' only if nothing
     is left outstanding. The WHERE clause and the NOT EXISTS are evaluated
     atomically in one statement, so whichever worker finishes last wins and every
-    other caller gets None."""
+    other caller gets None.
+
+    A STOPPED job has to finalize too, and getting that wrong is why «توقف»
+    looked dead: request_stop() moves the row to 'stopping', the fetch loop
+    breaks out and calls this — and the old `status IN ('running','queued')`
+    matched nothing, so nothing ever ran finalize_update() and nothing ever set
+    finished_at. snapshot() counts 'stopping' as running, so the page span for
+    ever on «در حال اجرا…» with no worker doing anything, and pressing the
+    button again changed nothing because the row was already 'stopping'.
+
+    Its second condition has to differ as well. Normally "outstanding" means any
+    symbol not in a terminal state; after a stop the pending symbols are
+    deliberately abandoned, so the only thing worth waiting for is the symbol
+    still in flight — hence the CASE."""
     row = _write(
-        """UPDATE update_job SET status='finalizing'
-            WHERE id = %s
-              AND status IN ('running', 'queued')
+        """UPDATE update_job j SET status='finalizing'
+            WHERE j.id = %s
+              AND j.status IN ('running', 'queued', 'stopping')
               AND NOT EXISTS (
-                    SELECT 1 FROM update_job_ticker
-                     WHERE job_id = %s AND status NOT IN %s)
+                    SELECT 1 FROM update_job_ticker t
+                     WHERE t.job_id = %s
+                       AND CASE WHEN j.stop_requested
+                                THEN t.status = 'running'
+                                ELSE t.status NOT IN %s END)
         RETURNING id""",
         (job_id, job_id, DONE_STATES), fetch=True)
     return row is not None
@@ -326,6 +365,130 @@ def request_stop(job_id):
 
 def request_pause(job_id, paused=True):
     _write("UPDATE update_job SET pause_requested=%s WHERE id=%s", (paused, job_id))
+
+
+# A symbol claimed less than this long ago is assumed to be in the hands of a
+# live worker, so a stop waits for it rather than declaring the job over while
+# something is still writing. Longer than the slowest single symbol — three
+# attempts with a linear backoff, plus TSETMC's own timeouts — and far shorter
+# than the ten minutes of confusion the alternative caused.
+STOP_INFLIGHT_GRACE = int(os.environ.get("UPDATE_STOP_INFLIGHT_GRACE", "180"))
+
+
+def close_stopped_job(job_id, inflight_grace=None):
+    """Take a stop-requested job to a terminal state NOW. Returns True if it is
+    finished when this returns.
+
+    request_stop() only records the wish. Something then has to notice it and set
+    finished_at, and until this existed that something was always a Celery
+    worker — either the batch that breaks out of its loop, or reconcile(). Both
+    live on the queue, and the queue is exactly what is not moving in the cases
+    where «توقف» is pressed:
+
+      * no worker is running at all (the job never left 'queued'), so nothing
+        will ever read the flag;
+      * the one worker a Windows machine has is busy elsewhere for minutes, so
+        nothing reads the flag *yet*.
+
+    In both, update_job stays 'stopping', active_job_id() keeps returning it,
+    the page keeps showing «در حال اجرا…» with no symbol, and every later attempt
+    to start an update is refused because "one is already running". A job with
+    nothing in flight has no reason to need a worker to end it, so the web
+    process ends it here, in the request that asked for it.
+
+    The one thing worth waiting for is a symbol actually being fetched: that
+    worker is mid-write, and declaring the job over while it works would let a
+    new job start against the same symbol. Anything claimed longer ago than
+    `inflight_grace` belongs to a worker that is gone, and release_stale() puts
+    it back in the pending pool where a resume can pick it up."""
+    grace = STOP_INFLIGHT_GRACE if inflight_grace is None else inflight_grace
+    job = get_job(job_id)
+    if not job:
+        return False
+    if job["finished_at"] and job["status"] in ("done", "stopped", "failed"):
+        return True
+    if not job["stop_requested"]:
+        # Nobody asked. Every current caller sets the flag first, and this is
+        # what keeps the next one from using this as a general-purpose "end the
+        # job" — a run being ended without a stop request is a bug, not a stop.
+        return False
+    if job["status"] == "finalizing":
+        # Every symbol is already done and a rebuild is running. It sets
+        # finished_at when it lands, and killing the row now would leave the
+        # analytics half-built with nothing recorded as owning them.
+        return False
+
+    release_stale(job_id, older_than_seconds=grace)
+    if summary_counts(job_id)["running"]:
+        return False                  # a live worker owns a symbol; it will finish
+
+    finish_job(job_id, status="stopped")
+    return True
+
+
+def reap_dead_job(job_id, inflight_grace=None):
+    """Close out an 'active' job that cannot actually make progress.
+
+    Called before refusing to start a new update. active_job_id() answers a
+    question about a row, not about a process, and three states pass that test
+    while being finished, or unrecoverable, in every sense that matters:
+
+      * stop was requested and nothing is in flight — close_stopped_job();
+      * every symbol reached a terminal state but the finalize message was lost
+        with the worker that should have sent it, so the job sits in 'running'
+        with nothing left to run;
+      * it is 'finalizing' and has been for longer than any real rebuild takes,
+        which means the worker running that rebuild died: claim_finalize() will
+        not re-enter a job already in that state, so nothing re-enqueues the
+        tail and the job blocks every later update for ever.
+
+    Returns True if the job is terminal — or, for the last two cases, if the tail
+    was successfully re-queued, since that is the job's own work finishing rather
+    than a new update being blocked by a ghost."""
+    job = get_job(job_id)
+    if not job:
+        return True
+    if job["status"] in ("done", "stopped", "failed"):
+        return True
+    if job["stop_requested"]:
+        return close_stopped_job(job_id, inflight_grace)
+
+    if job["status"] == "finalizing":
+        # The threshold has to exceed the slowest legitimate rebuild, or this
+        # would start a second one beside a healthy first. tasks owns that
+        # number; import it here rather than duplicating it.
+        try:
+            import tasks
+            stale_after = tasks.FINALIZE_STALE_AFTER
+        except Exception:
+            return False
+        if not finalize_stalled(job_id, stale_after):
+            return False
+        try:
+            tasks.finalize_update.delay(job_id)
+            return True          # re-queued: the job is finishing, not stuck
+        except Exception:
+            # No broker. Everything is counted, so close it rather than leave a
+            # ghost; the analytics are rebuilt by the next run.
+            finish_job(job_id)
+            return True
+
+    counts = summary_counts(job_id)
+    if counts["pending"] + counts["running"] == 0:
+        # Nothing outstanding and not finalizing: the finalize was never
+        # enqueued, or was enqueued and lost. claim_finalize() is the atomic way
+        # to become the one caller allowed to send it.
+        if claim_finalize(job_id):
+            try:
+                import tasks
+                tasks.finalize_update.delay(job_id)
+            except Exception:
+                # No broker to send it to. The counts are all in, so close the
+                # job on the spot rather than leaving it 'finalizing' for ever;
+                # the analytics are rebuilt by the next run.
+                finish_job(job_id)
+                return True
+    return False
 
 
 def control_flags(job_id):
@@ -384,6 +547,31 @@ def summary_counts(job_id):
                  "running": 0, "pending": 0}
 
 
+def rows_written(job_id):
+    """How many price rows this job actually wrote.
+
+    finalize_update() uses it to decide whether the six-minute materialized-view
+    rebuild is worth running at all. A job that was stopped before any symbol
+    succeeded — or whose every symbol failed — changed nothing, and rebuilding
+    twenty views against unchanged data just keeps «توقف» looking unfinished for
+    another six minutes.
+
+    Safe as a proxy for "the data changed": tse_fetch.store() only deletes the
+    window it is about to rewrite, and it raises NoDataError (→ mark_failed)
+    rather than reaching the delete when there is nothing to insert. So zero
+    rows written means zero rows touched."""
+    r = db._one("SELECT COALESCE(SUM(rows_written), 0) AS n "
+                "FROM update_job_ticker WHERE job_id=%s", (job_id,))
+    return int(r["n"]) if r else 0
+
+
+# When to start telling the user a running job has gone quiet. Comfortably
+# longer than one symbol (three attempts with backoff) so an ordinary slow
+# symbol never trips it, and short enough to notice within one screenful of
+# polls rather than after the run is abandoned.
+STALLED_HINT_AFTER = int(os.environ.get("UPDATE_STALLED_HINT_AFTER", "120"))
+
+
 def snapshot(job_id=None, list_limit=800):
     """The whole progress picture in three queries, in the exact shape the
     existing update.html already consumes — so the page keeps working — plus the
@@ -395,7 +583,8 @@ def snapshot(job_id=None, list_limit=800):
                 "paused": False, "processed": 0, "success": 0, "failed": 0,
                 "success_list": [], "failed_list": [], "current": None,
                 "result": None, "elapsed": 0, "job_id": None, "total": 0,
-                "queued": False, "attempts_total": 0}
+                "queued": False, "attempts_total": 0, "idle": None,
+                "stalled": False}
 
     jid = job["id"]
     counts = summary_counts(jid)
@@ -430,6 +619,13 @@ def snapshot(job_id=None, list_limit=800):
         "SELECT COALESCE(SUM(attempts),0) AS n FROM update_job_ticker WHERE job_id=%s",
         (jid,))
 
+    # How long since a symbol last moved. The page had no way to tell "fetching,
+    # between symbols" from "nothing has happened for nine hours" — both showed
+    # «در حال دریافت: …» — so a job whose worker was gone looked identical to a
+    # healthy one, which is most of why the updater was reported as broken
+    # rather than as stalled. None means not one symbol has ever started.
+    idle = last_activity(jid) if running else None
+
     return {
         "active": True,
         "running": running,
@@ -449,6 +645,13 @@ def snapshot(job_id=None, list_limit=800):
         "success_list": [r["ticker"] for r in ok_rows],
         "failed_list": failed_list,
         "current": live[0]["ticker"] if (live and running) else None,
+        "idle": None if idle is None else int(idle),
+        # Outstanding work, and nothing has touched it for a while. Purely a
+        # report: reconcile() decides what to do about it, this only stops the
+        # page from pretending everything is fine.
+        "stalled": bool(running and job["status"] != "finalizing"
+                        and (counts["pending"] + counts["running"]) > 0
+                        and (idle is None or idle >= STALLED_HINT_AFTER)),
         "result": job["result"],
         "status": job["status"],
         "source": job["source"],
@@ -472,11 +675,41 @@ def last_job_params():
             "full": j["full_rebuild"]}
 
 
+# The states that mean "symbols are still being fetched, or about to be".
+BUSY_STATES = ("queued", "running", "stopping")
+
+
 def active_job_id():
+    """The newest job that has not finished — including one that is only
+    rebuilding the analytics. This is the job the UI follows and the one
+    reconcile() watches."""
     r = db._one(
         """SELECT id FROM update_job
             WHERE status IN ('queued','running','stopping','finalizing')
             ORDER BY created_at DESC LIMIT 1""")
+    return r["id"] if r else None
+
+
+def blocking_job_id():
+    """The newest job that a NEW run would collide with — which excludes
+    'finalizing', and that difference is the whole point.
+
+    A job in 'finalizing' has no symbols left: claim_finalize() only moves it
+    there once every one of them is terminal. What remains is
+    db.refresh_analytics(), twenty REFRESH MATERIALIZED VIEW statements that
+    take minutes (350 s at best, six on this database) and touch nothing a new
+    run would touch. PostgreSQL serialises overlapping refreshes by itself, and
+    a new run ends with its own refresh anyway.
+
+    Treating it as a collision is what made «توقف» look like it broke the page:
+    the stop worked, the job moved to 'finalizing' — and then the form
+    disappeared for six minutes and every «اجرای به‌روزرسانی» was refused,
+    because active_job_id() answered this question too. A background rebuild is
+    housekeeping; it is not a reason to take the feature away from the user."""
+    r = db._one(
+        """SELECT id FROM update_job
+            WHERE status IN %s
+            ORDER BY created_at DESC LIMIT 1""", (BUSY_STATES,))
     return r["id"] if r else None
 
 

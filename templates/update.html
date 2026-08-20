@@ -56,6 +56,10 @@
   </div>
   <div class="progbar"><span id="prog-fill"></span></div>
   <p class="muted small note" id="prog-msg">در حال اجرا…</p>
+  <!-- Shown only when the server says the run has stopped moving. It is the
+       answer to «چرا هیچ نمادی نشان داده نمی‌شود؟»: either a worker is missing or
+       recovery is under way, and both are actionable, unlike a silent spinner. -->
+  <p class="down-t small note" id="prog-stall" style="display:none"></p>
 
   <div class="list-box" id="success-box" style="display:none">
     <h3 class="up-t">نمادهای موفق (<span id="succ-count">۰</span>)</h3>
@@ -229,12 +233,43 @@
       el.disabled = full; el.required = !full;
       el.parentElement.style.opacity = full ? ".45" : "";
     });
-    runBtn.textContent = full ? "⬇ دریافت کل سابقه" : "🔄 اجرای به‌روزرسانی";
+    // Only while it is actually clickable: during a run the button carries the
+    // reason it is disabled, and the mode toggle must not overwrite that with
+    // an invitation to click.
+    if (!runBtn.disabled) {
+      runBtn.textContent = full ? "⬇ دریافت کل سابقه" : "🔄 اجرای به‌روزرسانی";
+    }
   });
 
   let lastStatus = null;
+  // The last symbol actually seen being fetched. `current` is the one row in
+  // update_job_ticker with status='running', so it is briefly null in the gap
+  // between finishing one symbol and claiming the next — and polling every 3s
+  // lands in that gap often enough that the name flickered to «…» and back.
+  // Holding it makes the line readable instead of blinking.
+  let lastCurrent = null, lastJobId = null;
+  // Fetching in progress — the only state in which starting another run, or
+  // retrying a symbol, would collide with this one. A job that is merely
+  // rebuilding its analytics is not busy in that sense; see
+  // jobs.blocking_job_id().
+  const busyNow = (s) => !!s.running && s.status !== "finalizing";
+
+  // Enabling and disabling «اجرای به‌روزرسانی» in one place, because the label
+  // has to be restored exactly as the mode toggle left it — «کل سابقه» renames
+  // that same button.
+  const RUN_LABEL = () =>
+    (document.getElementById("mode-select").value === "full"
+      ? "⬇ دریافت کل سابقه" : "🔄 اجرای به‌روزرسانی");
+
+  function setRunEnabled(on) {
+    const btn = document.getElementById("run-btn");
+    if (!btn) return;
+    btn.disabled = !on;
+    btn.textContent = on ? RUN_LABEL() : "⏳ یک به‌روزرسانی در حال اجراست";
+    btn.title = on ? "" : "تا پایان به‌روزرسانی جاری یا زدن «توقف» صبر کنید";
+  }
   const panel = document.getElementById("progress-panel");
-  const form  = document.getElementById("form-panel");
+  const stallMsg = document.getElementById("prog-stall");
 
   function render(s) {
     if (!s.active) return;
@@ -251,28 +286,86 @@
     const pauseBtn = document.getElementById("pause-btn");
     const msg = document.getElementById("prog-msg");
     if (s.running) {
-      document.getElementById("prog-current").textContent = s.current || "…";
-      now.style.display = s.paused ? "none" : "";
+      // Only 'running' is actually fetching. 'queued' means no worker has taken
+      // a batch yet and 'finalizing' means every symbol is done and the views
+      // are being rebuilt — in both, «در حال دریافت: …» with a spinner was
+      // claiming a download was in progress when none was, which is what made
+      // the symbol name look like it had stopped being shown. The phase message
+      // below already says what is really happening, so hide the line instead.
+      const fetching = s.status !== "queued" && s.status !== "finalizing";
+      // 'finalizing' is running, but it is not BUSY: every symbol is done and
+      // what is left is a background rebuild of the analytics. Hiding the form
+      // through it — six minutes, measured — is what «قسمت به‌روزرسانی ناپدید
+      // شد» was: the stop worked, and then the page took the feature away with
+      // no explanation and refused to start anything new.
+      const busy = busyNow(s);
+      if (s.job_id !== lastJobId) { lastJobId = s.job_id; lastCurrent = null; }
+      if (fetching && s.current) lastCurrent = s.current;
+      document.getElementById("prog-current").textContent = lastCurrent || "…";
+      now.style.display = (s.paused || !fetching) ? "none" : "";
       stopBtn.style.display = "";
       // pause ⇄ resume: label + action follow the current paused state
       pauseBtn.style.display = "";
       pauseBtn.textContent = s.paused ? "▶ ادامه" : "⏸ مکث";
       pauseBtn.dataset.paused = s.paused ? "1" : "";
-      pauseBtn.disabled = false;
+      // Once every symbol is fetched there is nothing left to interrupt — the
+      // remaining work is one PostgreSQL statement per materialized view, which
+      // cannot be cancelled half-way without leaving the analytics inconsistent.
+      // Showing a live «توقف» there is what made the button look broken: it was
+      // pressed, it was recorded, and nothing could act on it.
+      // Hidden rather than merely disabled: a greyed-out stop button sitting
+      // next to a form that has come back reads as a page that cannot decide
+      // what state it is in.
+      const finalizing = s.status === "finalizing";
+      stopBtn.style.display = finalizing ? "none" : "";
+      pauseBtn.style.display = finalizing ? "none" : "";
+      // Reset rather than only set: a new job must not inherit the previous
+      // run's «در حال توقف…» label.
+      stopBtn.textContent = (s.stopped && !finalizing) ? "در حال توقف…" : "⏹ توقف";
       // 'queued'    — job row created, no Celery worker has claimed a batch yet
+      // 'stopping'  — «توقف» recorded; the symbol in flight is being finished
       // 'finalizing' — every symbol done; the last task is rebuilding the views
       msg.textContent = s.paused
         ? "⏸ مکث شد — برای ادامه دکمهٔ «ادامه» را بزنید"
         : (s.status === "queued"
             ? "⏳ در صف اجرا — منتظر آزاد شدن کارگر…"
             : (s.status === "finalizing"
-                ? "♻ همهٔ نمادها پردازش شدند — در حال بازسازی تحلیل‌ها…"
-                : "در حال اجرا… (این صفحه هر چند ثانیه به‌روز می‌شود)"));
-      form.style.display = "none";
+                ? "♻ همهٔ نمادها پردازش شدند — بازسازی تحلیل‌ها در پس‌زمینه "
+                  + "ادامه دارد (چند دقیقه). می‌توانید به‌روزرسانی تازه‌ای شروع کنید."
+                : (s.status === "stopping"
+                    ? "⏹ در حال توقف — نماد در حال دریافت تکمیل می‌شود…"
+                    : "در حال اجرا… (این صفحه هر چند ثانیه به‌روز می‌شود)")));
+      // A job that is not moving used to look exactly like one that was: the
+      // «در حال دریافت» line held the last symbol name it ever saw, so a dead
+      // worker read as a slow one. `idle` is seconds since any symbol last
+      // moved and `stalled` is the server's own verdict on it — say it plainly,
+      // including which of the two workers is missing, since that is the thing
+      // the reader can actually fix.
+      stallMsg.style.display = s.stalled ? "" : "none";
+      if (s.stalled) {
+        const dead = Object.entries(s.workers || {})
+          .filter(([, alive]) => alive === false).map(([role]) => role);
+        const idleTxt = s.idle == null
+          ? "هنوز هیچ نمادی شروع نشده"
+          : `${fa(s.idle)} ثانیه از آخرین پیشرفت گذشته`;
+        stallMsg.textContent = dead.length
+          ? `⚠ ${idleTxt} — کارگر «${dead.join("، ")}» در حال اجرا نیست. `
+            + "برنامه را دوباره اجرا کنید یا «توقف» را بزنید و از نو شروع کنید."
+          : `⚠ ${idleTxt} — بازیابی خودکار در جریان است؛ اگر ادامه یافت «توقف» را بزنید.`;
+      }
+      // The form is NEVER hidden. It used to be, for the whole of a run and for
+      // the whole of the analytics rebuild after it, and both read as the
+      // feature having disappeared — a page you cannot see the controls of is a
+      // page you cannot tell apart from a broken one. While symbols are
+      // actually being fetched the RUN BUTTON is disabled instead, and says
+      // why, which is the one piece of information hiding the form was
+      // conveying.
+      setRunEnabled(!busy);
     } else {
       now.style.display = "none";
       stopBtn.style.display = "none";
       pauseBtn.style.display = "none";
+      stallMsg.style.display = "none";
       // There is no subprocess return code any more — the job's own status is
       // the authority, and it is the same value in every worker.
       const stopped = s.stopped || s.status === "stopped";
@@ -283,7 +376,7 @@
             ? `✅ پایان یافت — موفق: ${fa(s.success)}، ناموفق: ${fa(s.failed)}`
             : `⛔ پایان با خطا: ${(s.result || "").replace("RESULT ", "")}`);
       msg.className = okm ? "up-t note" : (stopped ? "muted note" : "down-t note");
-      form.style.display = "";   // allow a new run
+      setRunEnabled(true);
     }
 
     // --- numeric tiles ----------------------------------------------------
@@ -313,12 +406,12 @@
       `<span class="muted small">موردی نیست</span>`;
     document.getElementById("failed-list").innerHTML =
       fail.map(f => f.ticker
-        ? `<button type="button" class="chip down retry" data-ticker="${f.ticker}"${s.running ? " disabled" : ""} title="${(f.reason || "")}${f.attempts ? ` — ${fa(f.attempts)} تلاش` : ""}${f.detail ? `
+        ? `<button type="button" class="chip down retry" data-ticker="${f.ticker}"${busyNow(s) ? " disabled" : ""} title="${(f.reason || "")}${f.attempts ? ` — ${fa(f.attempts)} تلاش` : ""}${f.detail ? `
 ${f.detail}` : ""} — برای تلاش دوباره کلیک کنید">${f.ticker}${f.attempts > 1 ? `<sup class="tries">${fa(f.attempts)}×</sup>` : ""}</button>`
         : `<span class="chip down">—</span>`).join("") ||
       `<span class="muted small">موردی نیست</span>`;
     const retryAll = document.getElementById("retry-all-btn");
-    if (retryAll) retryAll.disabled = s.running || !fail.length;
+    if (retryAll) retryAll.disabled = busyNow(s) || !fail.length;
   }
 
   document.getElementById("stop-btn").addEventListener("click", async () => {
@@ -360,7 +453,6 @@ ${f.detail}` : ""} — برای تلاش دوباره کلیک کنید">${f.tic
       const j = await res.json();
       if (!j.ok) { alert(j.error || "خطا در شروع تلاش دوباره"); return; }
       panel.style.display = "";
-      form.style.display = "none";
       poll();   // a fresh job started — follow its live progress
     } catch (e) { alert("خطا در ارتباط با سرور"); }
   }

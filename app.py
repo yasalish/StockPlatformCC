@@ -38,6 +38,20 @@ import market
 # logging.getLogger(); this is what turns those records into one-line JSON with
 # a request id attached.
 log = observability.setup_logging()
+
+# `python app.py` now brings the whole local stack up with it — Redis and the
+# Celery worker — because an app that serves every read screen but cannot run a
+# data update is not "started". __name__ is "__main__" from this line onwards
+# ONLY when this file was run as a script: Gunicorn and the Celery worker import
+# it as the `app` module, and there both are declared services
+# (docker-compose.yml) that a web worker has no business starting. It runs here,
+# above db/cache/jobs startup, because the cache probe further down is the first
+# thing that touches Redis. See dev_boot.py — it never raises, so a machine
+# without redis-server starts degraded exactly as before.
+if __name__ == "__main__":
+    import dev_boot
+    dev_boot.start_services()
+
 from tv import tv as tv_blueprint
 from auth import auth_bp, login_manager, init_oauth
 from account import account_bp
@@ -1113,6 +1127,12 @@ def update_status():
     views exactly once, in the worker, where the run actually ended."""
     st = market.job_status()
     st["refreshing"] = market.analytics_refreshing()
+    # Whether the local Celery workers are alive. The page uses it to explain a
+    # job that is not moving — "queued, and nothing is listening" is a different
+    # problem from "queued, and the worker is busy", and the old page showed
+    # «در حال دریافت: …» for both. None where it cannot be known (production,
+    # where the workers are separate containers with their own supervisor).
+    st["workers"] = market.local_worker_states()
     return jsonify(st)
 
 
@@ -1126,7 +1146,12 @@ def update_stop():
     the last one out runs tasks.finalize_update(), which refreshes the analytics
     for the partial run just as it would for a complete one."""
     stopped = market.stop_job()
-    return jsonify({"stopped": stopped})
+    # `finished` is the difference between «درخواست ثبت شد» and «تمام شد»: a job
+    # with nothing in flight is closed inside this request, so the page can stop
+    # polling immediately instead of waiting for a worker to confirm it.
+    st = market.job_status()
+    return jsonify({"stopped": stopped, "finished": not st.get("running"),
+                    "status": st.get("status")})
 
 
 @app.route("/update/pause", methods=["POST"])
@@ -1251,5 +1276,10 @@ if __name__ == "__main__":
     if not os.environ.get("WERKZEUG_RUN_MAIN"):
         shown = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
         print(f" * Running on http://{shown}:{port}  (Ctrl+C to quit)", flush=True)
+
+    # …and open it. On a background thread gated on the port actually accepting,
+    # so the tab opens onto a served page rather than a connection error. Set
+    # BN_OPEN_BROWSER=0 to keep the terminal-only behaviour.
+    dev_boot.open_browser_when_ready(host, port)
 
     app.run(debug=debug, host=host, port=port)

@@ -235,6 +235,7 @@ _client_lock = threading.Lock()
 _down_until = 0.0          # > 0 means degraded; the value is when to probe next
 _probing = False           # a background probe is in flight
 _warned = False
+_bump_owed = False         # an invalidation was requested while Redis was down
 
 
 def _build():
@@ -325,6 +326,34 @@ def _up():
         _warned = False
         _local_clear()          # Redis is authoritative again; drop the stand-in
         log.info("redis is back — analytics cache re-enabled")
+    _flush_owed_bump()
+
+
+def _flush_owed_bump():
+    """Apply an invalidation that was requested while Redis was unreachable.
+
+    bump_version() can only drop this process's fallback entries when there is
+    no Redis to INCR — but every entry written to Redis BEFORE the outage is
+    still sitting there under the unchanged version. Without this, the moment
+    Redis comes back the app starts serving pre-invalidation numbers again, and
+    keeps doing so for the rest of the TTL. Deleting price rows while Redis is
+    down and then restarting is exactly that shape: the delete is real, the
+    invalidation is lost, and «آخرین تاریخ» reverts to the deleted date.
+
+    Left owed if the INCR itself fails; the next _up() retries it."""
+    global _bump_owed
+    if not _bump_owed:
+        return
+    r = _client_obj                 # deliberately not _client(): no breaker games
+    if r is None:
+        return
+    try:
+        v = int(r.incr(_VER_KEY))
+    except (RedisError, OSError):
+        return
+    _bump_owed = False
+    log.info("applied the cache invalidation owed from the outage",
+             extra={"cache_version": v})
 
 
 def available(force=False):
@@ -384,16 +413,25 @@ def bump_version():
     """Invalidate everything, atomically for every worker. Returns the new
     version, or 0 while degraded (where there is no shared version to bump — but
     the in-process fallback entries are dropped, which is the whole cache when
-    this process is the only one)."""
+    this process is the only one).
+
+    A degraded bump is REMEMBERED, not discarded: entries written to Redis
+    before the outage would otherwise become live again the moment it returns.
+    _flush_owed_bump() applies it as soon as there is a client to apply it
+    with."""
+    global _bump_owed
     _local_clear()
     r = _client()
     if r is None:
+        _bump_owed = True
         return 0
     try:
         v = int(r.incr(_VER_KEY))
+        _bump_owed = False
         log.info("analytics cache invalidated", extra={"cache_version": v})
         return v
     except (RedisError, OSError) as e:
+        _bump_owed = True
         _down(e)
         return 0
 
@@ -638,3 +676,75 @@ def reset_stats():
             r.delete(k)
     except (RedisError, OSError):
         pass
+
+
+# ---------------------------------------------------------------------------
+# One analytics rebuild at a time — across processes
+#
+# db.refresh_analytics() walks twenty materialized views and takes minutes. Three
+# different things ask for it (the tail of an update, a manual row delete, and
+# the in-process fallback in market.py), they run in different processes, and
+# none of them could see that another was already doing it. A REFRESH
+# MATERIALIZED VIEW CONCURRENTLY that arrives during another one is not wrong —
+# PostgreSQL serialises them — it is simply another several minutes of work to
+# produce identical rows, during which the update page has nothing to show.
+#
+# The worst case was a redelivered task: tasks.refresh_analytics_only ran with
+# acks_late, so a worker killed mid-rebuild left the message unacked, kombu
+# handed it back on the next worker boot, and the rebuild started again from the
+# beginning — every time the app was restarted, blocking the fetch queue for six
+# minutes each time. One entry was found doing exactly that.
+#
+# A plain SET NX with a TTL is the right lock here: whoever gets it rebuilds,
+# everyone else skips, and a process killed while holding it blocks nothing for
+# longer than the TTL. There is no correctness risk in a lost lock — the worst
+# outcome is a duplicate rebuild, which is what this avoids rather than what it
+# guards against.
+# ---------------------------------------------------------------------------
+REFRESH_LOCK_TTL = int(os.environ.get("ANALYTICS_REFRESH_LOCK_TTL", "1800"))
+
+
+def _refresh_lock_key():
+    return f"{PREFIX}:analytics:refreshing"
+
+
+def claim_refresh(ttl=None, owner="?"):
+    """True if the caller may start an analytics rebuild.
+
+    False means another process is already doing it. With no Redis it always
+    returns True: there is nothing to coordinate through, and skipping the
+    rebuild on a machine with no cache would leave the views stale for ever —
+    a much worse failure than doing the work twice.
+    """
+    r = _client()
+    if r is None:
+        return True
+    try:
+        return bool(r.set(_refresh_lock_key(), str(owner).encode("utf-8")[:200],
+                          nx=True, ex=int(ttl or REFRESH_LOCK_TTL)))
+    except (RedisError, OSError) as e:
+        _down(e)
+        return True
+
+
+def release_refresh():
+    """Drop the lock. Safe to call when it was never held."""
+    r = _client()
+    if r is None:
+        return
+    try:
+        r.delete(_refresh_lock_key())
+    except (RedisError, OSError):
+        pass
+
+
+def refresh_in_progress():
+    """True while some process holds the rebuild lock. Observational only —
+    used by /update/status so the page can say what is happening."""
+    r = _client()
+    if r is None:
+        return False
+    try:
+        return bool(r.exists(_refresh_lock_key()))
+    except (RedisError, OSError):
+        return False

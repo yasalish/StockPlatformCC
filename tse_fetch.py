@@ -24,6 +24,8 @@ prerequisites for running the update under Celery:
    Every failure mode now raises a typed exception the task layer can retry and
    record with an attempt count.
 """
+import os
+
 import psycopg2.extras
 
 import db
@@ -95,12 +97,46 @@ def reference_tickers(kind):
     return [(r["id"], r["ticker"]) for r in db._rows(cfg["ref_sql"])]
 
 
+# TSETMC is an Iranian DOMESTIC host, and an Iranian desktop very often has
+# HTTP_PROXY/HTTPS_PROXY pointing at a local tunnel client (V2Ray, Xray, …) for
+# reaching sites abroad. `requests` — which finpy_tse uses — honours those
+# variables for every host, so the fetch gets tunnelled out of the country and
+# back, which is exactly the traffic TSETMC and the tunnel are worst at:
+# measured on this machine, the same request timed out after 25 s through the
+# proxy and returned HTTP 200 in 3.8 s direct.
+#
+# So the proxy is bypassed for TSETMC only. Everything else keeps whatever proxy
+# the environment says — this appends to `no_proxy`, it does not clear it — and
+# setting TSE_USE_PROXY=1 turns the bypass off for anyone who genuinely reaches
+# TSETMC through one.
+TSE_HOSTS = "tsetmc.com,.tsetmc.com,old.tsetmc.com,cdn.tsetmc.com,www.tsetmc.com"
+
+
+def _bypass_proxy_for_tsetmc():
+    """Add the TSETMC hosts to no_proxy unless TSE_USE_PROXY says otherwise.
+
+    Both spellings are set: `requests` reads the lower-case name first, but the
+    upper-case one is what a Windows environment usually carries, and a library
+    that reads only that one would still tunnel.
+    """
+    if os.environ.get("TSE_USE_PROXY", "").strip().lower() in ("1", "true", "yes"):
+        return
+    for name in ("no_proxy", "NO_PROXY"):
+        current = os.environ.get(name, "")
+        missing = [h for h in TSE_HOSTS.split(",") if h not in current]
+        if missing:
+            os.environ[name] = ",".join(filter(None, [current, *missing]))
+
+
 def fetch(kind, ticker, start, end, full=False):
     """Pull one symbol's history from TSETMC. Returns a DataFrame.
 
     finpy_tse is imported lazily: the web process only needs to ENQUEUE jobs, and
     importing finpy there would pull in aiohttp and touch the event loop for no
     reason. Only the Celery worker actually calls this."""
+    # Before finpy builds its session: requests reads the proxy environment at
+    # request time, but a session created earlier can cache the resolution.
+    _bypass_proxy_for_tsetmc()
     try:
         import finpy_tse as fpy
         import pandas as pd

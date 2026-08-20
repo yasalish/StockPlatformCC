@@ -269,127 +269,142 @@ r = cache._client()
 r.delete(bn_testkind.REFRESH_MARKER)
 version_before = cache.version()
 
-job_id = jobs.create_job("test", "1403-10-01", "1403-10-05")
-work = [t for _, t in jobs.tse_reference("test")]
-tasks.dispatch_job(job_id, "test", work, "1403-10-01", "1403-10-05", False)
-print(f"\n  queued job {job_id}: {len(work)} symbols in "
-      f"{-(-len(work) // tasks.BATCH_SIZE)} batches of {tasks.BATCH_SIZE}")
-
-
-def spawn_worker(tag):
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1",
-           "BN_TEST_FETCH_DELAY": "0.25"}
-    log = open(os.path.join(HERE, ".tools", f"worker-{tag}.log"), "w",
-               encoding="utf-8", errors="replace")
-    p = subprocess.Popen([sys.executable, os.path.join(HERE, ".tools", "fake_worker.py")],
-                         stdout=log, stderr=subprocess.STDOUT, env=env, cwd=HERE)
-    return p, log
-
-
-def wait_for(predicate, timeout, label):
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        c = jobs.summary_counts(job_id)
-        if predicate(c):
-            return c
-        time.sleep(0.4)
-    return None
-
-
-def hard_kill(proc):
-    """SIGKILL equivalent — no chance to ack, finish, or clean up. This is the
-    container being killed, not asked to stop."""
-    if os.name == "nt":
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                       capture_output=True)
-    else:
-        proc.kill()
-    try:
-        proc.wait(timeout=10)
-    except Exception:
-        pass
-
-
-w1, log1 = spawn_worker("A")
-print(f"  worker A started (pid {w1.pid})")
-
-progress = wait_for(lambda c: c["ok"] >= 12, 90, "progress")
-if progress is None:
-    check(False, "worker A made progress before the kill",
-          f"counts={jobs.summary_counts(job_id)} — see .tools/worker-A.log")
-    hard_kill(w1)
-    log1.close()
+# A worker this script did not start must not be consuming the fetch queue.
+# fake_worker.py is the only process with tse_fetch.fetch() swapped for the
+# local stand-in; an ordinary worker takes the same batches, asks the real
+# TSETMC for «آزمون001», and records the symbol as failed after its retries. The
+# run then ends 52/60 with eight failures and every assertion below points at
+# the wrong thing. It has happened; check for it rather than debug it again.
+foreign = [node for node, qs in
+           (celery_app.app.control.inspect(timeout=3).active_queues() or {}).items()
+           if any(q["name"] == "updates" for q in qs) and "killtest" not in node]
+if foreign:
+    check(False, "no foreign worker is consuming the fetch queue",
+          f"{', '.join(foreign)} would eat this test's batches — stop them "
+          r"(.\start_local.ps1 -Stop) and run again")
+    print("  PART D skipped — see above")
 else:
-    print(f"  worker A progress: ok={progress['ok']} pending={progress['pending']} "
-          f"running={progress['running']}")
-    mid_ok = progress["ok"]
+    job_id = jobs.create_job("test", "1403-10-01", "1403-10-05")
+    work = [t for _, t in jobs.tse_reference("test")]
+    tasks.dispatch_job(job_id, "test", work, "1403-10-01", "1403-10-05", False)
+    print(f"\n  queued job {job_id}: {len(work)} symbols in "
+          f"{-(-len(work) // tasks.BATCH_SIZE)} batches of {tasks.BATCH_SIZE}")
 
-    hard_kill(w1)
-    log1.close()
-    print(f"  *** worker A KILLED (taskkill /F) with {mid_ok}/{N_TICKERS} done ***")
 
-    after_kill = jobs.summary_counts(job_id)
-    check(after_kill["ok"] < N_TICKERS,
-          f"the run really was incomplete at the kill "
-          f"({after_kill['ok']}/{N_TICKERS} written)")
-    check(after_kill["pending"] + after_kill["running"] > 0,
-          f"{after_kill['pending'] + after_kill['running']} symbols still outstanding")
+    def spawn_worker(tag):
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1",
+               "BN_TEST_FETCH_DELAY": "0.25"}
+        log = open(os.path.join(HERE, ".tools", f"worker-{tag}.log"), "w",
+                   encoding="utf-8", errors="replace")
+        p = subprocess.Popen([sys.executable, os.path.join(HERE, ".tools", "fake_worker.py")],
+                             stdout=log, stderr=subprocess.STDOUT, env=env, cwd=HERE)
+        return p, log
 
-    time.sleep(2)
-    w2, log2 = spawn_worker("B")
-    print(f"  worker B started (pid {w2.pid}) — no manual re-dispatch; waiting "
-          f"for its boot-time reconcile to notice the orphaned batch")
 
-    final = wait_for(lambda c: c["ok"] + c["failed"] >= N_TICKERS, 240, "completion")
-    time.sleep(4)                      # let finalize_update land
-    hard_kill(w2)
-    log2.close()
+    def wait_for(predicate, timeout, label):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            c = jobs.summary_counts(job_id)
+            if predicate(c):
+                return c
+            time.sleep(0.4)
+        return None
 
-    if final is None:
-        check(False, "the run completed after the restart",
-              f"counts={jobs.summary_counts(job_id)} — see .tools/worker-B.log")
+
+    def hard_kill(proc):
+        """SIGKILL equivalent — no chance to ack, finish, or clean up. This is the
+        container being killed, not asked to stop."""
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           capture_output=True)
+        else:
+            proc.kill()
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            pass
+
+
+    w1, log1 = spawn_worker("A")
+    print(f"  worker A started (pid {w1.pid})")
+
+    progress = wait_for(lambda c: c["ok"] >= 12, 90, "progress")
+    if progress is None:
+        check(False, "worker A made progress before the kill",
+              f"counts={jobs.summary_counts(job_id)} — see .tools/worker-A.log")
+        hard_kill(w1)
+        log1.close()
     else:
-        counts = jobs.summary_counts(job_id)
-        print(f"\n  final: ok={counts['ok']} failed={counts['failed']} "
-              f"of {counts['total']}")
+        print(f"  worker A progress: ok={progress['ok']} pending={progress['pending']} "
+              f"running={progress['running']}")
+        mid_ok = progress["ok"]
 
-        check(counts["ok"] == N_TICKERS,
-              f"NOTHING LOST — all {N_TICKERS} symbols written "
-              f"({counts['ok']} ok, {counts['failed']} failed)")
+        hard_kill(w1)
+        log1.close()
+        print(f"  *** worker A KILLED (taskkill /F) with {mid_ok}/{N_TICKERS} done ***")
 
-        # --- the duplication check ---------------------------------------
-        per = db._rows(f"SELECT ticker, count(*) c FROM {bn_testkind.PRICE_TABLE} "
-                       f"GROUP BY ticker ORDER BY c DESC")
-        worst = per[0]["c"] if per else 0
-        expected = bn_testkind.ROWS_PER_TICKER
-        check(len(per) == N_TICKERS,
-              f"every symbol has rows in the table ({len(per)}/{N_TICKERS})")
-        check(worst == expected,
-              f"NOTHING DUPLICATED — max rows for any symbol is {worst}, "
-              f"expected exactly {expected}")
-        total_rows = db._one(f"SELECT count(*) c FROM {bn_testkind.PRICE_TABLE}")["c"]
-        check(total_rows == N_TICKERS * expected,
-              f"total rows {total_rows} == {N_TICKERS} symbols x {expected}")
+        after_kill = jobs.summary_counts(job_id)
+        check(after_kill["ok"] < N_TICKERS,
+              f"the run really was incomplete at the kill "
+              f"({after_kill['ok']}/{N_TICKERS} written)")
+        check(after_kill["pending"] + after_kill["running"] > 0,
+              f"{after_kill['pending'] + after_kill['running']} symbols still outstanding")
 
-        # --- proof that redelivery actually happened ----------------------
-        att = db._one("SELECT COALESCE(SUM(attempts),0) n, MAX(attempts) m "
-                      "FROM update_job_ticker WHERE job_id=%s", (job_id,))
-        check(att["n"] > N_TICKERS,
-              f"redelivery is REAL: {att['n']} claims for {N_TICKERS} symbols "
-              f"(max {att['m']} on one symbol) — the killed batch came back")
+        time.sleep(2)
+        w2, log2 = spawn_worker("B")
+        print(f"  worker B started (pid {w2.pid}) — no manual re-dispatch; waiting "
+              f"for its boot-time reconcile to notice the orphaned batch")
 
-        # --- the tail of the chain ran, once ------------------------------
-        marker = r.get(bn_testkind.REFRESH_MARKER)
-        marker = int(marker) if marker else 0
-        check(marker == 1,
-              f"the last task refreshed the analytics exactly once (marker={marker})")
-        check(cache.version() > version_before,
-              f"…and bumped the Redis cache version "
-              f"({version_before} -> {cache.version()})")
-        job = jobs.get_job(job_id)
-        check(job["status"] == "done",
-              f"the job closed itself out (status={job['status']}, "
-              f"result={job['result']})")
+        final = wait_for(lambda c: c["ok"] + c["failed"] >= N_TICKERS, 240, "completion")
+        time.sleep(4)                      # let finalize_update land
+        hard_kill(w2)
+        log2.close()
+
+        if final is None:
+            check(False, "the run completed after the restart",
+                  f"counts={jobs.summary_counts(job_id)} — see .tools/worker-B.log")
+        else:
+            counts = jobs.summary_counts(job_id)
+            print(f"\n  final: ok={counts['ok']} failed={counts['failed']} "
+                  f"of {counts['total']}")
+
+            check(counts["ok"] == N_TICKERS,
+                  f"NOTHING LOST — all {N_TICKERS} symbols written "
+                  f"({counts['ok']} ok, {counts['failed']} failed)")
+
+            # --- the duplication check ---------------------------------------
+            per = db._rows(f"SELECT ticker, count(*) c FROM {bn_testkind.PRICE_TABLE} "
+                           f"GROUP BY ticker ORDER BY c DESC")
+            worst = per[0]["c"] if per else 0
+            expected = bn_testkind.ROWS_PER_TICKER
+            check(len(per) == N_TICKERS,
+                  f"every symbol has rows in the table ({len(per)}/{N_TICKERS})")
+            check(worst == expected,
+                  f"NOTHING DUPLICATED — max rows for any symbol is {worst}, "
+                  f"expected exactly {expected}")
+            total_rows = db._one(f"SELECT count(*) c FROM {bn_testkind.PRICE_TABLE}")["c"]
+            check(total_rows == N_TICKERS * expected,
+                  f"total rows {total_rows} == {N_TICKERS} symbols x {expected}")
+
+            # --- proof that redelivery actually happened ----------------------
+            att = db._one("SELECT COALESCE(SUM(attempts),0) n, MAX(attempts) m "
+                          "FROM update_job_ticker WHERE job_id=%s", (job_id,))
+            check(att["n"] > N_TICKERS,
+                  f"redelivery is REAL: {att['n']} claims for {N_TICKERS} symbols "
+                  f"(max {att['m']} on one symbol) — the killed batch came back")
+
+            # --- the tail of the chain ran, once ------------------------------
+            marker = r.get(bn_testkind.REFRESH_MARKER)
+            marker = int(marker) if marker else 0
+            check(marker == 1,
+                  f"the last task refreshed the analytics exactly once (marker={marker})")
+            check(cache.version() > version_before,
+                  f"…and bumped the Redis cache version "
+                  f"({version_before} -> {cache.version()})")
+            job = jobs.get_job(job_id)
+            check(job["status"] == "done",
+                  f"the job closed itself out (status={job['status']}, "
+                  f"result={job['result']})")
 
 
 # ===========================================================================
@@ -436,6 +451,23 @@ check(client.get("/update/status").status_code in (302, 200, 401),
 print()
 print("=" * 74)
 try:
+    # The scratch PRICE tables are this script's own; the JOB tables are the
+    # real ones, and every 'test' job created above is a row in them. Leaving
+    # them behind is not untidiness, it is a landmine: PART B deliberately
+    # drives a job to 'finalizing' and PART C leaves one 'running', and
+    # jobs.active_job_id() returns the newest NON-TERMINAL job whatever was
+    # created after it — so a leftover row here made the real /update page
+    # refuse every subsequent run with "one is already running", with no way to
+    # clear it from the UI. Nine such rows were found after four runs.
+    conn = db.get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM update_job WHERE kind = 'test'")
+            removed = cur.rowcount
+        conn.commit()
+    finally:
+        db.release(conn)
+    print(f"scratch job rows removed ({removed}) — none left to block a real run")
     bn_testkind.drop_tables()
     print("scratch tables dropped — no production data was touched")
 except Exception as e:

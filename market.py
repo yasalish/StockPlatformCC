@@ -74,10 +74,33 @@ def start_job(kind, start, end, full=False, tickers=None, carry_failed=False,
     import tasks
 
     jobs.ensure_tables()
+
+    # Before anything else, and before the active-job check in particular: the
+    # recovery that check asks for (reconcile) is itself a queued task, so on a
+    # machine whose worker has died nudging it would recover nothing. Queueing
+    # work at a queue nobody consumes is also the other way this feature dies
+    # quietly — the job row appears and no symbol is ever claimed. No-op in
+    # production, where the workers are declared services.
+    ensure_local_worker()
+
+    # Two different questions, and conflating them is what took the update form
+    # off the page for six minutes after every «توقف».
+    #
+    #   active   — the newest unfinished job, INCLUDING one that is only
+    #              rebuilding the analytics. Worth reaping: a stopped-but-unclosed
+    #              job, a lost finalize and a rebuild whose worker died are all
+    #              ghosts that pass that test for ever.
+    #   blocking — the newest job that a new run would actually collide with.
+    #              'finalizing' is deliberately not one: every symbol is already
+    #              terminal and the rebuild left behind touches nothing a new run
+    #              touches. See jobs.blocking_job_id().
     active = jobs.active_job_id()
     if active:
-        raise RuntimeError(
-            "یک به‌روزرسانی هم‌اکنون در حال اجراست؛ تا پایان آن صبر کنید.")
+        jobs.reap_dead_job(active)
+
+    blocking = jobs.blocking_job_id()
+    if blocking:
+        raise RuntimeError(_busy_message(blocking))
 
     job_id = jobs.create_job(kind, start, end, full=full, tickers=tickers,
                              created_by=created_by, source=source)
@@ -93,6 +116,87 @@ def start_job(kind, start, end, full=False, tickers=None, carry_failed=False,
     return job_id
 
 
+def _busy_message(job_id):
+    """Why the new run was refused, in enough detail to act on.
+
+    "One is already running" is true and useless when the run in question has
+    not moved for nine hours: it reads as a bug in the button rather than as a
+    job needing a «توقف». So say which job, what state it is in, and how long it
+    has been silent — and ask the reconciler to look at it on the way out."""
+    import jobs
+    try:
+        job = jobs.get_job(job_id)
+        idle = jobs.last_activity(job_id)
+    except Exception:
+        return "یک به‌روزرسانی هم‌اکنون در حال اجراست؛ تا پایان آن صبر کنید."
+
+    status = (job or {}).get("status", "?")
+    msg = (f"کار #{job_id} ({_STATUS_FA.get(status, status)}) هم‌اکنون فعال است؛ "
+           "تا پایان آن صبر کنید یا دکمهٔ «توقف» را بزنید.")
+    if idle is None or idle >= 90:
+        idle_txt = "هرگز" if idle is None else f"{int(idle)} ثانیه پیش"
+        msg += f" آخرین پیشرفت: {idle_txt}. درخواست بازیابی ارسال شد."
+        try:
+            import tasks
+            tasks.reconcile.delay(job_id=job_id)
+        except Exception as e:
+            log.warning("could not ask for a reconcile", extra={"error": str(e)})
+    return msg
+
+
+_STATUS_FA = {"queued": "در صف", "running": "در حال اجرا", "stopping": "در حال توقف",
+              "finalizing": "بازسازی تحلیل‌ها", "stopped": "متوقف",
+              "done": "پایان‌یافته", "failed": "ناموفق"}
+
+
+def ensure_local_worker():
+    """Start the local Celery workers again if they died. Returns their states,
+    or None when this is not a machine that manages its own workers.
+
+    `python app.py` starts them (dev_boot), but nothing restarted one that died
+    mid-session — and a dead worker looks exactly like a broken updater: the job
+    row appears, no symbol is ever claimed, and the page shows «در حال دریافت»
+    with nothing after it. Checking here costs one file read per started job.
+
+    In production the workers are compose services with their own restart
+    policy, and a web container starting them would be wrong; APP_ENV and
+    BN_AUTOSTART_WORKER=0 both switch this off."""
+    if os.environ.get("APP_ENV", "development").strip().lower() == "production":
+        return None
+    try:
+        import dev_boot
+    except Exception:
+        return None
+    try:
+        states = dev_boot.ensure_workers()
+    except Exception as e:
+        log.warning("could not check the local celery workers",
+                    extra={"error": str(e)})
+        return None
+    if any(v == "started" for v in states.values()):
+        log.info("restarted a local celery worker before queueing a job",
+                 extra=states)
+    return states
+
+
+def local_worker_states():
+    """{role: True/False} for the workers this machine runs, or None.
+
+    Cheap on purpose — two pid-file reads and a process-handle check — because
+    /update/status polls every three seconds. None means "not knowable here",
+    which is the honest answer in production: the workers are their own
+    containers, this process has no pid file for them, and reporting False would
+    put a false alarm on the page of a perfectly healthy deployment."""
+    if os.environ.get("APP_ENV", "development").strip().lower() == "production":
+        return None
+    try:
+        import dev_boot
+        return {role: dev_boot.worker_running(role)
+                for role in dev_boot.WORKER_ROLES}
+    except Exception:
+        return None
+
+
 def stop_job():
     """Ask the running job to stop. One UPDATE, visible to every worker.
 
@@ -100,13 +204,47 @@ def stop_job():
     workers poll jobs.control_flags() between symbols and abandon the rest of
     their batch. The symbol in flight finishes and is written — which is what
     makes the stop safe to resume from rather than something that can leave a
-    half-written symbol behind."""
+    half-written symbol behind.
+
+    The UPDATE alone was not enough, though, and that is what «توقف نمی‌کند» was.
+    Recording the wish leaves the *ending* of the job to a Celery worker, and the
+    states people press the button in are exactly the ones where no worker will
+    read it soon: none running, or the single solo worker busy for minutes on an
+    analytics rebuild. So the job is also CLOSED here whenever nothing is in
+    flight — same request, no queue involved."""
     import jobs
     jid = jobs.active_job_id()
     if not jid:
         return False
     jobs.request_stop(jid)
+    closed = jobs.close_stopped_job(jid)
+    log.info("stop requested", extra={"job_id": jid, "closed": closed})
+    if closed:
+        _refresh_after_stop(jid)
     return True
+
+
+def _refresh_after_stop(job_id):
+    """A stopped run that wrote prices leaves the analytics behind those prices.
+
+    On a thread, because the alternative is doing it in the request: the worker
+    check inside refresh_analytics_async() sends a Celery control broadcast whose
+    FIRST call in a process costs seconds, and «توقف» has to answer instantly —
+    the whole point of closing the job here. A run that wrote nothing needs none
+    of this, which is the common case for a stop."""
+    import threading
+
+    def run():
+        import jobs
+        try:
+            if jobs.rows_written(job_id):
+                refresh_analytics_async(f"job {job_id} stopped")
+        except Exception as e:
+            log.error("could not refresh analytics after a stop",
+                      extra={"job_id": job_id, "error": str(e)})
+
+    threading.Thread(target=run, name=f"post-stop-refresh-{job_id}",
+                     daemon=True).start()
 
 
 def pause_job():
@@ -136,7 +274,19 @@ def job_status():
     import jobs
     try:
         jobs.ensure_tables()
-        return jobs.snapshot()
+        snap = jobs.snapshot()
+        # 'stopping' means «توقف» was recorded and one symbol was still in
+        # flight, so stop_job() deliberately left the ending to the worker
+        # holding it. If that worker never comes back, nothing else in the
+        # system would ever close the job — and a job that never closes is the
+        # ghost that blocks every later update. The page polls every three
+        # seconds; that makes this the cheapest possible place to notice. It
+        # only writes once, and only once the symbol is past the in-flight
+        # grace, so a live worker mid-fetch is still waited for.
+        if snap.get("status") == "stopping" and snap.get("job_id"):
+            if jobs.close_stopped_job(snap["job_id"]):
+                snap = jobs.snapshot(snap["job_id"])
+        return snap
     except Exception as e:
         log.error("job_status failed", extra={"error": str(e)})
         return {"active": False, "running": False, "kind": None, "start": None,
@@ -144,7 +294,7 @@ def job_status():
                 "paused": False, "processed": 0, "success": 0, "failed": 0,
                 "success_list": [], "failed_list": [], "current": None,
                 "result": None, "elapsed": 0, "job_id": None, "total": 0,
-                "error": str(e)}
+                "idle": None, "stalled": False, "error": str(e)}
 
 
 def last_job_params():
@@ -183,6 +333,60 @@ def resume_job_tasks(job_id=None):
 # ---------------------------------------------------------------------------
 # Analytics refresh
 # ---------------------------------------------------------------------------
+def _worker_listening(timeout=1.0):
+    """True if at least one Celery worker answers a broadcast ping.
+
+    `.delay()` returning without raising proves only that the BROKER accepted
+    the message — not that anything will ever run it. With Redis up and no
+    worker consuming the queue (the normal state of a laptop where `python
+    app.py` was started but start_local.ps1 was not), the refresh sits in
+    `updates` indefinitely, the clear_cache() at the end of the task never runs,
+    and every analytics page keeps serving pre-delete numbers until the 6-hour
+    TTL expires. Nothing in the log says so, because from the web process's
+    point of view the publish succeeded.
+
+    So: ask. A broadcast ping is bounded by `timeout` and this path only runs
+    after a manual row delete, which is rare and already slow."""
+    try:
+        import tasks
+        replies = tasks.refresh_analytics_only.app.control.ping(timeout=timeout)
+        if replies:
+            return True
+    except Exception as e:
+        # Broker unreachable, or control disabled — either way, do it here.
+        log.warning("could not ask whether a celery worker is listening",
+                    extra={"error": str(e)})
+        return False
+    # No reply is not the same as no worker. --pool=solo — the only pool that
+    # works on Windows, see start_local.ps1 — runs the task on the very thread
+    # that answers control broadcasts, so a worker mid-refresh is silent for the
+    # several MINUTES the refresh takes. `celery inspect ping` times out on it
+    # too. Treating that as "no worker" would start a duplicate rebuild in the
+    # web process every time a delete landed during one.
+    return _worker_has_claimed_work()
+
+
+def _worker_has_claimed_work():
+    """True if the broker holds a task some worker has taken but not finished.
+
+    Redis' Kombu transport keeps those in the `unacked` hash — with acks_late
+    the entry survives until the task actually completes, which is exactly the
+    window a solo worker cannot answer a ping in. Reading it is one HLEN.
+
+    A stale entry left by a killed worker would read as "present" here; that is
+    the safe direction, because Celery redelivers such a message as soon as a
+    worker starts, whereas a false "absent" costs a duplicate multi-minute
+    rebuild."""
+    try:
+        import redis
+        from celery_app import app as _celery
+        r = redis.Redis.from_url(_celery.conf.broker_url,
+                                 socket_connect_timeout=0.5, socket_timeout=0.5)
+        return r.hlen("unacked") > 0
+    except Exception:
+        return False
+
+
 def refresh_analytics_async(reason=""):
     """Rebuild the materialized analytics off the request path.
 
@@ -197,8 +401,11 @@ def refresh_analytics_async(reason=""):
     import threading
     try:
         import tasks
-        tasks.refresh_analytics_only.delay(reason)
-        return True
+        if _worker_listening():
+            tasks.refresh_analytics_only.delay(reason)
+            return True
+        log.warning("no celery worker is consuming the queue — refreshing "
+                    "analytics in-process instead", extra={"reason": reason})
     except Exception as e:
         log.warning("celery unavailable — refreshing analytics in-process", extra={"error": str(e)})
 
@@ -210,12 +417,25 @@ def refresh_analytics_async(reason=""):
 
     def _run():
         global _refreshing
+        import cache
+        # The module flag above is per PROCESS: it stops this web worker from
+        # starting two, and says nothing about the other three, or about a
+        # Celery worker that took the same job. The Redis lock is what all of
+        # them share. Skipping here is the right answer — whoever holds it is
+        # rebuilding the very views this call wanted.
+        claimed = cache.claim_refresh(owner="market-fallback")
         try:
+            if not claimed:
+                log.info("analytics are already being rebuilt elsewhere — "
+                         "skipping the in-process refresh")
+                return
             import db
             db.refresh_analytics()
         except Exception as exc:
             log.error("refresh_analytics failed", extra={"error": str(exc)})
         finally:
+            if claimed:
+                cache.release_refresh()
             with _refresh_lock:
                 _refreshing = False
 
@@ -229,12 +449,25 @@ _refreshing = False
 
 
 def analytics_refreshing():
-    """True while a refresh is in flight. Covers both routes: the local thread
-    fallback above, and a job sitting in the 'finalizing' state, which is the
-    Celery task doing exactly the same work on another machine."""
+    """True while a refresh is in flight, by any of the three routes:
+
+      * the local thread fallback above — a per-process flag;
+      * the shared Redis lock, which is how a rebuild running in a Celery
+        worker (or in another Gunicorn worker) is visible from here at all;
+      * a job sitting in 'finalizing', which is the tail of an update doing the
+        same work. That one does NOT take the lock — a finalize must never skip
+        its rebuild, because the prices it just wrote are the reason for it — so
+        it has to be checked separately.
+    """
     with _refresh_lock:
         if _refreshing:
             return True
+    try:
+        import cache
+        if cache.refresh_in_progress():
+            return True
+    except Exception:
+        pass
     try:
         import jobs
         j = jobs.current_job()

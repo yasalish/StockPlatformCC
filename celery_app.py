@@ -34,6 +34,33 @@ def _redis_url(db_index):
 BROKER_DB = int(os.environ.get("CELERY_BROKER_DB", "1"))
 RESULT_DB = int(os.environ.get("CELERY_RESULT_DB", "2"))
 
+# ---------------------------------------------------------------------------
+# Two queues, and the reason is head-of-line blocking
+#
+# On Windows --pool=solo is the only pool available (Celery's prefork needs
+# fork(); finpy_tse drives asyncio/aiohttp and misbehaves shared across
+# threads), which means ONE task at a time per worker. Put the analytics
+# rebuild on the same queue as the fetches and that single slot is held for the
+# whole rebuild — 350 s at best, six minutes measured — while everything else
+# waits behind it:
+#
+#   * a job's batches sit unclaimed, so /update shows «در حال دریافت: …» with no
+#     symbol name and no progress, exactly as if the updater were broken;
+#   * tasks.reconcile cannot run, so the watchdog that recovers a stalled job is
+#     itself stalled;
+#   * a job left in 'stopping' cannot be closed out, so it stays the active job
+#     and every later «اجرای به‌روزرسانی» is refused with "one is already
+#     running".
+#
+# That is not a theoretical ordering: it is what a manual row delete followed by
+# an update did on this machine, and all three symptoms were reported together.
+# Fetching and maintenance therefore get separate queues and separate workers,
+# so the slow, rare, interruptible-by-nobody work cannot starve the fast work
+# that the page and the stop button depend on.
+# ---------------------------------------------------------------------------
+FETCH_QUEUE = os.environ.get("CELERY_FETCH_QUEUE", "updates")
+MAINTENANCE_QUEUE = os.environ.get("CELERY_MAINTENANCE_QUEUE", "maintenance")
+
 app = Celery(
     "boursenegar",
     broker=os.environ.get("CELERY_BROKER_URL") or _redis_url(BROKER_DB),
@@ -96,7 +123,20 @@ app.conf.update(
     worker_send_task_events=True,
     task_send_sent_event=True,
 
-    task_default_queue="updates",
+    task_default_queue=FETCH_QUEUE,
+
+    # Routing, so `.delay()` puts each task where its worker is listening and no
+    # caller has to remember a queue name. Only fetch_batch belongs on the fetch
+    # queue; everything else is maintenance — including reconcile, which exists
+    # precisely to rescue a fetch queue that has gone quiet and so must never
+    # queue behind it.
+    task_routes={
+        "tasks.fetch_batch": {"queue": FETCH_QUEUE},
+        "tasks.finalize_update": {"queue": MAINTENANCE_QUEUE},
+        "tasks.refresh_analytics_only": {"queue": MAINTENANCE_QUEUE},
+        "tasks.reconcile": {"queue": MAINTENANCE_QUEUE},
+        "tasks.nightly_update": {"queue": MAINTENANCE_QUEUE},
+    },
 )
 
 # ---------------------------------------------------------------------------
@@ -123,7 +163,7 @@ app.conf.beat_schedule = {
         "schedule": crontab(hour=BEAT_HOUR, minute=BEAT_MINUTE,
                             day_of_week=TRADING_DAYS),
         "kwargs": {"kind": "stock"},
-        "options": {"queue": "updates", "expires": 6 * 3600},
+        "options": {"queue": MAINTENANCE_QUEUE, "expires": 6 * 3600},
     },
     "nightly-etf-update": {
         # Half an hour after the stocks so the two runs do not compete for
@@ -133,7 +173,7 @@ app.conf.beat_schedule = {
         "schedule": crontab(hour=BEAT_HOUR + 1, minute=BEAT_MINUTE,
                             day_of_week=TRADING_DAYS),
         "kwargs": {"kind": "etf"},
-        "options": {"queue": "updates", "expires": 6 * 3600},
+        "options": {"queue": MAINTENANCE_QUEUE, "expires": 6 * 3600},
     },
     "reconcile-stalled-jobs": {
         # The safety net for work Celery cannot recover by itself: a batch whose
@@ -143,7 +183,7 @@ app.conf.beat_schedule = {
         # immediately; this schedule covers the case where nothing restarts.
         "task": "tasks.reconcile",
         "schedule": crontab(minute="*/5"),
-        "options": {"queue": "updates", "expires": 240},
+        "options": {"queue": MAINTENANCE_QUEUE, "expires": 240},
     },
 }
 
