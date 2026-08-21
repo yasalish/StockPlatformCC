@@ -468,10 +468,29 @@ try:
                   "…plus the switches and segmented controls")
             check(st.get("active") == 1, "…with the current theme marked")
 
+            #  These two used to assert `bodyBg == "rgb(11, 16, 32)"`, the exact
+            #  value of the old «نیمه‌شب» surface. That is a test of the palette,
+            #  not of the feature, and it failed the moment the palette was
+            #  redesigned even though theme switching worked perfectly. What the
+            #  feature promises is that the surface becomes DARK — so measure
+            #  that, and it survives the next redesign too.
+            def _dark(css_rgb):
+                """True if an 'rgb(r, g, b)' string is a dark surface."""
+                try:
+                    r, g, b = (int(n) for n in
+                               css_rgb[css_rgb.index("(") + 1:
+                                       css_rgb.index(")")].split(",")[:3])
+                except Exception:
+                    return False
+                #  Rec. 709 relative luminance. A dark theme's page surface sits
+                #  far below 60/255; every light theme here is above 230.
+                return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 60
+
             click = data.get("afterClick") or {}
             check(click.get("theme") == "midnight", "clicking a swatch applies the theme")
-            check(click.get("bodyBg") == "rgb(11, 16, 32)",
-                  "…and the page surface really changes", str(click.get("bodyBg")))
+            check(_dark(click.get("bodyBg") or ""),
+                  "…and the page surface really goes dark",
+                  str(click.get("bodyBg")))
 
             reload_ = data.get("afterReload") or {}
             check(reload_.get("theme") == "midnight",
@@ -481,7 +500,7 @@ try:
 
             dark = data.get("darkTable") or {}
             check(dark.get("theme") == "midnight", "the theme follows onto /stocks")
-            check(dark.get("bodyBg") == "rgb(11, 16, 32)",
+            check(_dark(dark.get("bodyBg") or ""),
                   "…the table page is dark", str(dark.get("bodyBg")))
             check(dark.get("cellInk") not in (None, "rgb(28, 40, 48)"),
                   "…and the table ink inverted with it (no dark-on-dark text)",

@@ -55,13 +55,17 @@ delete the preference — do not leave the switch on screen.
 # Adding a theme: append here, add the `[data-theme="…"]` block to style.css
 # redefining EVERY custom property `:root` defines, and tests/test_prefs.py will
 # check the two stayed in step.
+# swatch = (the theme's page surface, the theme's accent). Kept in step with the
+# [data-theme] blocks in static/css/style.css BY HAND, because a swatch that
+# advertises a palette the stylesheet no longer has is worse than no swatch: the
+# picker's whole premise is that you choose by looking.
 THEMES = [
-    {"id": "light",    "label": "روشن",       "family": "light", "swatch": ("#f4f2ea", "#b89529")},
-    {"id": "sepia",    "label": "سپیا",        "family": "light", "swatch": ("#efe3cd", "#a8781f")},
-    {"id": "paper",    "label": "کاغذ سفید",   "family": "light", "swatch": ("#f4f5f7", "#b08e24")},
-    {"id": "dark",     "label": "تاریک",       "family": "dark",  "swatch": ("#16232c", "#c7ab4d")},
-    {"id": "midnight", "label": "نیمه‌شب",     "family": "dark",  "swatch": ("#0b1020", "#c8b06a")},
-    {"id": "graphite", "label": "ذغالی",       "family": "dark",  "swatch": ("#1b1c1e", "#c7ab4d")},
+    {"id": "light",    "label": "روشن",       "family": "light", "swatch": ("#f5f7f9", "#2563eb")},
+    {"id": "sepia",    "label": "سپیا",        "family": "light", "swatch": ("#efe6d5", "#1d63c9")},
+    {"id": "paper",    "label": "کاغذ سفید",   "family": "light", "swatch": ("#f2f4f7", "#1f6feb")},
+    {"id": "dark",     "label": "تاریک",       "family": "dark",  "swatch": ("#0f151b", "#4d9bff")},
+    {"id": "midnight", "label": "نیمه‌شب",     "family": "dark",  "swatch": ("#070b12", "#5b9dff")},
+    {"id": "graphite", "label": "ذغالی",       "family": "dark",  "swatch": ("#121314", "#6ba3f5")},
 ]
 THEME_IDS = tuple(t["id"] for t in THEMES)
 
@@ -101,7 +105,14 @@ PERIOD_LABELS = {
 # ---------------------------------------------------------------------------
 DEFAULTS = {
     # پوسته — applied pre-paint by the inline script in base.html.
-    "theme": "light",
+    #  DARK by default, with the redesign. Every platform this app is measured
+    #  against — TradingView, the terminal products, the broker dashboards —
+    #  opens dark, because a market screen is read for hours and its content is
+    #  overwhelmingly coloured numerals on a neutral ground. The three light
+    #  themes are unchanged and one click away (☾ in the header, or «پوستهٔ
+    #  نمایش» in settings), and a signed-in user's saved choice still wins over
+    #  this — it only decides what a NEW visitor sees.
+    "theme": "dark",
     # ارقام — 'en' makes static/js/theme.js rewrite Persian digits to Latin in
     # the rendered page. Server-side text stays Persian; this is presentation.
     "digits": "fa",

@@ -92,10 +92,10 @@
   function css(c) { return "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")"; }
 
   function palette() {
-    var flat = rgb("--mute-fill", "#cfd4da");
+    var flat = rgb("--mute-fill", "#cfd6de");
     return {
-      up: rgb("--up", "#1a9d63"),
-      down: rgb("--down", "#e5484d"),
+      up: rgb("--up", "#14874f"),
+      down: rgb("--down", "#d92d20"),
       flat: flat,
       flatInk: luminance(flat) > 150 ? [20, 25, 30] : [255, 255, 255]
     };

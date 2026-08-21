@@ -5,9 +5,15 @@
 {#  data-no-autorefresh: this console polls /update/status itself and holds a
     running job's log; a page reload underneath it would discard both.  #}
 <div data-no-autorefresh></div>
-<section class="hero">
-  <h1>به‌روزرسانی داده‌ها</h1>
-  <div class="stat-row">
+{#  A page header, not a .hero: that dark band belongs to the landing
+    page. Here the title is a label on the work, not an introduction.  #}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">به‌روزرسانی داده‌ها</h1>
+    <p class="page-sub">دریافت قیمت‌های تازه از TSETMC، و مدیریت رکوردهای موجود</p>
+  </div>
+</div>
+<div class="stat-row">
     <div class="stat-card">
       <div class="stat-num">{{ fy(summary.stock_latest) }}</div>
       <div class="stat-label">آخرین تاریخ سهام در پایگاه داده</div>
@@ -21,11 +27,13 @@
       <div class="stat-label">دیروز (تاریخ هدف)</div>
     </div>
     <div class="stat-card">
-      <div class="stat-num">{{ '✅' if updater_available else '⛔' }}</div>
+      <div class="stat-num {{ 'up-t' if updater_available else 'down-t' }}"
+             style="font-size:var(--fs-15)">
+          {{ 'آماده' if updater_available else 'در دسترس نیست' }}
+        </div>
       <div class="stat-label">وضعیت ماژول finpy_tse</div>
     </div>
   </div>
-</section>
 
 {% if not updater_available %}
 <section class="panel">
@@ -68,7 +76,7 @@
   <div class="list-box" id="failed-box" style="display:none">
     <div class="list-head">
       <h3 class="down-t">نمادهای ناموفق / بدون داده (<span id="fail-count">۰</span>)</h3>
-      <button type="button" class="btn ghost small" id="retry-all-btn">🔁 تلاش دوباره برای همه</button>
+      <button type="button" class="btn ghost small" id="retry-all-btn"><svg class="ico" aria-hidden="true"><use href="#i-refresh"></use></svg> تلاش دوباره برای همه</button>
     </div>
     <p class="muted small" style="margin:2px 0 10px">روی نام هر نماد کلیک کنید تا فقط همان دوباره به‌روزرسانی شود.</p>
     <div class="chips" id="failed-list"></div>
@@ -112,7 +120,10 @@
       ⚠ در حالت «کل سابقه» تمام تاریخچهٔ هر نماد از روز نخست دریافت می‌شود (تاریخ‌ها نادیده گرفته می‌شوند).
       این عملیات طولانی است؛ پیش از اجرا مطمئن شوید جدول قیمت خالی است تا رکورد تکراری ایجاد نشود.
     </p>
-    <button type="submit" class="btn" id="run-btn">🔄 اجرای به‌روزرسانی</button>
+    {#  The icon lives in the markup and the words in a span, because
+        setRunEnabled() rewrites the label while a run is in flight and
+        textContent on the button would take the icon with it.  #}
+    <button type="submit" class="btn primary" id="run-btn"><svg class="ico" aria-hidden="true"><use href="#i-refresh"></use></svg><span class="btn-label">اجرای به‌روزرسانی</span></button>
   </form>
 </section>
 {% endif %}
@@ -120,7 +131,7 @@
 <!-- delete panel (works independently of finpy_tse — pure DB operation) -->
 <section class="panel danger-zone" id="delete-panel">
   <div class="panel-head">
-    <h2 class="down-t">🗑 حذف داده‌های قیمت</h2>
+    <h2 class="down-t"><svg class="ico" aria-hidden="true"><use href="#i-trash"></use></svg> حذف داده‌های قیمت</h2>
     <span class="muted small">حذف رکوردهای قیمت یک نماد یا همهٔ نمادها در یک بازهٔ تاریخ</span>
   </div>
   <p class="flash error small" style="margin:0 0 14px">
@@ -148,7 +159,7 @@
       <input type="text" id="del-end" value="{{ yesterday }}" dir="ltr" data-jdate readonly>
     </label>
   </div>
-  <button type="button" class="btn danger" id="del-btn">🗑 حذف داده‌ها</button>
+  <button type="button" class="btn danger" id="del-btn"><svg class="ico" aria-hidden="true"><use href="#i-trash"></use></svg><span class="btn-label">حذف داده‌ها</span></button>
   <p class="note" id="del-msg" style="display:none"></p>
 </section>
 {% endblock %}
@@ -159,6 +170,14 @@
 <!-- shared helpers + delete panel (available whether or not finpy_tse is installed) -->
 <script>
   const fa = (s) => String(s).replace(/[0-9]/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
+
+  /*  Rewrite a button's words without touching its icon. The buttons here have
+      an <svg> and a <span class="btn-label">, and `btn.textContent = "…"` would
+      replace both — which is how the icons used to be emoji in the string.  */
+  function label(btn, text) {
+    const span = btn.querySelector(".btn-label");
+    if (span) span.textContent = text; else btn.textContent = text;
+  }
   const DELETE_URL = "{{ url_for('update_delete') }}";
 
   // «حذف همهٔ نمادها» toggle disables the single-ticker field
@@ -205,7 +224,7 @@
         showDel("⛔ " + (j.error || "خطا در حذف"), false);
       }
     } catch (e) { showDel("⛔ خطا در ارتباط با سرور", false); }
-    btn.disabled = false; btn.textContent = "🗑 حذف داده‌ها";
+    btn.disabled = false; label(btn, "حذف داده‌ها");
   });
 </script>
 
@@ -237,7 +256,7 @@
     // reason it is disabled, and the mode toggle must not overwrite that with
     // an invitation to click.
     if (!runBtn.disabled) {
-      runBtn.textContent = full ? "⬇ دریافت کل سابقه" : "🔄 اجرای به‌روزرسانی";
+      label(runBtn, full ? "دریافت کل سابقه" : "اجرای به‌روزرسانی");
     }
   });
 
@@ -259,13 +278,13 @@
   // that same button.
   const RUN_LABEL = () =>
     (document.getElementById("mode-select").value === "full"
-      ? "⬇ دریافت کل سابقه" : "🔄 اجرای به‌روزرسانی");
+      ? "دریافت کل سابقه" : "اجرای به‌روزرسانی");
 
   function setRunEnabled(on) {
     const btn = document.getElementById("run-btn");
     if (!btn) return;
     btn.disabled = !on;
-    btn.textContent = on ? RUN_LABEL() : "⏳ یک به‌روزرسانی در حال اجراست";
+    label(btn, on ? RUN_LABEL() : "یک به‌روزرسانی در حال اجراست");
     btn.title = on ? "" : "تا پایان به‌روزرسانی جاری یا زدن «توقف» صبر کنید";
   }
   const panel = document.getElementById("progress-panel");

@@ -3,15 +3,19 @@
 
 {% block content %}
 <div data-preset-page="performance" data-preset-kind="{{ kind }}"></div>
-<section class="hero">
-  <h1>بازدهٔ دوره‌ای — سقف و کف</h1>
-  <p class="muted" style="max-width:80ch;margin:6px 0 0">
-    برای هر نماد، بازدهٔ بازه‌های ۱ هفته تا ۳ سال و «از ابتدا» به همراه «سقف»
+{#  A page header, not a .hero: that dark band belongs to the landing
+    page. Here the title is a label on the work, not an introduction.  #}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">بازدهٔ دوره‌ای — سقف و کف</h1>
+    <p class="page-sub">
+      برای هر نماد، بازدهٔ بازه‌های ۱ هفته تا ۳ سال و «از ابتدا» به همراه «سقف»
     (فاصلهٔ قیمت پایانی تا بیشترین قیمت آن بازه) و «کف» (فاصله تا کمترین قیمت بازه)
     محاسبه می‌شود. با انتخاب «از/تا» می‌توانید تاریخ مبنا را عوض کنید و یک ستون
     «بازهٔ دلخواه» بیفزایید — بر پایهٔ «قیمت پایانی تعدیل‌شده» (adj_final).
-  </p>
-</section>
+    </p>
+  </div>
+</div>
 
 {# The date range stays a server round trip: «از…تا» adds a column that only the
    database can compute, and this form owns the Jalali picker. Its hidden inputs
@@ -28,7 +32,7 @@
   <label>تا تاریخ (مبنا):</label>
   <input type="text" name="rto" value="{{ rto }}" dir="ltr" data-jdate readonly
          placeholder="YYYY-MM-DD" class="date-inp">
-  <button type="submit" class="btn">📈 محاسبه</button>
+  <button type="submit" class="btn primary"><svg class="ico" aria-hidden="true"><use href="#i-chart"></use></svg> محاسبه</button>
   {% if rfrom or rto %}<a class="btn ghost" href="{{ url_for('performance_page', kind=kind, market=market, group=group, subgroup=subgroup, cmp=cmp) }}">پاک‌کردن تاریخ‌ها</a>{% endif %}
 </form>
 

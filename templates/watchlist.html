@@ -2,13 +2,17 @@
 {% block title %}بورس‌نگار · دیده‌بان{% endblock %}
 
 {% block content %}
-<section class="hero">
-  <h1>دیده‌بان من</h1>
-  <p class="muted">
-    {% if total %}{{ fa(total) }} نماد دنبال‌شده · تاریخ مبنا: {{ fy(as_of) }}
+{#  A page header, not a .hero: that dark band belongs to the landing
+    page. Here the title is a label on the work, not an introduction.  #}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">دیده‌بان من</h1>
+    <p class="page-sub">
+      {% if total %}{{ fa(total) }} نماد دنبال‌شده · تاریخ مبنا: {{ fy(as_of) }}
     {% else %}هنوز نمادی به دیده‌بان اضافه نکرده‌اید.{% endif %}
-  </p>
-</section>
+    </p>
+  </div>
+</div>
 
 {% if not total %}
 <section class="panel empty-state">
@@ -58,13 +62,13 @@
 {% endmacro %}
 
 <section class="panel">
-  <div class="panel-head"><h2>📈 سهام ({{ fa(stock_rows|length) }})</h2></div>
+  <div class="panel-head"><h2><svg class="ico" aria-hidden="true"><use href="#i-stock"></use></svg> سهام ({{ fa(stock_rows|length) }})</h2></div>
   {% if stock_rows %}{{ watch_table(stock_rows, 'stock') }}
   {% else %}<p class="muted note">سهمی در دیده‌بان نیست.</p>{% endif %}
 </section>
 
 <section class="panel">
-  <div class="panel-head"><h2>🏦 صندوق‌ها ({{ fa(etf_rows|length) }})</h2></div>
+  <div class="panel-head"><h2><svg class="ico" aria-hidden="true"><use href="#i-fund"></use></svg> صندوق‌ها ({{ fa(etf_rows|length) }})</h2></div>
   {% if etf_rows %}{{ watch_table(etf_rows, 'etf') }}
   {% else %}<p class="muted note">صندوقی در دیده‌بان نیست.</p>{% endif %}
 </section>

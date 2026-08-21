@@ -100,7 +100,11 @@ def test_payload_of_nothing_is_the_defaults():
     p = prefs.payload({})
     for key, value in prefs.DEFAULTS.items():
         assert p[key] == value
-    assert p["theme_family"] == "light"
+    # Derived, not defaulted: theme_family has to follow whatever DEFAULTS says
+    # the theme is. It asserted "light" literally, which broke the day the
+    # default theme became dark — while the code was working exactly as
+    # intended. Assert the RELATIONSHIP instead.
+    assert p["theme_family"] == prefs.family_of(prefs.DEFAULTS["theme"])
 
 
 def test_payload_overlays_valid_values_only():

@@ -12,13 +12,24 @@
  * from those — narrower than the real content needs, and changing as you
  * scrolled. Stating them keeps the layout identical to the old page AND stable.
  */
+/**
+ * Revised with the redesign (ui.css): a percentage inside a data grid is now
+ * plain coloured text rather than a filled pill, so each numeric column no
+ * longer needs the pill's 18px of horizontal padding. The names and the sector
+ * columns lose their generous allowance too — cells truncate with an ellipsis
+ * instead of wrapping, which is what used to force a 67px row height.
+ */
 export const W = {
-  symbol: 81,
-  name: 156,
-  market: 62,
-  sector: 101,
-  subSector: 116,
-  price: 88,
-  period: 99,
-  chev: 29,
+  symbol: 78,
+  name: 150,
+  market: 58,
+  sector: 96,
+  subSector: 110,
+  price: 84,
+  //  A three-digit return is real («+۲۶۸.۸۴٪» = 9 glyphs), and at 80px the
+  //  cell truncated it to «۰۲.۵۵٪…», which is worse than a narrower table:
+  //  a number you cannot read is not a column. 9 glyphs x 8px + 20px of
+  //  padding.
+  period: 92,
+  chev: 26,
 } as const;

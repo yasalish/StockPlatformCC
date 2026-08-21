@@ -37,7 +37,7 @@
     <label>نماد دوم (اختیاری):</label>
     <input type="text" name="cmp2" value="{{ cmp2 or '' }}" dir="rtl" autocomplete="off"
            placeholder="برای مقایسهٔ رو‌در‌رو">
-    <button type="submit" class="btn">📊 محاسبه / مقایسه</button>
+    <button type="submit" class="btn primary"><svg class="ico" aria-hidden="true"><use href="#i-chart"></use></svg> محاسبه / مقایسه</button>
     {% if compare or compare2 or cat %}<a class="btn ghost" href="?">پاک‌کردن</a>{% endif %}
   </form>
 
@@ -118,7 +118,7 @@
           <td class="num">{{ pill(c.diff) }}</td>
           <td class="small">
             {% if c.diff is none %}<span class="muted">—</span>
-            {% elif c.diff >= -0.0001 and c.top_ticker == compare.ticker %}<span class="up-title">👑 صدرنشین</span>
+            {% elif c.diff >= -0.0001 and c.top_ticker == compare.ticker %}<span class="up-title"><svg class="ico" aria-hidden="true"><use href="#i-trophy"></use></svg> صدرنشین</span>
             {% elif c.diff >= 0 %}<span class="up-title">✅ جلوتر</span>
             {% else %}<span class="down-title">❌ عقب‌تر</span>{% endif %}
           </td>

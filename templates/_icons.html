@@ -1,0 +1,144 @@
+{#  _icons.html — the icon sprite
+    ---------------------------------------------------------------------------
+    One hidden <svg> of <symbol>s, included once per document by base.html. A
+    page then draws one with:
+
+        <svg class="ico"><use href="#i-chart"></use></svg>
+
+    Why a sprite and not emoji, which is what this replaces: an emoji is a
+    picture chosen by the operating system's font. 📈 is a different drawing on
+    Windows, macOS, Android and Linux; it cannot inherit the theme colour, it
+    cannot be sized to the optical grid, and at 14px it renders as coloured
+    mush. These are 16×16 line icons on a 1.6px stroke that inherit
+    currentColor, so they follow every one of the six themes for free.
+
+    Why a sprite and not an icon font: a font is a second render-blocking
+    request whose glyphs are invisible until it loads, and it puts pictures in
+    the text layer where a screen reader finds them.
+#}
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <defs>
+    {#  Every symbol shares one geometry: a 16-unit box, no fill, 1.6 stroke,
+        round caps and joins. Consistency here is most of what makes a set of
+        icons read as a set.  #}
+    <g id="i-defaults"></g>
+  </defs>
+
+  <symbol id="i-chart" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1.5 12.5 5.5 7l2.8 2.8L14.5 3"/><path d="M10.5 3h4v4"/>
+  </symbol>
+
+  <symbol id="i-dashboard" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="1.8" y="1.8" width="5.2" height="5.2" rx="1.2"/>
+    <rect x="9" y="1.8" width="5.2" height="5.2" rx="1.2"/>
+    <rect x="1.8" y="9" width="5.2" height="5.2" rx="1.2"/>
+    <rect x="9" y="9" width="5.2" height="5.2" rx="1.2"/>
+  </symbol>
+
+  <symbol id="i-stock" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 13.5V7M8 13.5V3M13 13.5v-4"/>
+  </symbol>
+
+  <symbol id="i-fund" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 6.5 8 2.5l6 4"/><path d="M3.2 6.5v7h9.6v-7"/>
+    <path d="M6.2 13.5v-4h3.6v4"/>
+  </symbol>
+
+  <symbol id="i-map" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="1.8" y="2.5" width="5" height="11" rx="1"/>
+    <rect x="9.2" y="2.5" width="5" height="6.5" rx="1"/>
+    <rect x="9.2" y="11" width="5" height="2.5" rx="1"/>
+  </symbol>
+
+  <symbol id="i-filter" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1.8 3.5h12.4L9.6 8.6v4.4L6.4 11.6V8.6z"/>
+  </symbol>
+
+  <symbol id="i-target" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.6"/>
+  </symbol>
+
+  <symbol id="i-clock" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="8" cy="8" r="6"/><path d="M8 4.6V8l2.6 1.6"/>
+  </symbol>
+
+  <symbol id="i-star" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 1.9l1.9 3.9 4.3.6-3.1 3 .8 4.2L8 11.6l-3.9 2 .8-4.2-3.1-3
+             4.3-.6z"/>
+  </symbol>
+
+  <symbol id="i-search" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/>
+  </symbol>
+
+  <symbol id="i-refresh" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13.6 7a5.6 5.6 0 1 0-1.7 4.3"/><path d="M13.9 3.4V7h-3.6"/>
+  </symbol>
+
+  <symbol id="i-settings" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="8" cy="8" r="2.3"/>
+    <path d="M8 1.6v1.8M8 12.6v1.8M2.5 8H4.3M11.7 8h1.8M4.1 4.1l1.3 1.3
+             M10.6 10.6l1.3 1.3M11.9 4.1l-1.3 1.3M5.4 10.6l-1.3 1.3"/>
+  </symbol>
+
+  <symbol id="i-download" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 2v7.4"/><path d="M5 7l3 3 3-3"/><path d="M2.6 13.4h10.8"/>
+  </symbol>
+
+  <symbol id="i-info" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="8" cy="8" r="6"/><path d="M8 7.2v4"/><path d="M8 4.9h.01"/>
+  </symbol>
+
+  <symbol id="i-help" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="8" cy="8" r="6"/>
+    <path d="M6.3 6.1a1.8 1.8 0 1 1 2.6 1.7c-.6.3-.9.7-.9 1.4"/>
+    <path d="M8 11.6h.01"/>
+  </symbol>
+
+  <symbol id="i-trash" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2.6 4.4h10.8"/><path d="M6.4 4.4V2.9h3.2v1.5"/>
+    <path d="M4 4.4l.7 8.1a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9l.7-8.1"/>
+    <path d="M6.6 7v3.6M9.4 7v3.6"/>
+  </symbol>
+
+  <symbol id="i-print" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4.4 6V2.6h7.2V6"/>
+    <path d="M4.4 12H2.9V6.6h10.2V12h-1.5"/>
+    <rect x="4.4" y="9.6" width="7.2" height="3.8" rx=".8"/>
+  </symbol>
+
+  <symbol id="i-expand" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 2.6H2.6V6M10 2.6h3.4V6M10 13.4h3.4V10M6 13.4H2.6V10"/>
+  </symbol>
+
+  <symbol id="i-trophy" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M5 2.6h6v3.1a3 3 0 0 1-6 0z"/>
+    <path d="M5 3.6H3.2v1a2 2 0 0 0 1.9 2M11 3.6h1.8v1a2 2 0 0 1-1.9 2"/>
+    <path d="M8 8.8v2.4M5.8 13.4h4.4"/>
+  </symbol>
+
+  <symbol id="i-empty" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="3" width="12" height="10" rx="1.6"/>
+    <path d="M2 6.4h12M5.6 9.6h4.8"/>
+  </symbol>
+</svg>

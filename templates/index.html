@@ -3,54 +3,71 @@
 {% block body_class %}home-page{% endblock %}
 
 {% block content %}
-{# Professional landing page — renders instantly with NO database work. The
-   live market data lives on the dashboard (/dashboard). #}
-<section class="landing-hero">
-  <div class="landing-hero-inner">
-    <span class="landing-badge">📈 بورس اوراق بهادار تهران</span>
-    <h1>تحلیل هوشمند بازار سرمایه، یک‌جا</h1>
-    <p class="landing-sub">
-      بازدهٔ دوره‌ای، سقف و کف قیمت، استراتژی‌های معاملاتی و فیلترهای پیشرفته روی
-      داده‌های روزآمد بورس تهران — سریع، دقیق و کاربرپسند.
-    </p>
-    <div class="landing-cta">
-      <a class="btn hero-primary" href="{{ url_for('dashboard') }}">ورود به داشبورد بازار</a>
-      <a class="btn hero-secondary" href="{{ url_for('performance_page') }}">مشاهدهٔ بازدهٔ دوره‌ای</a>
-    </div>
+{#  Professional landing page — renders instantly with NO database work. The
+    live market data lives on the dashboard (/dashboard), and it stays there:
+    the one page a first-time visitor sees should not wait on a market-wide
+    scan.
+
+    Rewritten with the redesign to use the shared component classes (.hero,
+    .btn, .feature-card) instead of a parallel set of .landing-* rules, so the
+    landing page inherits the design system rather than restating it. The icons
+    are the _icons.html sprite: 📊 and 🏛️ were pictures chosen by the operating
+    system's emoji font — a different drawing on every platform, unable to
+    inherit the theme colour, and rendered as coloured mush at 34px.  #}
+<section class="hero">
+  <span class="hero-badge">
+    <svg class="ico" aria-hidden="true"><use href="#i-chart"></use></svg>
+    بورس اوراق بهادار تهران
+  </span>
+  <h1>تحلیل هوشمند بازار سرمایه، یک‌جا</h1>
+  <p>
+    بازدهٔ دوره‌ای، سقف و کف قیمت، استراتژی‌های معاملاتی و فیلترهای پیشرفته روی
+    داده‌های روزآمد بورس تهران — سریع، دقیق و کاربرپسند.
+  </p>
+  <div class="hero-actions">
+    <a class="btn primary" href="{{ url_for('dashboard') }}">
+      <svg class="ico" aria-hidden="true"><use href="#i-dashboard"></use></svg>
+      ورود به داشبورد بازار
+    </a>
+    <a class="btn ghost" href="{{ url_for('performance_page') }}">
+      مشاهدهٔ بازدهٔ دوره‌ای
+    </a>
   </div>
 </section>
 
-<section class="landing-section">
-  <h2 class="landing-h2">امکانات سامانه</h2>
-  <p class="landing-h2-sub">هر ابزار برای یک تصمیم بهتر در بازار</p>
+<section>
+  <div class="section-head">
+    <h2>امکانات سامانه</h2>
+    <p>هر ابزار برای یک تصمیم بهتر در بازار</p>
+  </div>
   <div class="feature-grid">
     <a class="feature-card" href="{{ url_for('dashboard') }}">
-      <div class="feature-icon">📊</div>
+      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-dashboard"></use></svg></div>
       <h3>داشبورد بازار</h3>
       <p>نمای کلی بازار، برترین بازده‌ها و بیشترین افت‌ها در یک نگاه.</p>
     </a>
     <a class="feature-card" href="{{ url_for('performance_page') }}">
-      <div class="feature-icon">📈</div>
+      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-chart"></use></svg></div>
       <h3>بازدهٔ دوره‌ای</h3>
       <p>بازده، سقف و کف هر نماد در بازه‌های ۱ هفته تا ۳ سال و «از ابتدا».</p>
     </a>
     <a class="feature-card" href="{{ url_for('stocks_page') }}">
-      <div class="feature-icon">🏛️</div>
+      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-stock"></use></svg></div>
       <h3>تحلیل سهام</h3>
       <p>رتبه‌بندی و مقایسهٔ نمادهای بازار بر پایهٔ بازدهی دوره‌های مختلف.</p>
     </a>
     <a class="feature-card" href="{{ url_for('etfs_page') }}">
-      <div class="feature-icon">🧺</div>
+      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-fund"></use></svg></div>
       <h3>صندوق‌های سرمایه‌گذاری</h3>
       <p>عملکرد صندوق‌های قابل معامله (ETF) به تفکیک نوع و بازدهی.</p>
     </a>
     <a class="feature-card" href="{{ url_for('strategies_page') }}">
-      <div class="feature-icon">🎯</div>
+      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-target"></use></svg></div>
       <h3>استراتژی‌ها</h3>
       <p>پویش بازار بر پایهٔ سیگنال‌ها و شرایط معاملاتی از پیش تعریف‌شده.</p>
     </a>
     <a class="feature-card" href="{{ url_for('filters_page') }}">
-      <div class="feature-icon">🔎</div>
+      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-filter"></use></svg></div>
       <h3>فیلترهای پیشرفته</h3>
       <p>غربال نمادها با ترکیب معیارهای دلخواه برای یافتن فرصت‌ها.</p>
     </a>
@@ -58,16 +75,19 @@
 </section>
 
 {% if current_user.is_authenticated %}
-<section class="landing-section">
-  <div class="landing-welcome">
-    <div>
-      <h2>{{ current_user.display_name }} عزیز، خوش آمدید 👋</h2>
-      <p class="muted">برای دیدن آخرین وضعیت بازار وارد داشبورد شوید یا دیده‌بان خود را دنبال کنید.</p>
-    </div>
-    <div class="landing-welcome-cta">
-      <a class="btn" href="{{ url_for('dashboard') }}">داشبورد بازار</a>
-      <a class="btn" href="{{ url_for('watchlist_page') }}">دیده‌بان من</a>
-    </div>
+<section class="panel welcome-panel">
+  <div>
+    <h2 class="page-title">{{ current_user.display_name }} عزیز، خوش آمدید</h2>
+    <p class="page-sub">
+      برای دیدن آخرین وضعیت بازار وارد داشبورد شوید یا دیده‌بان خود را دنبال کنید.
+    </p>
+  </div>
+  <div class="page-actions">
+    <a class="btn primary" href="{{ url_for('dashboard') }}">داشبورد بازار</a>
+    <a class="btn" href="{{ url_for('watchlist_page') }}">
+      <svg class="ico" aria-hidden="true"><use href="#i-star"></use></svg>
+      دیده‌بان من
+    </a>
   </div>
 </section>
 {% endif %}

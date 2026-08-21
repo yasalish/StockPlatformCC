@@ -3,15 +3,19 @@
 
 {% block content %}
 <div data-preset-page="filters" data-preset-kind="{{ kind }}"></div>
-<section class="hero">
-  <h1>فیلترهای تکنیکال — الگوهای کندلی و اندیکاتورها</h1>
-  <p class="muted" style="max-width:74ch;margin:6px 0 0">
-    همهٔ نمادها روی آخرین دادهٔ قیمت با مجموعه‌ای از فیلترهای رایج تحلیل تکنیکال پویش می‌شوند:
+{#  A page header, not a .hero: that dark band belongs to the landing
+    page. Here the title is a label on the work, not an introduction.  #}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">فیلترهای تکنیکال — الگوهای کندلی و اندیکاتورها</h1>
+    <p class="page-sub">
+      همهٔ نمادها روی آخرین دادهٔ قیمت با مجموعه‌ای از فیلترهای رایج تحلیل تکنیکال پویش می‌شوند:
     الگوهای شمعی (کندل پوشای صعودی/نزولی، چکش، ستارهٔ صبحگاهی/شامگاهی و …) و وضعیت اندیکاتورها
     (اشباع خرید/فروش RSI، مکدی، باند بولینگر و میانگین متحرک). نمادهایی که هم‌اکنون هر فیلتر روی آن‌ها
     برقرار است فهرست می‌شوند.
-  </p>
-</section>
+    </p>
+  </div>
+</div>
 
 {# ── the island: summary cards, filter bar and one section per filter. The rows
    come from /api/scan/filters/<kind>, and each section builds its table only

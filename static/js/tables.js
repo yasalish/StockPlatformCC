@@ -120,10 +120,10 @@ const BNTables = (function () {
     var table = scroller.querySelector("table");
     var virtual = table && table.classList.contains("grid-virtual");
 
-    tools.appendChild(button("⛶", "تمام‌صفحه", function () { toggleFullscreen(scroller); }));
+    tools.appendChild(button("⤢", "تمام‌صفحه", function () { toggleFullscreen(scroller); }));
     if (!virtual) {
       tools.appendChild(button("⤓", "دریافت CSV", function () { exportCsv(scroller); }));
-      tools.appendChild(button("🖨", "چاپ جدول", function () { printTable(scroller); }));
+      tools.appendChild(button("⎙", "چاپ جدول", function () { printTable(scroller); }));
     }
     return tools;
   }

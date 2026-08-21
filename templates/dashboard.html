@@ -5,9 +5,25 @@
 {# The dashboard shell paints instantly with NO database work. The data-heavy
    blocks (counts, top gainers/losers, top ETFs) are fetched right after paint
    from /dashboard/data and injected below. #}
-<section class="hero">
-  <h1>داشبورد بازار</h1>
-</section>
+{#  A page header, not a hero. .hero is the landing page's dark band — 140px
+    of gradient carrying two words, on the screen a returning user opens most
+    often. The stat strip below is the first thing worth seeing.  #}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">داشبورد بازار</h1>
+    <p class="page-sub">نمای کلی بازار، پهنای صعود و نزول، و برترین‌های دوره</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="{{ url_for('heatmap_page') }}">
+      <svg class="ico" aria-hidden="true"><use href="#i-map"></use></svg>
+      نقشهٔ بازار
+    </a>
+    <a class="btn" href="{{ url_for('performance_page') }}">
+      <svg class="ico" aria-hidden="true"><use href="#i-chart"></use></svg>
+      بازدهٔ دوره‌ای
+    </a>
+  </div>
+</div>
 
 <div id="dashboard" data-src="{{ url_for('dashboard_data') }}">
   <div class="dash-loading">

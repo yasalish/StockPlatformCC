@@ -16,194 +16,380 @@
 @font-face{font-family:Vazirmatn;src:url('../fonts/Vazirmatn-Black.woff2') format('woff2');font-weight:900;font-style:normal;font-display:swap}
 
 /* ---------------------------------------------------------------------------
-   پوسته‌ها / THEMES
+   پوسته‌ها — the design tokens, one block per theme
    ---------------------------------------------------------------------------
-   `:root` below IS the light theme («روشن») — the warm cream + gold palette this
-   app has always had. It is deliberately NOT spelled `[data-theme="light"]`, for
-   two reasons: an unknown or missing `data-theme` then renders as the theme
-   everyone already knows (prefs.family_of() answers 'light' for exactly the same
-   reason), and a page loaded with JavaScript disabled still has a full palette.
+   THE RULES (tests/test_prefs.py enforces the second one)
 
-   Adding a theme is three steps, and the first is the one that bites:
+   1. `:root` IS the light theme. It is deliberately not `[data-theme="light"]`,
+      so a `data-theme` value the stylesheet does not know — an old bookmark, a
+      theme removed from prefs.THEMES — renders as light rather than as nothing.
 
-   1. Add a `[data-theme="<id>"]` block that redefines EVERY custom property
-      `:root` defines below. A block that redefines half of them inherits the
-      rest from `:root` and renders as a broken light theme — dark panels with
-      pale hover states, pills nobody can read. verify_order09.py diffs the
-      property names of every block against `:root`, so this cannot ship
-      half-finished.
-   2. Register it in `prefs.THEMES` (id, label, family, swatch). The settings
-      picker and the light/dark toggle both read that list: a theme present only
-      in this stylesheet is invisible, and one present only in that list paints
-      nothing.
-   3. `--radius` is geometry rather than colour, so every block repeats it
-      unchanged; it is listed only to keep the "redefine everything" rule
-      mechanical.
+   2. Every `[data-theme]` block redefines EVERY property `:root` defines. A
+      block that redefines half of them inherits the rest from `:root` and
+      renders as a broken light theme, which is the one failure mode that looks
+      like a bug in the app rather than in a stylesheet.
 
-   Two rules about the numbers themselves:
+   3. Components never name a colour. They read a semantic token — --surface-1,
+      --ink-2, --accent — so a new theme is a palette, not a rewrite. The three
+      properties below that DO name colours (--up, --down, --mid) are the only
+      ones whose meaning is the colour itself.
 
-   * `--up` / `--down` keep their meaning in every theme (green rises, red
-     falls) but need more luminance on a dark surface to stay legible, and
-     `--up-bg` / `--down-bg` become dark tints rather than the light ones. A red
-     an investor has to squint at is a number they will misread.
-   * `--on-brand` is the text colour ON a filled accent (buttons, tags, the
-     selected calendar day): white over the light themes' deep gold, dark ink
-     over the dark themes' pale gold. Left at #fff everywhere it would put white
-     text on a light-gold button.
+   Adding a theme: append to prefs.THEMES, add a block here (copy the whole set
+   of properties), and the tests will check the two stayed in step.
 
-   `color-scheme` is declared per family so the browser's own furniture — native
-   scrollbars, `<select>` popups, form controls, the canvas behind an overscroll
-   — follows the theme instead of staying stubbornly light.
+   Generated from one definition so the six key sets cannot drift apart.
    --------------------------------------------------------------------------- */
+
+/* روشن — a neutral, cool white. This block IS :root, so any
+   unknown data-theme value falls back to it (see prefs.family_of). */
 :root{
   color-scheme:light;
-  /* filmnegar-inspired palette: warm cream surfaces + gold accent, on a
-     dark slate-navy header/hero. */
-  --bg:#f4f2ea; --panel:#ffffff; --ink:#1c2830;
-  --muted:#6a7078; --line:#e4dfd1; --brand:#b89529; --brand2:#a2811f;
-  --brand-soft:#f4ecd2;
-  --header1:#16232c; --header2:#22333e; --header3:#3a4b55;
-  --up:#1a9d63; --up-bg:#e3f6ec; --down:#e5484d; --down-bg:#fdecec;
-  --gold-grad:linear-gradient(135deg,#d4b85b 0%,#c4a749 55%,#a98d2c 100%);
-  --shadow:0 1px 2px rgba(30,35,20,.05),0 6px 16px rgba(30,35,20,.07);
-  /* Tokens lifted out of the literals that used to sit inline in the rules
-     below. Each holds exactly the value its rule carried before, so the light
-     theme is unchanged to the pixel; they exist so a theme block has something
-     to move. */
-  --on-brand:#ffffff;       /* text on a filled accent (button, tag, chip)     */
-  --on-header:#ffffff;      /* text on the dark header / hero gradient         */
-  --on-gold:#1c2830;        /* text on --gold-grad (the hero primary button)   */
-  --hero-badge:#e7d38f;     /* the small pill on the landing hero              */
-  --code-bg:#f0ece0;
-  --input-bg:#ffffff;       /* select / text input / date field surface        */
-  --hover:#f6f2e6;          /* table row and tile hover                        */
-  --total-bg:#fff7f0;       /* the total row of a table                        */
-  --star:#f0b429;           /* دیده‌بان star, and the pinned-row rule           */
-  --star-bg:#fff8e6;
-  --pin-bg:#fff7e8;
-  --pin-bg-hover:#fff2d6;
-  --down-strong:#b83636;    /* hover state of a destructive button             */
-  --mute-fill:#cfd4da;      /* a bar with no signal in it                      */
-  --mid:#d19a2e; --mid-bg:#fbf1da;  /* the neutral verdict, between up & down  */
-  --sbar-track:#efeade;     /* table scrollbars — see «نوار پیمایش» below      */
-  --sbar-thumb:#c9bfa4;
-  --sbar-thumb-hover:#a2811f;
-  --radius:14px;
+
+  /* surfaces: page → panel → raised/hover → overlay */
+  --surface-0:#f5f7f9; --surface-1:#ffffff;
+  --surface-2:#eff2f6; --surface-3:#ffffff;
+  --bg:var(--surface-0); --panel:var(--surface-1); --hover:var(--surface-2);
+  --input-bg:var(--surface-1); --code-bg:#f1f3f6;
+  --total-bg:#f7f9fb; --overlay:rgba(12,18,26,.42);
+
+  /* text: primary → secondary → tertiary (labels, placeholders, units) */
+  --ink:#0f151b; --ink-2:#48535f; --ink-3:#78838f;
+  --muted:var(--ink-2);
+
+  /* dividers */
+  --line:#e2e7ec; --line-strong:#cfd6de; --line-soft:#eef1f5;
+
+  /* the interactive accent — one colour for every actionable thing, kept
+     clear of the up/down pair below so "clickable" never reads as "rising" */
+  --accent:#2563eb; --accent-hover:#1d4ed8;
+  --accent-soft:#e9f0ff; --on-accent:#ffffff;
+  --focus:#2563eb66;
+
+  /* price direction. The only place green and red are allowed. */
+  --up:#14874f; --up-bg:#e6f6ee;
+  --down:#d92d20; --down-bg:#fdeceb; --down-strong:#b42318;
+  --mid:#b7791f; --mid-bg:#fdf4e3;
+  --mute-fill:#cfd6de;
+
+  /* the gold mark. Identity, not chrome: logo, hero badge, pinned rows. */
+  --brand:#a8811f; --brand2:#8a6913; --brand-soft:#f6efd8;
+  --gold-grad:linear-gradient(180deg,#8a6913 0%,#a8811f 100%);
+  --on-brand:#ffffff; --on-gold:#f2f6fa;
+  --hero-badge:#e2c980;
+  --star:#e0a51f; --star-bg:#fdf6e3;
+  --pin-bg:#fdf6e3; --pin-bg-hover:#f6efd8;
+
+  /* the dark band behind the landing hero */
+  --header1:#131b24; --header2:#1b2632; --header3:#243241;
+  --on-header:#f2f6fa;
+
+  /* table scrollbars — see «نوار پیمایش» in settings */
+  --sbar-track:#eef1f5; --sbar-thumb:#c3ccd6;
+  --sbar-thumb-hover:#96a2af;
+
+  /* geometry & elevation. 8px, not 14: a data platform reads as precise, and
+     a large radius on a dense table cell fights the grid it sits in. */
+  --radius:10px; --radius-sm:6px; --radius-lg:14px;
+  --shadow:0 1px 2px rgba(12,18,26,.06),0 1px 3px rgba(12,18,26,.04);
+  --shadow-md:0 4px 12px -2px rgba(12,18,26,.10),0 2px 6px -2px rgba(12,18,26,.06);
+  --shadow-lg:0 16px 40px -12px rgba(12,18,26,.22),0 4px 12px -4px rgba(12,18,26,.10);
 }
 
-/* سپیا — warmer paper, for long reading sessions under artificial light. */
+/* سپیا — warm paper for long reading sessions under artificial light. */
 [data-theme="sepia"]{
   color-scheme:light;
-  --bg:#efe3cd; --panel:#f9f2e4; --ink:#2b2118;
-  --muted:#6f6353; --line:#ddcdb0; --brand:#a8781f; --brand2:#8d6316;
-  --brand-soft:#eadcbe;
-  --header1:#3b2c1c; --header2:#4a3927; --header3:#6b563b;
-  --up:#1a7f52; --up-bg:#dfeede; --down:#c33f43; --down-bg:#f3dcd8;
-  --gold-grad:linear-gradient(135deg,#c9a95e 0%,#b8934a 55%,#8d6316 100%);
-  --shadow:0 1px 2px rgba(60,45,20,.07),0 6px 16px rgba(60,45,20,.10);
-  --on-brand:#fdf8ef; --on-header:#fdf8ef; --on-gold:#2b2118;
-  --hero-badge:#e8d3a2; --code-bg:#e6d8bd; --input-bg:#fdf8ef;
-  --hover:#e9dcc2; --total-bg:#f2e6d0; --star:#c98a12; --star-bg:#f0e0bd;
-  --pin-bg:#f1e2c1; --pin-bg-hover:#e8d5ad; --down-strong:#a53337;
-  --mute-fill:#c3b69c; --mid:#b8871f; --mid-bg:#f0e3c6;
-  --sbar-track:#e3d4b7; --sbar-thumb:#bfa87e; --sbar-thumb-hover:#8d6316;
-  --radius:14px;
+
+  /* surfaces: page → panel → raised/hover → overlay */
+  --surface-0:#efe6d5; --surface-1:#fbf6ec;
+  --surface-2:#e9dfca; --surface-3:#fbf6ec;
+  --bg:var(--surface-0); --panel:var(--surface-1); --hover:var(--surface-2);
+  --input-bg:var(--surface-1); --code-bg:#e9dfca;
+  --total-bg:#f3ebda; --overlay:rgba(38,28,16,.42);
+
+  /* text: primary → secondary → tertiary (labels, placeholders, units) */
+  --ink:#2a2118; --ink-2:#5f5344; --ink-3:#877a67;
+  --muted:var(--ink-2);
+
+  /* dividers */
+  --line:#ddd0b8; --line-strong:#cbbb9d; --line-soft:#e8ddc8;
+
+  /* the interactive accent — one colour for every actionable thing, kept
+     clear of the up/down pair below so "clickable" never reads as "rising" */
+  --accent:#1d63c9; --accent-hover:#1750a8;
+  --accent-soft:#e3ecfb; --on-accent:#ffffff;
+  --focus:#2563eb66;
+
+  /* price direction. The only place green and red are allowed. */
+  --up:#146b45; --up-bg:#e0eddf;
+  --down:#c0362d; --down-bg:#f5ddd8; --down-strong:#9e2a22;
+  --mid:#9c6516; --mid-bg:#f0e4c8;
+  --mute-fill:#c9bba1;
+
+  /* the gold mark. Identity, not chrome: logo, hero badge, pinned rows. */
+  --brand:#96701a; --brand2:#7a5a10; --brand-soft:#eaddbe;
+  --gold-grad:linear-gradient(180deg,#7a5a10 0%,#96701a 100%);
+  --on-brand:#ffffff; --on-gold:#fbf6ec;
+  --hero-badge:#e5d0a1;
+  --star:#c98a12; --star-bg:#f2e7c9;
+  --pin-bg:#f2e7c9; --pin-bg-hover:#eaddbe;
+
+  /* the dark band behind the landing hero */
+  --header1:#221a12; --header2:#2f2419; --header3:#3d2f20;
+  --on-header:#fbf6ec;
+
+  /* table scrollbars — see «نوار پیمایش» in settings */
+  --sbar-track:#e8ddc8; --sbar-thumb:#c6b491;
+  --sbar-thumb-hover:#a08d68;
+
+  /* geometry & elevation. 8px, not 14: a data platform reads as precise, and
+     a large radius on a dense table cell fights the grid it sits in. */
+  --radius:10px; --radius-sm:6px; --radius-lg:14px;
+  --shadow:0 1px 2px rgba(12,18,26,.06),0 1px 3px rgba(12,18,26,.04);
+  --shadow-md:0 4px 12px -2px rgba(12,18,26,.10),0 2px 6px -2px rgba(12,18,26,.06);
+  --shadow-lg:0 16px 40px -12px rgba(12,18,26,.22),0 4px 12px -4px rgba(12,18,26,.10);
 }
 
-/* کاغذ سفید — a cool, neutral white for panels that render the cream cast badly
-   (many IPS screens do) and for anyone printing a screenshot. */
+/* کاغذ سفید — the coolest, flattest light theme; no colour cast at all. */
 [data-theme="paper"]{
   color-scheme:light;
-  --bg:#f4f5f7; --panel:#ffffff; --ink:#1a1f26;
-  --muted:#6b7480; --line:#e2e5ea; --brand:#b08e24; --brand2:#94761a;
-  --brand-soft:#f2ead2;
-  --header1:#1b2430; --header2:#26313f; --header3:#3e4c5d;
-  --up:#12855a; --up-bg:#e2f5ec; --down:#d93b41; --down-bg:#fdeaea;
-  --gold-grad:linear-gradient(135deg,#d0b45f 0%,#bfa24b 55%,#94761a 100%);
-  --shadow:0 1px 2px rgba(20,25,35,.05),0 6px 16px rgba(20,25,35,.08);
-  --on-brand:#ffffff; --on-header:#ffffff; --on-gold:#1a1f26;
-  --hero-badge:#e6d49a; --code-bg:#eef0f3; --input-bg:#ffffff;
-  --hover:#f0f2f5; --total-bg:#f7f8fa; --star:#e0a51f; --star-bg:#fdf4dd;
-  --pin-bg:#fdf3da; --pin-bg-hover:#f8eac2; --down-strong:#b32f34;
-  --mute-fill:#ccd2da; --mid:#c4901f; --mid-bg:#faf0d8;
-  --sbar-track:#e8eaee; --sbar-thumb:#bcc3cc; --sbar-thumb-hover:#94761a;
-  --radius:14px;
+
+  /* surfaces: page → panel → raised/hover → overlay */
+  --surface-0:#f2f4f7; --surface-1:#ffffff;
+  --surface-2:#eaeef3; --surface-3:#ffffff;
+  --bg:var(--surface-0); --panel:var(--surface-1); --hover:var(--surface-2);
+  --input-bg:var(--surface-1); --code-bg:#f1f3f6;
+  --total-bg:#f6f8fa; --overlay:rgba(12,18,26,.42);
+
+  /* text: primary → secondary → tertiary (labels, placeholders, units) */
+  --ink:#0b1017; --ink-2:#454f5b; --ink-3:#737e8a;
+  --muted:var(--ink-2);
+
+  /* dividers */
+  --line:#dfe4ea; --line-strong:#c9d1da; --line-soft:#ecf0f4;
+
+  /* the interactive accent — one colour for every actionable thing, kept
+     clear of the up/down pair below so "clickable" never reads as "rising" */
+  --accent:#1f6feb; --accent-hover:#1858c4;
+  --accent-soft:#e7f0fe; --on-accent:#ffffff;
+  --focus:#2563eb66;
+
+  /* price direction. The only place green and red are allowed. */
+  --up:#14874f; --up-bg:#e6f6ee;
+  --down:#d92d20; --down-bg:#fdeceb; --down-strong:#b42318;
+  --mid:#b7791f; --mid-bg:#fdf4e3;
+  --mute-fill:#cfd6de;
+
+  /* the gold mark. Identity, not chrome: logo, hero badge, pinned rows. */
+  --brand:#8d6f22; --brand2:#725917; --brand-soft:#f2ecda;
+  --gold-grad:linear-gradient(180deg,#725917 0%,#8d6f22 100%);
+  --on-brand:#ffffff; --on-gold:#f2f6fa;
+  --hero-badge:#e2c980;
+  --star:#e0a51f; --star-bg:#fdf6e3;
+  --pin-bg:#fdf6e3; --pin-bg-hover:#f2ecda;
+
+  /* the dark band behind the landing hero */
+  --header1:#0e141b; --header2:#18212b; --header3:#212d3a;
+  --on-header:#f2f6fa;
+
+  /* table scrollbars — see «نوار پیمایش» in settings */
+  --sbar-track:#ecf0f4; --sbar-thumb:#c0c9d3;
+  --sbar-thumb-hover:#8f9aa6;
+
+  /* geometry & elevation. 8px, not 14: a data platform reads as precise, and
+     a large radius on a dense table cell fights the grid it sits in. */
+  --radius:10px; --radius-sm:6px; --radius-lg:14px;
+  --shadow:0 1px 2px rgba(12,18,26,.06),0 1px 3px rgba(12,18,26,.04);
+  --shadow-md:0 4px 12px -2px rgba(12,18,26,.10),0 2px 6px -2px rgba(12,18,26,.06);
+  --shadow-lg:0 16px 40px -12px rgba(12,18,26,.22),0 4px 12px -4px rgba(12,18,26,.10);
 }
 
-/* تاریک — the slate-navy of the existing header extended over the whole page,
-   so dark mode looks like this product rather than a generic inversion. */
+/* تاریک — the default. Slate-navy terminal: the surface ramp is four
+   steps so a menu can sit above a panel above the page and still read as
+   three distinct planes, which a single --panel colour cannot express. */
 [data-theme="dark"]{
   color-scheme:dark;
-  --bg:#16232c; --panel:#1e2f3a; --ink:#e7eef3;
-  --muted:#93a6b3; --line:#2d4250; --brand:#c7ab4d; --brand2:#ddc069;
-  --brand-soft:#33402f;
-  --header1:#0f1a21; --header2:#16232c; --header3:#25394a;
-  --up:#3ddc97; --up-bg:#123528; --down:#ff6b6b; --down-bg:#3b1e20;
-  --gold-grad:linear-gradient(135deg,#d4b85b 0%,#c4a749 55%,#a98d2c 100%);
-  --shadow:0 1px 2px rgba(0,0,0,.35),0 6px 18px rgba(0,0,0,.45);
-  --on-brand:#16232c; --on-header:#ffffff; --on-gold:#16232c;
-  --hero-badge:#e7d38f; --code-bg:#243642; --input-bg:#223440;
-  --hover:#26404f; --total-bg:#24384a; --star:#f0b429; --star-bg:#3a3220;
-  --pin-bg:#33301d; --pin-bg-hover:#403a23; --down-strong:#c9524f;
-  --mute-fill:#46596a; --mid:#e3b45a; --mid-bg:#3a3220;
-  --sbar-track:#1a2b36; --sbar-thumb:#48606f; --sbar-thumb-hover:#c7ab4d;
-  --radius:14px;
+
+  /* surfaces: page → panel → raised/hover → overlay */
+  --surface-0:#0f151b; --surface-1:#161d25;
+  --surface-2:#1d2630; --surface-3:#212c37;
+  --bg:var(--surface-0); --panel:var(--surface-1); --hover:var(--surface-2);
+  --input-bg:var(--surface-1); --code-bg:#1b242c;
+  --total-bg:#1a232c; --overlay:rgba(2,6,12,.62);
+
+  /* text: primary → secondary → tertiary (labels, placeholders, units) */
+  --ink:#e7eef5; --ink-2:#9db0c0; --ink-3:#6d7f8f;
+  --muted:var(--ink-2);
+
+  /* dividers */
+  --line:#243039; --line-strong:#31404c; --line-soft:#1b242c;
+
+  /* the interactive accent — one colour for every actionable thing, kept
+     clear of the up/down pair below so "clickable" never reads as "rising" */
+  --accent:#4d9bff; --accent-hover:#6aaeff;
+  --accent-soft:#13273e; --on-accent:#06121f;
+  --focus:#4d9bff66;
+
+  /* price direction. The only place green and red are allowed. */
+  --up:#3fb950; --up-bg:#10301e;
+  --down:#f85149; --down-bg:#3a1b1b; --down-strong:#ff7b72;
+  --mid:#d29922; --mid-bg:#33260b;
+  --mute-fill:#3a4753;
+
+  /* the gold mark. Identity, not chrome: logo, hero badge, pinned rows. */
+  --brand:#d2b85c; --brand2:#e4cd85; --brand-soft:#2b2617;
+  --gold-grad:linear-gradient(180deg,#e4cd85 0%,#d2b85c 100%);
+  --on-brand:#06121f; --on-gold:#eaf1f8;
+  --hero-badge:#e2c980;
+  --star:#e3b341; --star-bg:#312709;
+  --pin-bg:#312709; --pin-bg-hover:#2b2617;
+
+  /* the dark band behind the landing hero */
+  --header1:#0d131a; --header2:#141d26; --header3:#1c2833;
+  --on-header:#eaf1f8;
+
+  /* table scrollbars — see «نوار پیمایش» in settings */
+  --sbar-track:#161d25; --sbar-thumb:#33424e;
+  --sbar-thumb-hover:#4d9bff;
+
+  /* geometry & elevation. 8px, not 14: a data platform reads as precise, and
+     a large radius on a dense table cell fights the grid it sits in. */
+  --radius:10px; --radius-sm:6px; --radius-lg:14px;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 1px 3px rgba(0,0,0,.3);
+  --shadow-md:0 6px 16px -4px rgba(0,0,0,.5),0 2px 6px -2px rgba(0,0,0,.4);
+  --shadow-lg:0 20px 48px -16px rgba(0,0,0,.7),0 6px 16px -6px rgba(0,0,0,.5);
 }
 
-/* نیمه‌شب — near-black navy, for trading after dark and for OLED panels, where
-   a lower black point is the difference between comfortable and glaring. */
+/* نیمه‌شب — near-black navy for OLED panels and for trading after dark. */
 [data-theme="midnight"]{
   color-scheme:dark;
-  --bg:#0b1020; --panel:#141c31; --ink:#e6e9f5;
-  --muted:#8e97b5; --line:#242e4c; --brand:#c8b06a; --brand2:#dcc47f;
-  --brand-soft:#2b2f45;
-  --header1:#070b16; --header2:#0f1527; --header3:#1d2640;
-  --up:#46e0a1; --up-bg:#0f3327; --down:#ff7079; --down-bg:#3a1725;
-  --gold-grad:linear-gradient(135deg,#d8c274 0%,#c8b06a 55%,#a08a45 100%);
-  --shadow:0 1px 2px rgba(0,0,0,.5),0 6px 20px rgba(0,0,0,.55);
-  --on-brand:#0b1020; --on-header:#ffffff; --on-gold:#0b1020;
-  --hero-badge:#e3d29a; --code-bg:#1b2340; --input-bg:#182142;
-  --hover:#1e2947; --total-bg:#1b2440; --star:#f2bd45; --star-bg:#332a1c;
-  --pin-bg:#2c2718; --pin-bg-hover:#39321f; --down-strong:#c9525c;
-  --mute-fill:#3e4870; --mid:#e6bb63; --mid-bg:#332a1c;
-  --sbar-track:#101733; --sbar-thumb:#39456e; --sbar-thumb-hover:#c8b06a;
-  --radius:14px;
+
+  /* surfaces: page → panel → raised/hover → overlay */
+  --surface-0:#070b12; --surface-1:#0d131e;
+  --surface-2:#141c2a; --surface-3:#18212f;
+  --bg:var(--surface-0); --panel:var(--surface-1); --hover:var(--surface-2);
+  --input-bg:var(--surface-1); --code-bg:#131b28;
+  --total-bg:#111827; --overlay:rgba(0,2,8,.68);
+
+  /* text: primary → secondary → tertiary (labels, placeholders, units) */
+  --ink:#e4ecf6; --ink-2:#96a8c0; --ink-3:#65768e;
+  --muted:var(--ink-2);
+
+  /* dividers */
+  --line:#1c2536; --line-strong:#283349; --line-soft:#141b28;
+
+  /* the interactive accent — one colour for every actionable thing, kept
+     clear of the up/down pair below so "clickable" never reads as "rising" */
+  --accent:#5b9dff; --accent-hover:#7db3ff;
+  --accent-soft:#0f2038; --on-accent:#06121f;
+  --focus:#4d9bff66;
+
+  /* price direction. The only place green and red are allowed. */
+  --up:#35d07f; --up-bg:#0a2a1c;
+  --down:#ff6b6b; --down-bg:#341618; --down-strong:#ff8f8f;
+  --mid:#e0b155; --mid-bg:#2e2410;
+  --mute-fill:#2f3c52;
+
+  /* the gold mark. Identity, not chrome: logo, hero badge, pinned rows. */
+  --brand:#c8b06a; --brand2:#dcc98d; --brand-soft:#242012;
+  --gold-grad:linear-gradient(180deg,#dcc98d 0%,#c8b06a 100%);
+  --on-brand:#06121f; --on-gold:#eaf1f8;
+  --hero-badge:#e2c980;
+  --star:#e8bc4d; --star-bg:#2b2209;
+  --pin-bg:#2b2209; --pin-bg-hover:#242012;
+
+  /* the dark band behind the landing hero */
+  --header1:#060a11; --header2:#0b1220; --header3:#111a2b;
+  --on-header:#eaf1f8;
+
+  /* table scrollbars — see «نوار پیمایش» in settings */
+  --sbar-track:#0d131e; --sbar-thumb:#293449;
+  --sbar-thumb-hover:#5b9dff;
+
+  /* geometry & elevation. 8px, not 14: a data platform reads as precise, and
+     a large radius on a dense table cell fights the grid it sits in. */
+  --radius:10px; --radius-sm:6px; --radius-lg:14px;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 1px 3px rgba(0,0,0,.3);
+  --shadow-md:0 6px 16px -4px rgba(0,0,0,.5),0 2px 6px -2px rgba(0,0,0,.4);
+  --shadow-lg:0 20px 48px -16px rgba(0,0,0,.7),0 6px 16px -6px rgba(0,0,0,.5);
 }
 
-/* ذغالی — neutral grey with no colour cast, for anyone who finds a tinted dark
-   theme tiring, and the calmest backdrop for a table full of red and green. */
+/* ذغالی — neutral grey, no colour cast, for anyone who finds a tinted
+   dark theme tiring. */
 [data-theme="graphite"]{
   color-scheme:dark;
-  --bg:#1b1c1e; --panel:#252729; --ink:#e8e8e9;
-  --muted:#9a9da1; --line:#37393c; --brand:#c7ab4d; --brand2:#dcc069;
-  --brand-soft:#3a3527;
-  --header1:#121314; --header2:#1d1e20; --header3:#2e3033;
-  --up:#41d68e; --up-bg:#16301f; --down:#f76b6b; --down-bg:#361d1d;
-  --gold-grad:linear-gradient(135deg,#d4b85b 0%,#c4a749 55%,#a98d2c 100%);
-  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.5);
-  --on-brand:#1b1c1e; --on-header:#ffffff; --on-gold:#1b1c1e;
-  --hero-badge:#e2d29b; --code-bg:#2d2f31; --input-bg:#2b2d30;
-  --hover:#303336; --total-bg:#2c2e31; --star:#eeb42c; --star-bg:#37301e;
-  --pin-bg:#332e1e; --pin-bg-hover:#3d3724; --down-strong:#c25151;
-  --mute-fill:#4d5155; --mid:#e0b155; --mid-bg:#37301e;
-  --sbar-track:#232527; --sbar-thumb:#4a4d51; --sbar-thumb-hover:#c7ab4d;
-  --radius:14px;
+
+  /* surfaces: page → panel → raised/hover → overlay */
+  --surface-0:#121314; --surface-1:#191b1d;
+  --surface-2:#212426; --surface-3:#262a2c;
+  --bg:var(--surface-0); --panel:var(--surface-1); --hover:var(--surface-2);
+  --input-bg:var(--surface-1); --code-bg:#202325;
+  --total-bg:#1e2123; --overlay:rgba(0,0,0,.66);
+
+  /* text: primary → secondary → tertiary (labels, placeholders, units) */
+  --ink:#e8eaec; --ink-2:#a2a8ad; --ink-3:#767c82;
+  --muted:var(--ink-2);
+
+  /* dividers */
+  --line:#2a2d30; --line-strong:#383c40; --line-soft:#202325;
+
+  /* the interactive accent — one colour for every actionable thing, kept
+     clear of the up/down pair below so "clickable" never reads as "rising" */
+  --accent:#6ba3f5; --accent-hover:#8ab8f8;
+  --accent-soft:#1b242e; --on-accent:#06121f;
+  --focus:#4d9bff66;
+
+  /* price direction. The only place green and red are allowed. */
+  --up:#4cc26a; --up-bg:#162a1b;
+  --down:#f5706a; --down-bg:#2f1c1b; --down-strong:#f89a95;
+  --mid:#dcae52; --mid-bg:#2e2711;
+  --mute-fill:#3d4245;
+
+  /* the gold mark. Identity, not chrome: logo, hero badge, pinned rows. */
+  --brand:#c7ab4d; --brand2:#dcc576; --brand-soft:#26241a;
+  --gold-grad:linear-gradient(180deg,#dcc576 0%,#c7ab4d 100%);
+  --on-brand:#06121f; --on-gold:#eaf1f8;
+  --hero-badge:#e2c980;
+  --star:#eeb42c; --star-bg:#2c2611;
+  --pin-bg:#2c2611; --pin-bg-hover:#26241a;
+
+  /* the dark band behind the landing hero */
+  --header1:#101112; --header2:#181a1c; --header3:#212426;
+  --on-header:#eaf1f8;
+
+  /* table scrollbars — see «نوار پیمایش» in settings */
+  --sbar-track:#191b1d; --sbar-thumb:#34383b;
+  --sbar-thumb-hover:#6ba3f5;
+
+  /* geometry & elevation. 8px, not 14: a data platform reads as precise, and
+     a large radius on a dense table cell fights the grid it sits in. */
+  --radius:10px; --radius-sm:6px; --radius-lg:14px;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 1px 3px rgba(0,0,0,.3);
+  --shadow-md:0 6px 16px -4px rgba(0,0,0,.5),0 2px 6px -2px rgba(0,0,0,.4);
+  --shadow-lg:0 20px 48px -16px rgba(0,0,0,.7),0 6px 16px -6px rgba(0,0,0,.5);
 }
 
 /* رنگ صعود و نزول — the colour-blind alternative, layered on top of whichever
-   theme is active. Blue rises, orange falls: that pair stays distinguishable
+   theme is active. Blue rises, amber falls: that pair stays distinguishable
    under deuteranopia and protanopia, where green and red collapse into one
-   colour — and roughly ۸٪ of men see them that way. It overrides only the four
-   semantic tokens, so it composes with every theme instead of doubling the
-   number of palettes to maintain. */
+   colour — and roughly ۸٪ of men see them that way. It overrides only the
+   direction tokens, so it composes with every theme instead of doubling the
+   number of palettes to maintain.
+
+   The accent shifts too, and has to: with blue meaning "rising", a blue button
+   would read as a price signal. It moves to violet, which no price ever is. */
 [data-updown="colorblind"]{
-  --up:#2f7fd1; --down:#e0761c; --up-bg:#e2eefa; --down-bg:#fcecdc;
+  --up:#1f6feb; --up-bg:#e6effd; --down:#c2620a; --down-bg:#fceee0;
+  --down-strong:#9d4e05; --mid:#7c5cd6; --mid-bg:#efeafc;
+  --accent:#6d43c8; --accent-hover:#5a35ab; --accent-soft:#efeafc;
 }
 [data-updown="colorblind"][data-theme="dark"],
 [data-updown="colorblind"][data-theme="midnight"],
 [data-updown="colorblind"][data-theme="graphite"]{
-  --up:#5aa9ee; --down:#f2933c; --up-bg:#152c40; --down-bg:#3a2717;
+  --up:#58a6ff; --up-bg:#132c45; --down:#e8983d; --down-bg:#38260f;
+  --down-strong:#f2b366; --mid:#a78bfa; --mid-bg:#241c3d;
+  --accent:#a78bfa; --accent-hover:#c4b1fd; --accent-soft:#241c3d;
 }
+
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 html{background:var(--bg)}
@@ -237,61 +423,11 @@ a{color:inherit;text-decoration:none}
 /* inline "loading market data" state on the dashboard shell */
 .dash-loading{display:flex;align-items:center;justify-content:center;gap:12px;padding:60px 20px}
 
-/* ---------- landing / home page ---------- */
-.landing-hero{
-  position:relative;overflow:hidden;text-align:center;color:var(--on-header);
-  background:linear-gradient(135deg,var(--header1),var(--header3));
-  border-radius:calc(var(--radius) + 4px);
-  padding:72px 32px;margin-top:8px;box-shadow:var(--shadow);
-}
-.landing-hero::before,.landing-hero::after{
-  content:"";position:absolute;border-radius:50%;
-  background:rgba(255,255,255,.08);pointer-events:none;
-}
-.landing-hero::before{width:340px;height:340px;top:-140px;inset-inline-start:-100px}
-.landing-hero::after{width:260px;height:260px;bottom:-130px;inset-inline-end:-80px}
-.landing-hero-inner{position:relative;z-index:1;max-width:720px;margin:0 auto}
-.landing-badge{
-  display:inline-block;background:rgba(199,171,77,.20);color:var(--hero-badge);
-  border:1px solid rgba(199,171,77,.35);
-  padding:6px 15px;border-radius:30px;font-size:13px;font-weight:700;margin-bottom:20px;
-}
-.landing-hero h1{font-size:38px;line-height:1.35;margin:0 0 16px;font-weight:800}
-.landing-sub{font-size:16px;line-height:1.95;opacity:.92;margin:0 auto 30px;max-width:58ch}
-.landing-cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
-.landing-cta .btn{padding:12px 26px;font-size:15px}
-.hero-primary{background:var(--gold-grad);color:var(--on-gold);box-shadow:0 6px 18px rgba(180,150,55,.32)}
-.hero-primary:hover{filter:brightness(1.05);color:var(--on-gold)}
-.hero-secondary{background:transparent;color:var(--on-header);border:1.5px solid rgba(255,255,255,.6)}
-.hero-secondary:hover{background:rgba(255,255,255,.14)}
-
-.landing-section{margin-top:52px}
-.landing-h2{text-align:center;font-size:24px;font-weight:800;margin:0 0 4px}
-.landing-h2-sub{text-align:center;color:var(--muted);margin:0 0 30px;font-size:14px}
-.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
-.feature-card{
-  display:block;background:var(--panel);border:1px solid var(--line);
-  border-radius:var(--radius);padding:26px 24px;box-shadow:var(--shadow);
-  transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease;
-}
-.feature-card:hover{
-  transform:translateY(-4px);border-color:var(--brand2);
-  box-shadow:0 10px 32px rgba(20,30,60,.12);
-}
-.feature-icon{font-size:32px;line-height:1;margin-bottom:14px}
-.feature-card h3{margin:0 0 8px;font-size:16px;color:var(--brand)}
-.feature-card p{margin:0;color:var(--muted);font-size:13.5px;line-height:1.85}
-
-.landing-welcome{
-  display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap;
-  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-  padding:24px 26px;box-shadow:var(--shadow);
-}
-.landing-welcome h2{margin:0 0 4px;font-size:19px}
-.landing-welcome-cta{display:flex;gap:12px;flex-wrap:wrap}
-.landing-welcome .hero-secondary{background:transparent;color:var(--brand);border:1.5px solid var(--brand)}
-.landing-welcome .hero-secondary:hover{background:var(--brand);color:var(--on-brand)}
-@media (max-width:560px){.landing-hero h1{font-size:29px}.landing-hero{padding:52px 22px}}
+/* ---------- landing / home page ----------
+   Gone with the redesign. The landing page now uses the shared components
+   (.hero, .btn, .feature-card in ui.css) instead of a parallel .landing-*
+   system, so there is one card style in the app rather than two that drift.
+   .feature-grid / .feature-card / .feature-icon live in ui.css now. */
 code{background:var(--code-bg);padding:1px 6px;border-radius:6px;direction:ltr;display:inline-block}
 
 /* topbar */

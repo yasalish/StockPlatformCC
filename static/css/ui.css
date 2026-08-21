@@ -1,0 +1,1013 @@
+/* ===========================================================================
+   ui.css — the component layer
+   ===========================================================================
+   Loaded AFTER style.css, and that order is the whole architecture:
+
+     style.css   the palettes (one block per theme) + the page-specific chrome
+                 that predates this file — the KLineChart toolbar, the Jalali
+                 datepicker, the security-detail tabs. All of it already reads
+                 semantic tokens, so it inherits the new palette for free.
+     ui.css      every component the app is actually made of: the shell, the
+                 tables, the buttons, the forms, the tiles, the chips.
+
+   Splitting them this way means the redesign is one reviewable file and one
+   `<link>` to roll back, instead of a 1,300-line diff. Nothing here uses
+   !important except where it overrides an inline style the page cannot avoid.
+
+   THE RULES THIS FILE FOLLOWS
+
+   1. No literal colours. Every value comes from a token, so all six themes and
+      the colour-blind scheme keep working without a second implementation.
+   2. Numbers are tabular. A price column whose digits change width is a column
+      you cannot scan, and this is a market data platform before it is anything
+      else — `font-variant-numeric: tabular-nums` is not decoration here.
+   3. Density is a first-class dimension. Rows are sized from --row-h, which
+      [data-density] moves; nothing hard-codes a height.
+   4. Green and red mean direction, and nothing else means direction. Actions
+      are --accent. That separation is why a filled green pill no longer sits
+      behind every cell: the fill was carrying no information the colour of the
+      number did not already carry, and 800 of them per screen is noise.
+   5. Focus is always visible. :focus-visible draws a 2px ring in --accent on
+      every interactive element, keyboard users included.
+   =========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   1. Foundations
+   --------------------------------------------------------------------------- */
+:root{
+  /* Type scale. Multiplied by --font-scale from [data-font], so the user's
+     «اندازهٔ قلم» preference moves the whole system, not just body text. */
+  --fs-11:calc(.6875rem * var(--font-scale));
+  --fs-12:calc(.75rem   * var(--font-scale));
+  --fs-13:calc(.8125rem * var(--font-scale));
+  --fs-14:calc(.875rem  * var(--font-scale));
+  --fs-15:calc(.9375rem * var(--font-scale));
+  --fs-16:calc(1rem     * var(--font-scale));
+  --fs-18:calc(1.125rem * var(--font-scale));
+  --fs-20:calc(1.25rem  * var(--font-scale));
+  --fs-24:calc(1.5rem   * var(--font-scale));
+  --fs-30:calc(1.875rem * var(--font-scale));
+  --fs-38:calc(2.375rem * var(--font-scale));
+
+  /* Spacing: a 4px grid, named so a component says what it means. */
+  --sp-1:4px;  --sp-2:8px;  --sp-3:12px; --sp-4:16px;
+  --sp-5:20px; --sp-6:24px; --sp-8:32px; --sp-10:40px; --sp-12:48px;
+
+  /* Table row height — the one number that decides how much of the market
+     fits on a screen. 34px shows ~22 rows in a 1080p viewport; the old 67px
+     (a wrapping group name) showed seven. */
+  --row-h:34px;
+  --cell-x:10px;
+
+  --dur-1:110ms; --dur-2:180ms;
+  --ease:cubic-bezier(.2,0,.2,1);
+
+  --topbar-h:56px;
+  --container:1400px;
+}
+
+[data-density="compact"]{ --row-h:28px; --cell-x:8px }
+
+/* «کاهش حرکت» — the preference exists, so honour it here too. */
+[data-motion="reduce"] *, [data-reduce-motion="1"] *{
+  animation-duration:1ms !important; transition-duration:1ms !important;
+}
+
+body{
+  font-size:var(--fs-14);
+  line-height:1.55;
+  background:var(--surface-0);
+  color:var(--ink);
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+
+/* Every number in the app, wherever it appears. */
+.num,.numh,.stat-num,.tile-v,.mono,td,th,input,.pill,.chip{
+  font-variant-numeric:tabular-nums;
+  font-feature-settings:"tnum" 1;
+}
+
+::selection{ background:var(--accent-soft); color:var(--ink) }
+
+:where(a,button,input,select,textarea,[tabindex]):focus-visible{
+  outline:2px solid var(--accent);
+  outline-offset:2px;
+  border-radius:var(--radius-sm);
+}
+/* Mouse users get the hover states, not a ring. */
+:where(a,button,input,select,textarea):focus:not(:focus-visible){ outline:none }
+
+/* Scrollbars, everywhere rather than only on tables. */
+*{ scrollbar-color:var(--sbar-thumb) var(--sbar-track); scrollbar-width:thin }
+*::-webkit-scrollbar{ width:10px; height:10px }
+*::-webkit-scrollbar-track{ background:var(--sbar-track) }
+*::-webkit-scrollbar-thumb{
+  background:var(--sbar-thumb); border-radius:99px;
+  border:2px solid var(--sbar-track);
+}
+*::-webkit-scrollbar-thumb:hover{ background:var(--sbar-thumb-hover) }
+
+.muted{ color:var(--ink-2) }
+.small{ font-size:var(--fs-12) }
+.note{ font-size:var(--fs-12); color:var(--ink-2) }
+
+/* ---------------------------------------------------------------------------
+   2. The app shell
+   ---------------------------------------------------------------------------
+   The old header was eleven boxed buttons in a row: eleven borders, eleven
+   background fills and eleven shadows competing for attention above content
+   that had none. Text links with a single 2px indicator under the active one
+   carry exactly the same information with one visual element instead of 33.
+   --------------------------------------------------------------------------- */
+.topbar{
+  position:sticky; top:0; z-index:60;
+  display:flex; align-items:center; gap:var(--sp-4);
+  height:var(--topbar-h); padding:0 var(--sp-5);
+  background:color-mix(in srgb, var(--surface-1) 88%, transparent);
+  backdrop-filter:saturate(1.4) blur(12px);
+  -webkit-backdrop-filter:saturate(1.4) blur(12px);
+  border-bottom:1px solid var(--line);
+  box-shadow:none;
+}
+/* A browser without color-mix still needs an opaque bar. */
+@supports not (background:color-mix(in srgb,red,blue)){
+  .topbar{ background:var(--surface-1) }
+}
+
+.brand{ display:flex; align-items:center; gap:var(--sp-2); flex:0 0 auto }
+.brand > a{ display:flex; align-items:center; gap:var(--sp-2) }
+.brand .logo{
+  display:grid; place-items:center; width:28px; height:28px;
+  border-radius:8px; background:var(--brand-soft); color:var(--brand);
+  font-size:0; /* kills the old emoji if a cached template still ships it */
+}
+.brand .logo svg{ width:17px; height:17px; display:block }
+.brand-name{
+  font-size:var(--fs-16); font-weight:800; letter-spacing:-.01em;
+  color:var(--ink); white-space:nowrap;
+}
+/* The tagline is marketing copy; it belongs on the landing page, not in 56px
+   of chrome on every screen. */
+.brand-sub{ display:none }
+
+.topnav{
+  display:flex; align-items:center; gap:2px; flex:1 1 auto;
+  min-width:0; overflow-x:auto; scrollbar-width:none;
+  -ms-overflow-style:none; margin-inline-start:var(--sp-3);
+}
+.topnav::-webkit-scrollbar{ display:none }
+.topnav a{
+  position:relative; flex:0 0 auto;
+  padding:8px 10px; border-radius:var(--radius-sm);
+  font-size:var(--fs-13); font-weight:500; color:var(--ink-2);
+  white-space:nowrap; transition:color var(--dur-1) var(--ease),
+                                 background var(--dur-1) var(--ease);
+  border:0; background:none; box-shadow:none;
+}
+.topnav a:hover{ color:var(--ink); background:var(--surface-2) }
+.topnav a.on{ color:var(--ink); font-weight:700; background:none }
+.topnav a.on::after{
+  content:""; position:absolute; inset-inline:10px; bottom:-9px; height:2px;
+  background:var(--accent); border-radius:2px 2px 0 0;
+}
+.nav-badge{
+  display:inline-grid; place-items:center; min-width:17px; height:17px;
+  padding:0 4px; margin-inline-start:5px; border-radius:99px;
+  background:var(--accent); color:var(--on-accent);
+  font-size:var(--fs-11); font-weight:700; line-height:1;
+}
+
+/* search — the one input in the chrome, so it reads as a tool, not a field */
+.search-wrap{ position:relative; flex:0 1 300px; min-width:150px }
+.search-wrap input{
+  width:100%; height:34px; padding:0 32px 0 var(--sp-3);
+  border:1px solid var(--line); border-radius:var(--radius-sm);
+  background:var(--surface-2); color:var(--ink); font-size:var(--fs-13);
+  transition:border-color var(--dur-1) var(--ease),
+             background var(--dur-1) var(--ease);
+}
+.search-wrap input::placeholder{ color:var(--ink-3) }
+.search-wrap input:focus{
+  background:var(--surface-1); border-color:var(--accent); outline:none;
+  box-shadow:0 0 0 3px var(--focus);
+}
+.search-wrap .search-ico{
+  position:absolute; inset-inline-start:10px; top:50%; translate:0 -50%;
+  width:14px; height:14px; color:var(--ink-3); pointer-events:none;
+}
+.search-wrap .search-kbd{
+  position:absolute; inset-inline-end:8px; top:50%; translate:0 -50%;
+  padding:1px 5px; border:1px solid var(--line-strong); border-radius:4px;
+  background:var(--surface-1); color:var(--ink-3);
+  font-size:var(--fs-11); font-family:inherit; line-height:1.5;
+  pointer-events:none;
+}
+.search-wrap input:focus ~ .search-kbd{ opacity:0 }
+
+.search-results{
+  position:absolute; top:calc(100% + 6px); inset-inline:0; z-index:70;
+  max-height:min(60vh,420px); overflow:auto;
+  background:var(--surface-3); border:1px solid var(--line);
+  border-radius:var(--radius); box-shadow:var(--shadow-lg);
+  padding:4px;
+}
+.search-results a,.search-results .sr-item{
+  display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3);
+  padding:7px 10px; border-radius:var(--radius-sm);
+  font-size:var(--fs-13); color:var(--ink);
+}
+.search-results a:hover,.search-results .sr-item:hover,
+.search-results .on{ background:var(--surface-2) }
+
+/* icon buttons (theme toggle, and anything else in the chrome) */
+.icon-btn{
+  display:grid; place-items:center; width:34px; height:34px; flex:0 0 auto;
+  border:1px solid var(--line); border-radius:var(--radius-sm);
+  background:var(--surface-1); color:var(--ink-2); cursor:pointer;
+  font-size:var(--fs-14); line-height:1;
+  transition:color var(--dur-1) var(--ease), background var(--dur-1) var(--ease),
+             border-color var(--dur-1) var(--ease);
+}
+.icon-btn:hover{ color:var(--ink); background:var(--surface-2);
+                 border-color:var(--line-strong) }
+
+/* user menu */
+.user-menu{ position:relative; flex:0 0 auto }
+.user-trigger{
+  display:flex; align-items:center; gap:var(--sp-2);
+  height:34px; padding:0 8px 0 6px;
+  border:1px solid var(--line); border-radius:var(--radius-sm);
+  background:var(--surface-1); color:var(--ink); cursor:pointer;
+  font-size:var(--fs-13); transition:background var(--dur-1) var(--ease);
+}
+.user-trigger:hover{ background:var(--surface-2) }
+.user-avatar{
+  display:grid; place-items:center; width:22px; height:22px; border-radius:6px;
+  background:var(--accent); color:var(--on-accent);
+  font-size:var(--fs-11); font-weight:700;
+}
+.user-name{ max-width:120px; overflow:hidden; text-overflow:ellipsis;
+            white-space:nowrap }
+.user-caret{ color:var(--ink-3); font-size:var(--fs-11) }
+.user-pop{
+  position:absolute; top:calc(100% + 6px); inset-inline-end:0; z-index:70;
+  min-width:230px; padding:4px;
+  background:var(--surface-3); border:1px solid var(--line);
+  border-radius:var(--radius); box-shadow:var(--shadow-lg);
+}
+.user-pop-head{ padding:8px 10px 10px; border-bottom:1px solid var(--line-soft);
+                margin-bottom:4px }
+.user-pop-name{ font-weight:700; font-size:var(--fs-13) }
+.user-pop-sub{ color:var(--ink-3); font-size:var(--fs-11) }
+.user-pop a,.user-pop .menu-item{
+  display:flex; align-items:center; gap:var(--sp-2); width:100%;
+  padding:7px 10px; border:0; border-radius:var(--radius-sm);
+  background:none; color:var(--ink); font-size:var(--fs-13);
+  cursor:pointer; text-align:start;
+}
+.user-pop a:hover,.user-pop .menu-item:hover{ background:var(--surface-2) }
+.menu-ico{ width:16px; text-align:center; color:var(--ink-3); font-size:var(--fs-12) }
+.menu-sep{ height:1px; background:var(--line-soft); margin:4px 6px }
+
+/* ---------------------------------------------------------------------------
+   3. Layout
+   --------------------------------------------------------------------------- */
+.container{
+  width:100%; max-width:var(--container); margin:0 auto;
+  padding:var(--sp-6) var(--sp-5) var(--sp-12);
+}
+.page-head{
+  display:flex; align-items:flex-end; justify-content:space-between;
+  gap:var(--sp-4); margin-bottom:var(--sp-5); flex-wrap:wrap;
+}
+.page-title{ font-size:var(--fs-20); font-weight:800; letter-spacing:-.01em;
+             margin:0 }
+.page-sub{ color:var(--ink-2); font-size:var(--fs-13); margin:2px 0 0 }
+.page-actions{ display:flex; align-items:center; gap:var(--sp-2) }
+.two-col{ display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+          gap:var(--sp-4) }
+
+/* ---------------------------------------------------------------------------
+   4. Panels
+   ---------------------------------------------------------------------------
+   A hairline and 10px, not a 14px radius over a two-layer drop shadow. At the
+   old settings every panel looked like a floating card, which means nothing on
+   the page looked primary.
+   --------------------------------------------------------------------------- */
+.panel{
+  background:var(--surface-1); border:1px solid var(--line);
+  border-radius:var(--radius); box-shadow:none;
+  padding:var(--sp-5); margin-bottom:var(--sp-4);
+}
+[data-density="compact"] .panel{ padding:var(--sp-4) }
+.panel.flush{ padding:0; overflow:hidden }
+.panel.raised{ box-shadow:var(--shadow-md) }
+.panel-head{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:var(--sp-3); flex-wrap:wrap;
+  margin:0 0 var(--sp-4);
+}
+.panel.flush > .panel-head{
+  padding:var(--sp-4) var(--sp-5); margin:0;
+  border-bottom:1px solid var(--line);
+}
+.panel-head h2,.panel-head h3{
+  margin:0; font-size:var(--fs-15); font-weight:700; letter-spacing:-.01em;
+}
+.head-actions{ display:flex; align-items:center; gap:var(--sp-2);
+               flex-wrap:wrap }
+
+/* ---------------------------------------------------------------------------
+   5. Buttons
+   ---------------------------------------------------------------------------
+   Flat. The gold gradient read as a 2012 web app, and a gradient on a control
+   that repeats forty times a screen is a gradient you have to look past.
+   --------------------------------------------------------------------------- */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  height:34px; padding:0 var(--sp-4);
+  border:1px solid var(--line-strong); border-radius:var(--radius-sm);
+  background:var(--surface-1); color:var(--ink);
+  font-size:var(--fs-13); font-weight:600; font-family:inherit;
+  cursor:pointer; white-space:nowrap; text-decoration:none;
+  background-image:none; box-shadow:none;
+  transition:background var(--dur-1) var(--ease),
+             border-color var(--dur-1) var(--ease),
+             color var(--dur-1) var(--ease);
+}
+.btn:hover{ background:var(--surface-2); border-color:var(--ink-3) }
+.btn:active{ translate:0 1px }
+.btn:disabled,.btn[disabled],.btn[aria-disabled="true"]{
+  opacity:.5; cursor:not-allowed; translate:none;
+}
+.btn svg{ width:15px; height:15px }
+
+/* the one primary action per view */
+.btn.primary,.btn-primary,button[type="submit"].btn:not(.ghost):not(.danger){
+  background:var(--accent); border-color:var(--accent);
+  color:var(--on-accent); background-image:none;
+}
+.btn.primary:hover,.btn-primary:hover,
+button[type="submit"].btn:not(.ghost):not(.danger):hover{
+  background:var(--accent-hover); border-color:var(--accent-hover);
+}
+.btn.ghost{ background:transparent; border-color:var(--line);
+            color:var(--ink-2) }
+.btn.ghost:hover{ background:var(--surface-2); color:var(--ink);
+                  border-color:var(--line-strong) }
+.btn.soft{ background:var(--accent-soft); border-color:transparent;
+           color:var(--accent) }
+.btn.soft:hover{ background:var(--accent-soft); border-color:var(--accent) }
+.btn.danger{ background:var(--down); border-color:var(--down);
+             color:#fff; background-image:none }
+.btn.danger:hover{ background:var(--down-strong); border-color:var(--down-strong) }
+.btn.small{ height:28px; padding:0 10px; font-size:var(--fs-12) }
+.btn.block{ width:100% }
+
+/* ---------------------------------------------------------------------------
+   6. Forms
+   --------------------------------------------------------------------------- */
+input[type="text"],input[type="search"],input[type="number"],
+input[type="password"],input[type="email"],input[type="date"],select,textarea{
+  height:34px; padding:0 10px;
+  border:1px solid var(--line-strong); border-radius:var(--radius-sm);
+  background:var(--input-bg); color:var(--ink);
+  font-size:var(--fs-13); font-family:inherit;
+  transition:border-color var(--dur-1) var(--ease),
+             box-shadow var(--dur-1) var(--ease);
+}
+textarea{ height:auto; padding:8px 10px; line-height:1.6 }
+input::placeholder,textarea::placeholder{ color:var(--ink-3) }
+input:focus,select:focus,textarea:focus{
+  border-color:var(--accent); outline:none; box-shadow:0 0 0 3px var(--focus);
+}
+input:disabled,select:disabled{ opacity:.55; cursor:not-allowed;
+                                background:var(--surface-2) }
+select{
+  padding-inline-end:28px; cursor:pointer;
+  appearance:none; -webkit-appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--ink-3) 50%),
+                   linear-gradient(135deg,var(--ink-3) 50%,transparent 50%);
+  background-position:calc(100% - 15px) 14px, calc(100% - 10px) 14px;
+  background-size:5px 5px,5px 5px; background-repeat:no-repeat;
+}
+html[dir="rtl"] select{
+  background-position:15px 14px, 10px 14px;
+}
+label{ font-size:var(--fs-12); color:var(--ink-2); font-weight:500 }
+
+.filterbar{
+  display:flex; align-items:center; gap:var(--sp-3); flex-wrap:wrap;
+  padding:var(--sp-3) 0;
+}
+.filterbar label{ display:flex; align-items:center; gap:6px }
+
+/* ---------------------------------------------------------------------------
+   7. Tables — the heart of the app
+   ---------------------------------------------------------------------------
+   What changed and why:
+
+   * Row height is --row-h and cells no longer wrap. One wrapping group name
+     («مواد و محصولات دارویی») was stretching every row to three lines, so a
+     1080p screen showed seven symbols out of 782. It now shows twenty-two.
+   * The header sticks. Scrolling a 782-row table used to lose the column names
+     on the second screenful.
+   * Zebra striping is gone, replaced by a hairline per row. Stripes were
+     competing with the up/down colour that carries the actual meaning.
+   * Numbers align on their end edge and are tabular, so digits stack.
+   --------------------------------------------------------------------------- */
+.table-scroll{
+  overflow:auto; border-radius:var(--radius);
+  border:1px solid var(--line); background:var(--surface-1);
+}
+.panel .table-scroll{ border:0; border-radius:0 }
+
+table.grid{
+  width:100%; border-collapse:separate; border-spacing:0;
+  font-size:var(--fs-13);
+}
+table.grid thead th{
+  position:sticky; top:0; z-index:2;
+  height:calc(var(--row-h) + 2px); padding:0 var(--cell-x);
+  background:var(--surface-2); color:var(--ink-2);
+  font-size:var(--fs-11); font-weight:700; letter-spacing:.01em;
+  text-align:start; white-space:nowrap; vertical-align:middle;
+  border-bottom:1px solid var(--line-strong);
+  box-shadow:none;
+}
+table.grid tbody td{
+  height:var(--row-h); padding:0 var(--cell-x);
+  border-bottom:1px solid var(--line-soft);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  max-width:220px; vertical-align:middle;
+  color:var(--ink);
+}
+table.grid tbody tr:last-child td{ border-bottom:0 }
+table.grid tbody tr:hover td{ background:var(--surface-2) }
+table.grid tbody tr.clickable{ cursor:pointer }
+
+/* numeric cells: same alignment in header and body so digits stack */
+table.grid .num,table.grid .numh,
+table.grid td.num,table.grid th.numh{ text-align:end }
+
+/* the symbol column: the row's identity, so it carries the weight */
+table.grid .sym,table.grid td.sym{
+  font-weight:700; color:var(--ink);
+}
+table.grid .sym a{ color:var(--ink) }
+table.grid tbody tr:hover .sym a{ color:var(--accent) }
+.mname,table.grid .rtl-name{ color:var(--ink-2) }
+
+/* a sortable header says so */
+table.grid thead th[data-sort],table.grid thead th.sortable{ cursor:pointer;
+  user-select:none }
+table.grid thead th[data-sort]:hover,table.grid thead th.sortable:hover{
+  color:var(--ink); background:var(--surface-3);
+}
+table.grid thead th[aria-sort]:not([aria-sort="none"]){ color:var(--accent) }
+
+/* total / summary row */
+table.grid tfoot td,table.grid tr.total td{
+  background:var(--total-bg); font-weight:700;
+  border-top:1px solid var(--line-strong);
+}
+
+/* pinned symbol column (watchlist, wide performance grid) */
+table.grid .pin,table.grid tr.pinned td{ background:var(--pin-bg) }
+table.grid tr.pinned:hover td{ background:var(--pin-bg-hover) }
+
+/* ---------------------------------------------------------------------------
+   8. Price direction
+   ---------------------------------------------------------------------------
+   Colour on the number, not a filled box behind it. The old grid drew a rounded
+   green or red block around every one of ~5,500 cells on the market screen; the
+   sign and the colour of the digits say the same thing without turning the page
+   into a mosaic. Fills survive only where a value is a VERDICT rather than a
+   measurement — .pill on a signal, and the heatmap.
+   --------------------------------------------------------------------------- */
+.up-t,.pos,td.up,.val.up{ color:var(--up); font-weight:600 }
+.down-t,.neg,td.down,.val.down{ color:var(--down); font-weight:600 }
+.mid-t{ color:var(--mid); font-weight:600 }
+.flat-t,.zero{ color:var(--ink-3) }
+
+/* The percentage cells of the performance / market grids. */
+table.grid .pct{ font-weight:600 }
+table.grid .pct.up,table.grid .pct.pos{ color:var(--up); background:none }
+table.grid .pct.down,table.grid .pct.neg{ color:var(--down); background:none }
+
+/* verdict pills — kept, because a verdict IS a category */
+.pill{
+  display:inline-flex; align-items:center; gap:4px;
+  height:20px; padding:0 8px; border-radius:99px;
+  font-size:var(--fs-11); font-weight:700; line-height:1;
+  background:var(--surface-2); color:var(--ink-2);
+  border:1px solid transparent;
+}
+.pill.up,.pill.pos,.pill.buy{ background:var(--up-bg); color:var(--up) }
+.pill.down,.pill.neg,.pill.sell{ background:var(--down-bg); color:var(--down) }
+.pill.mid,.pill.hold{ background:var(--mid-bg); color:var(--mid) }
+.pill.info{ background:var(--accent-soft); color:var(--accent) }
+
+.tag{
+  display:inline-flex; align-items:center; height:19px; padding:0 7px;
+  border-radius:var(--radius-sm); border:1px solid var(--line);
+  background:var(--surface-2); color:var(--ink-2);
+  font-size:var(--fs-11); font-weight:600;
+}
+.chip{
+  display:inline-flex; align-items:center; gap:5px;
+  height:24px; padding:0 9px; border-radius:99px;
+  border:1px solid var(--line); background:var(--surface-1);
+  color:var(--ink); font-size:var(--fs-12); font-weight:600;
+  cursor:default;
+}
+.chip.up{ border-color:transparent; background:var(--up-bg); color:var(--up) }
+.chip.down{ border-color:transparent; background:var(--down-bg); color:var(--down) }
+button.chip{ cursor:pointer }
+button.chip:hover{ border-color:var(--accent); color:var(--accent) }
+.chips{ display:flex; flex-wrap:wrap; gap:6px }
+.tries{ font-size:var(--fs-11); opacity:.7 }
+
+/* ---------------------------------------------------------------------------
+   9. Stat tiles / KPI strip
+   ---------------------------------------------------------------------------
+   One strip of hairline-separated figures instead of a row of shadowed cards.
+   --------------------------------------------------------------------------- */
+.stat-row,.prog-tiles{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:1px; background:var(--line); border:1px solid var(--line);
+  border-radius:var(--radius); overflow:hidden; margin-bottom:var(--sp-4);
+}
+.stat-card,.tile{
+  background:var(--surface-1); padding:var(--sp-3) var(--sp-4);
+  border:0; border-radius:0; box-shadow:none; margin:0;
+}
+.stat-label,.tile-l{
+  display:block; color:var(--ink-2); font-size:var(--fs-11); font-weight:600;
+  margin-bottom:3px; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis;
+}
+.stat-num,.tile-v{
+  display:block; color:var(--ink);
+  font-size:var(--fs-18); font-weight:750; line-height:1.25;
+  letter-spacing:-.01em;
+}
+.tile-u{ color:var(--ink-3); font-size:var(--fs-11); font-weight:600 }
+.tile.tile-btn,.stat-card.clickable{ cursor:pointer }
+.tile.tile-btn:hover,.stat-card.clickable:hover{ background:var(--surface-2) }
+
+/* progress bar (update page, and any percentage of a whole) */
+.progbar{
+  height:6px; border-radius:99px; background:var(--surface-2);
+  overflow:hidden; margin:var(--sp-3) 0;
+}
+.progbar > span{
+  display:block; height:100%; background:var(--accent);
+  border-radius:99px; transition:width var(--dur-2) var(--ease);
+}
+
+/* ---------------------------------------------------------------------------
+   10. Messages, empty states, loading
+   --------------------------------------------------------------------------- */
+.flash-wrap{ max-width:var(--container); margin:var(--sp-4) auto 0;
+             padding:0 var(--sp-5) }
+.flash{
+  display:flex; align-items:flex-start; gap:var(--sp-2);
+  padding:10px var(--sp-4); margin-bottom:var(--sp-2);
+  border:1px solid var(--line); border-inline-start:3px solid var(--ink-3);
+  border-radius:var(--radius-sm); background:var(--surface-1);
+  font-size:var(--fs-13); box-shadow:none;
+}
+.flash.ok{ border-inline-start-color:var(--up); background:var(--up-bg);
+           color:var(--ink) }
+.flash.error{ border-inline-start-color:var(--down); background:var(--down-bg);
+              color:var(--ink) }
+.flash.info{ border-inline-start-color:var(--accent);
+             background:var(--accent-soft) }
+
+.empty{
+  display:grid; place-items:center; gap:var(--sp-2);
+  padding:var(--sp-10) var(--sp-4); text-align:center; color:var(--ink-2);
+}
+.empty .empty-ico{ color:var(--ink-3); width:28px; height:28px }
+.empty h3{ margin:0; font-size:var(--fs-15); color:var(--ink) }
+
+@keyframes bn-shimmer{ from{ background-position:200% 0 } to{ background-position:-200% 0 } }
+.skeleton{
+  border-radius:var(--radius-sm);
+  background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface-3) 37%,
+                             var(--surface-2) 63%);
+  background-size:200% 100%; animation:bn-shimmer 1.3s linear infinite;
+}
+
+.nav-loader{ background:var(--overlay); backdrop-filter:blur(3px) }
+.nav-loader-box{
+  display:flex; align-items:center; gap:var(--sp-3);
+  padding:var(--sp-4) var(--sp-5); background:var(--surface-3);
+  border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:var(--shadow-lg); color:var(--ink); font-size:var(--fs-13);
+}
+.nav-spinner{
+  width:16px; height:16px; border-radius:50%;
+  border:2px solid var(--line-strong); border-top-color:var(--accent);
+  animation:bn-spin .7s linear infinite;
+}
+@keyframes bn-spin{ to{ rotate:360deg } }
+
+/* ---------------------------------------------------------------------------
+   11. Landing page
+   --------------------------------------------------------------------------- */
+.hero{
+  position:relative; overflow:hidden;
+  padding:var(--sp-12) var(--sp-6);
+  border:1px solid var(--line); border-radius:var(--radius-lg);
+  background:
+    radial-gradient(120% 140% at 85% -10%,
+                    color-mix(in srgb,var(--accent) 22%, transparent) 0%,
+                    transparent 55%),
+    linear-gradient(160deg,var(--header3) 0%,var(--header1) 100%);
+  color:var(--on-header); text-align:center;
+  margin-bottom:var(--sp-8);
+}
+.hero h1{
+  margin:0 0 var(--sp-3); font-size:var(--fs-38); font-weight:850;
+  letter-spacing:-.02em; line-height:1.25;
+}
+.hero p{
+  margin:0 auto var(--sp-6); max-width:62ch;
+  color:color-mix(in srgb,var(--on-header) 76%, transparent);
+  font-size:var(--fs-15);
+}
+.hero-badge{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:4px 10px; margin-bottom:var(--sp-4); border-radius:99px;
+  background:color-mix(in srgb,var(--hero-badge) 16%, transparent);
+  border:1px solid color-mix(in srgb,var(--hero-badge) 34%, transparent);
+  color:var(--hero-badge); font-size:var(--fs-12); font-weight:600;
+}
+.hero-actions{ display:flex; gap:var(--sp-3); justify-content:center;
+               flex-wrap:wrap }
+.hero .btn{ height:38px; padding:0 var(--sp-5); font-size:var(--fs-14) }
+.hero .btn.primary{ background:var(--accent); border-color:var(--accent);
+                    color:var(--on-accent) }
+.hero .btn.ghost{
+  background:color-mix(in srgb,var(--on-header) 8%, transparent);
+  border-color:color-mix(in srgb,var(--on-header) 26%, transparent);
+  color:var(--on-header);
+}
+.hero .btn.ghost:hover{
+  background:color-mix(in srgb,var(--on-header) 16%, transparent);
+}
+
+.section-head{ text-align:center; margin:var(--sp-10) 0 var(--sp-5) }
+.section-head h2{ margin:0; font-size:var(--fs-24); font-weight:800;
+                  letter-spacing:-.015em }
+.section-head p{ margin:6px 0 0; color:var(--ink-2); font-size:var(--fs-13) }
+
+.feature-grid,.features{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:var(--sp-3);
+}
+.feature-card{
+  padding:var(--sp-5); background:var(--surface-1);
+  border:1px solid var(--line); border-radius:var(--radius);
+  box-shadow:none; text-align:start;
+  transition:border-color var(--dur-1) var(--ease),
+             background var(--dur-1) var(--ease);
+}
+.feature-card:hover{ border-color:var(--accent); background:var(--surface-1) }
+.feature-icon{
+  display:grid; place-items:center; width:34px; height:34px;
+  margin-bottom:var(--sp-3); border-radius:var(--radius-sm);
+  background:var(--accent-soft); color:var(--accent); font-size:var(--fs-16);
+}
+.feature-icon svg{ width:18px; height:18px }
+.feature-card h3{ margin:0 0 5px; font-size:var(--fs-14); font-weight:700 }
+.feature-card p{ margin:0; color:var(--ink-2); font-size:var(--fs-12);
+                 line-height:1.65 }
+
+.footer{
+  border-top:1px solid var(--line); margin-top:var(--sp-10);
+  padding:var(--sp-5); text-align:center;
+  color:var(--ink-3); font-size:var(--fs-12);
+}
+.footer a{ color:var(--ink-2) }
+.footer a:hover{ color:var(--accent) }
+
+/* ---------------------------------------------------------------------------
+   12. Settings rows
+   --------------------------------------------------------------------------- */
+.set-row{
+  display:grid; grid-template-columns:minmax(200px,1fr) minmax(200px,320px);
+  align-items:center; gap:var(--sp-4);
+  padding:var(--sp-4) 0; border-bottom:1px solid var(--line-soft);
+}
+.set-row:last-child{ border-bottom:0 }
+.set-label{ font-size:var(--fs-13); font-weight:650; color:var(--ink) }
+.set-desc{ color:var(--ink-2); font-size:var(--fs-12); margin-top:2px }
+.set-control{ justify-self:end; width:100% }
+.set-control select,.set-control input[type="text"],
+.set-control input[type="number"]{ width:100% }
+
+/* ---------------------------------------------------------------------------
+   13. Watchlist star
+   --------------------------------------------------------------------------- */
+.star-btn,.watch-star{
+  border:0; background:none; cursor:pointer; padding:0 2px;
+  color:var(--ink-3); font-size:var(--fs-13); line-height:1;
+  transition:color var(--dur-1) var(--ease), scale var(--dur-1) var(--ease);
+}
+.star-btn:hover,.watch-star:hover{ color:var(--star); scale:1.12 }
+.star-btn.on,.watch-star.on,.star-btn[aria-pressed="true"]{ color:var(--star) }
+
+/* ---------------------------------------------------------------------------
+   14. Narrow screens
+   --------------------------------------------------------------------------- */
+@media (max-width:1100px){
+  .brand-name{ display:none }
+  .search-wrap{ flex-basis:200px }
+}
+@media (max-width:820px){
+  :root{ --topbar-h:52px }
+  .topbar{ padding:0 var(--sp-3); gap:var(--sp-2) }
+  .container{ padding:var(--sp-4) var(--sp-3) var(--sp-10) }
+  .user-name{ display:none }
+  .hero{ padding:var(--sp-8) var(--sp-4) }
+  .hero h1{ font-size:var(--fs-30) }
+  .set-row{ grid-template-columns:1fr; gap:var(--sp-2) }
+  .set-control{ justify-self:stretch }
+}
+
+/* Print: the app is used to produce reports. */
+@media print{
+  .topbar,.footer,.nav-loader,.page-actions,.filterbar{ display:none !important }
+  .panel{ border-color:#ccc; break-inside:avoid }
+  table.grid thead th{ position:static }
+}
+
+/* ---------------------------------------------------------------------------
+   15. Sprite icons
+   --------------------------------------------------------------------------- */
+.ico{ width:16px; height:16px; flex:0 0 auto; vertical-align:-2px }
+.ico-lg{ width:20px; height:20px }
+
+/* ---------------------------------------------------------------------------
+   16. Corrections after the first pass in a real browser
+   ---------------------------------------------------------------------------
+   Both Vue islands and the Jinja tables render a percentage as
+   `<span class="pill up">`, so «کشتن پیل‌ها» could not be done by restyling
+   .pill alone — a verdict pill on the security page is the same class and does
+   want its fill. The distinction is CONTEXT, not class: inside a data grid a
+   percentage is a measurement, and one of 5,500 rounded green blocks on a
+   screen is noise; outside a grid it is a verdict, and a verdict is a category
+   that earns a chip.
+   --------------------------------------------------------------------------- */
+table.grid .pill{
+  display:inline; height:auto; padding:0; border:0; border-radius:0;
+  background:none !important;      /* the islands set no inline style, but
+                                      style.css reaches these with .grid .pill */
+  font-size:inherit; font-weight:600; line-height:inherit;
+}
+table.grid .pill.up{ color:var(--up) }
+table.grid .pill.down{ color:var(--down) }
+table.grid .pill.mid{ color:var(--mid) }
+
+/* The header of a numeric column and its cells must agree, or the digits stop
+   forming a column. The islands mark headers .numh and cells .num. */
+table.grid th.numh,table.grid td.num{ text-align:end }
+table.grid td.num .pill{ direction:ltr; unicode-bidi:plaintext }
+
+/* The search box was collapsing: the eleven-item nav is flex:1 and won, so the
+   field shrank to its 150px minimum and then past it. Fixed basis, no shrink;
+   the nav scrolls instead, which it is already set up to do. */
+.search-wrap{ flex:0 0 clamp(170px,22vw,290px) }
+@media (max-width:900px){ .search-wrap{ flex-basis:150px } }
+
+/* An unstarred star should be visible-but-quiet. style.css paints it
+   var(--line), which in the new palette is a hairline and disappears. */
+table.grid .watch-star{ color:var(--ink-3) }
+table.grid .watch-star.on{ color:var(--star) }
+
+/* ---------------------------------------------------------------------------
+   17. Beating one id selector
+   ---------------------------------------------------------------------------
+   style.css styles the search box as `#search`, for a header that used to be
+   dark: a translucent-white fill and white placeholder text. On the new light
+   topbar that is an invisible field with invisible text in it, and no class
+   selector can override an id. `.search-wrap #search` can — 1-1-0 beats 1-0-0
+   — and it is worth the extra specificity to leave style.css untouched.
+   --------------------------------------------------------------------------- */
+.search-wrap #search{
+  width:100%; height:34px; padding:0 32px 0 var(--sp-3);
+  border:1px solid var(--line); border-radius:var(--radius-sm);
+  background:var(--surface-2); color:var(--ink);
+  font-size:var(--fs-13);
+}
+.search-wrap #search::placeholder{ color:var(--ink-3) }
+.search-wrap #search:focus{
+  background:var(--surface-1); border-color:var(--accent); color:var(--ink);
+  box-shadow:0 0 0 3px var(--focus);
+}
+
+/* ---------------------------------------------------------------------------
+   18. Landing page: three columns, and a welcome that is a panel
+   --------------------------------------------------------------------------- */
+.feature-grid{ grid-template-columns:repeat(3,1fr) }
+@media (max-width:1000px){ .feature-grid{ grid-template-columns:repeat(2,1fr) } }
+@media (max-width:640px){ .feature-grid{ grid-template-columns:1fr } }
+
+.welcome-panel{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:var(--sp-4); flex-wrap:wrap; margin-top:var(--sp-8);
+}
+.welcome-panel .page-title{ font-size:var(--fs-18) }
+
+/* The hero was 400px of empty dark band. Tighter, and the radial highlight
+   sits behind the badge rather than in the corner where nothing is. */
+.hero{ padding:var(--sp-10) var(--sp-6) }
+.hero h1{ font-size:var(--fs-30) }
+@media (min-width:1100px){ .hero h1{ font-size:var(--fs-38) } }
+
+/* A button whose words JavaScript rewrites keeps them in their own span, so the
+   icon beside them survives. See label() in update.html. */
+.btn .btn-label{ display:inline }
+
+/* ---------------------------------------------------------------------------
+   20. Dashboard
+   ---------------------------------------------------------------------------
+   The «برترین‌های دوره» / «ضعیف‌ترین‌های دوره» lists render the same
+   `{{ pill() }}` macro the tables do, so they arrived as ten filled blocks in a
+   column. Same reasoning as in a grid: the sign and the colour of the number
+   already say which way it went. The row becomes the hover target instead,
+   because each one is a link and did not look like one.
+   --------------------------------------------------------------------------- */
+.mini-list h3{
+  margin:0 0 var(--sp-2); font-size:var(--fs-12); font-weight:700;
+  color:var(--ink-2);
+}
+.mini-list > a{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:var(--sp-3); padding:5px 8px; border-radius:var(--radius-sm);
+  font-size:var(--fs-13);
+}
+.mini-list > a:hover{ background:var(--surface-2) }
+.mini-list .sym{ font-weight:700; color:var(--ink) }
+.mini-list > a:hover .sym{ color:var(--accent) }
+.mini-list .pill{
+  background:none; border:0; padding:0; height:auto;
+  font-size:var(--fs-13); font-weight:600;
+}
+.mini-list .pill.up{ color:var(--up) }
+.mini-list .pill.down{ color:var(--down) }
+
+/* Sector chips: a tint is right here — each one is a category carrying a value
+   — but at full saturation twenty of them shout over everything else on the
+   page. A quiet surface with a coloured number reads as data; a solid green
+   block reads as a button you can press. */
+.chips .chip.up,.chips .chip.down{
+  background:var(--surface-2); border:1px solid var(--line); font-weight:600;
+}
+.chips .chip.up{ color:var(--up) }
+.chips .chip.down{ color:var(--down) }
+
+/* breadth — the advance / decline bar */
+.breadth{ display:grid; gap:var(--sp-3) }
+.breadth-nums{ display:flex; align-items:baseline; gap:var(--sp-2) }
+.breadth-big{ font-size:var(--fs-30); font-weight:800; letter-spacing:-.02em }
+.breadth-big.up{ color:var(--up) }
+.breadth-big.down{ color:var(--down) }
+.breadth-cap{ color:var(--ink-2); font-size:var(--fs-12) }
+.breadth-bar{
+  display:flex; height:8px; border-radius:99px; overflow:hidden;
+  background:var(--surface-2); font-size:0;
+}
+.breadth-bar .b-up{ background:var(--up) }
+.breadth-bar .b-down{ background:var(--down) }
+.breadth-bar .b-flat{ background:var(--mute-fill) }
+.breadth-legend{
+  display:flex; flex-wrap:wrap; gap:var(--sp-4);
+  font-size:var(--fs-12); color:var(--ink-2);
+}
+.breadth-legend .l-up{ color:var(--up) }
+.breadth-legend .l-down{ color:var(--down) }
+.breadth-lists{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+  gap:var(--sp-4); margin-top:var(--sp-2);
+}
+.breadth-lists .mini-list{
+  padding:var(--sp-3); border:1px solid var(--line);
+  border-radius:var(--radius); background:var(--surface-1);
+}
+.dash-loading{
+  display:flex; align-items:center; justify-content:center; gap:var(--sp-3);
+  padding:var(--sp-12) var(--sp-4); color:var(--ink-2);
+}
+.up-title{ color:var(--up) }
+.down-title{ color:var(--down) }
+
+/* The little table toolbar (copy / export / fullscreen) that tables.js adds. */
+.tbl-tools{ display:flex; gap:6px; margin-bottom:var(--sp-2) }
+.tbl-tools button{
+  display:grid; place-items:center; width:28px; height:28px;
+  border:1px solid var(--line); border-radius:var(--radius-sm);
+  background:var(--surface-1); color:var(--ink-3); cursor:pointer;
+  font-size:var(--fs-12);
+}
+.tbl-tools button:hover{ color:var(--accent); border-color:var(--accent) }
+/* The advance/decline counts are already spelled out in the legend below the
+   bar; at 8px tall the in-bar labels were four pixels of unreadable white. */
+.breadth-bar span{ font-size:0; line-height:0; color:transparent }
+
+/* A page-sub can be a full paragraph of explanation (the screener and filters
+   pages both open with four lines of it), so it needs a measure. 90ch keeps it
+   readable without pushing the page actions off the row. */
+.page-head .page-sub{ max-width:90ch; line-height:1.7 }
+.page-head > div:first-child{ min-width:0 }
+
+/* ---------------------------------------------------------------------------
+   21. Security detail
+   ---------------------------------------------------------------------------
+   The tab indicator was --brand (gold). Gold is the identity mark now, not the
+   interactive colour: a selected tab is a control's state, so it takes
+   --accent, the same colour every other actionable thing in the app takes.
+   --------------------------------------------------------------------------- */
+.tab-nav{ border-bottom:1px solid var(--line); gap:0 }
+.tab-btn{
+  font-size:var(--fs-13); font-weight:600; color:var(--ink-2);
+  padding:10px 14px; border-bottom:2px solid transparent; margin-bottom:-1px;
+}
+.tab-btn:hover{ color:var(--ink) }
+.tab-btn.on,.tab-btn[aria-selected="true"]{
+  color:var(--accent); border-bottom-color:var(--accent);
+}
+
+/* The «★ دیده‌بان» toggle next to the symbol name. */
+.watch-star.big{
+  height:30px; padding:0 12px; border:1px solid var(--line-strong);
+  border-radius:var(--radius-sm); font-size:var(--fs-12); font-weight:600;
+  color:var(--ink-2); background:var(--surface-1);
+}
+.watch-star.big:hover{ border-color:var(--star); color:var(--star) }
+.watch-star.big.on{
+  border-color:var(--star); color:var(--star); background:var(--star-bg);
+}
+
+/* The score ring's verdict badge IS a verdict, so it keeps a fill. */
+.verdict{ font-size:var(--fs-14); font-weight:700 }
+
+/* ---------------------------------------------------------------------------
+   22. Settings controls
+   ---------------------------------------------------------------------------
+   Every control on this page was gold, and the toggles were green. Both are
+   wrong under the rule the palette is built on: gold is the identity mark and
+   green means "the price went up". A selected segment and an enabled switch are
+   states of a control, so they are --accent, like every other actionable thing.
+   --------------------------------------------------------------------------- */
+.seg{
+  display:inline-flex; gap:2px; padding:2px;
+  background:var(--surface-2); border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+}
+.seg label{
+  padding:5px 12px; border-radius:4px; cursor:pointer;
+  font-size:var(--fs-12); font-weight:600; color:var(--ink-2);
+  transition:background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.seg label:hover{ color:var(--ink); background:var(--surface-1) }
+.seg label:has(input:checked){ background:var(--accent); color:var(--on-accent) }
+.seg input:checked + span{ color:var(--on-accent) }
+.seg input:focus-visible + span{ outline:2px solid var(--accent);
+                                 outline-offset:3px; border-radius:4px }
+
+.switch{ width:40px; height:22px }
+.switch .track{
+  border-radius:99px; background:var(--mute-fill);
+  transition:background var(--dur-2) var(--ease);
+}
+.switch .track::before{
+  width:16px; height:16px; border-radius:50%;
+  box-shadow:0 1px 2px rgba(0,0,0,.25);
+}
+.switch input:checked + .track{ background:var(--accent) }
+.switch input:checked + .track::before{ transform:translateX(-18px) }
+html[dir="ltr"] .switch input:checked + .track::before{ transform:translateX(18px) }
+.switch input:focus-visible + .track{ outline:2px solid var(--accent);
+                                      outline-offset:2px }
+
+/* the theme picker */
+.theme-row{ grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px }
+.theme-swatch{ border:1px solid var(--line); border-radius:var(--radius) }
+.theme-swatch:hover{ transform:none; border-color:var(--accent) }
+.theme-swatch.active{
+  border-color:var(--accent); box-shadow:0 0 0 3px var(--focus);
+}
+.theme-swatch .sw-check{ color:var(--accent) }
+.theme-swatch .sw-name{ font-size:var(--fs-12); font-weight:650 }
+.theme-family{ font-size:var(--fs-11); color:var(--ink-3) }
+
+.set-anon{
+  background:var(--accent-soft); color:var(--ink);
+  border-radius:var(--radius-sm); font-size:var(--fs-12);
+}
+.set-saved{ color:var(--accent); font-size:var(--fs-12); font-weight:700 }

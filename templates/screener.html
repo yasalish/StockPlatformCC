@@ -3,13 +3,17 @@
 
 {% block content %}
 <div data-preset-page="screener" data-preset-kind="{{ kind }}"></div>
-<section class="hero">
-  <h1>غربالگر هوشمند — بهترین موقعیت‌های خرید</h1>
-  <p class="muted" style="max-width:74ch;margin:6px 0 0">
-    همهٔ نمادها بر پایهٔ یک «امتیاز فنی» ۰ تا ۱۰۰ رتبه‌بندی می‌شوند که روند، مومنتوم، قدرت نسبی (RSI)،
+{#  A page header, not a .hero: that dark band belongs to the landing
+    page. Here the title is a label on the work, not an introduction.  #}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">غربالگر هوشمند — بهترین موقعیت‌های خرید</h1>
+    <p class="page-sub">
+      همهٔ نمادها بر پایهٔ یک «امتیاز فنی» ۰ تا ۱۰۰ رتبه‌بندی می‌شوند که روند، مومنتوم، قدرت نسبی (RSI)،
     موقعیت قیمت در بازهٔ سالانه و کنترل ریسک را با هم ترکیب می‌کند. بالاترین امتیازها در صدر فهرست‌اند.
-  </p>
-</section>
+    </p>
+  </div>
+</div>
 
 {# ── the island: summary cards, filter bar and the ranked table. The rows come
    from /api/screener/<kind> and only the ones on screen are in the DOM — all

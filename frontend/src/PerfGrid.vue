@@ -63,7 +63,11 @@ function fieldOf(col: PerfCol, half: "ceil" | "floor") {
  * because it depends on the data and not on what is scrolled into view.
  */
 const CHAR = 8;        // px per Persian digit at the grid's 13.5px font
-const PAD = 46;        // cell padding (12+12) + pill padding (9+9) + a little air
+const PAD = 30;        // cell padding (10+10) + a little air. Was 46, which
+                       // also paid for a pill's own 9+9 — ui.css renders a
+                       // percentage inside a grid as plain coloured text, so
+                       // that padding was reserving space for a box nobody
+                       // draws. Twelve columns x 20px is a column of viewport.
 function widthFor(field: string, min: number) {
   let widest = 0;
   for (const r of props.rows) {

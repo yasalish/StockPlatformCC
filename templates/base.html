@@ -48,8 +48,14 @@
 
   <!-- Vazirmatn Persian font — self-hosted; @font-face lives in style.css -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ asset_version('css/style.css') }}">
+  {#  The component layer. MUST come after style.css: style.css owns the theme
+      palettes and the older page-specific chrome, ui.css owns the components,
+      and the cascade order is what lets the second redesign the first without
+      a 1,300-line diff. Removing this one line reverts the whole redesign.  #}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ui.css') }}?v={{ asset_version('css/ui.css') }}">
 </head>
 <body class="{% block body_class %}{% endblock %}">
+  {% include "_icons.html" %}
   <div id="nav-loader" class="nav-loader" aria-hidden="true">
     <div class="nav-loader-box">
       <div class="nav-spinner"></div>
@@ -58,8 +64,15 @@
   </div>
   <header class="topbar">
     <div class="brand">
-      <a href="{{ url_for('index') }}">
-        <span class="logo">📈</span>
+      <a href="{{ url_for('index') }}" aria-label="بورس‌نگار — خانه">
+        {#  An emoji is a font-dependent picture of a chart; this is a chart.
+            It also inherits currentColor, so it follows the theme.  #}
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 15.5 7 9l3.5 3.5L18 4"/><path d="M13 4h5v5"/>
+          </svg>
+        </span>
         <span class="brand-name">بورس‌نگار</span>
       </a>
       <span class="brand-sub">سامانهٔ یکپارچهٔ تحلیل بازار سرمایه</span>
@@ -82,7 +95,15 @@
       {% endif %}
     </nav>
     <div class="search-wrap">
-      <input type="text" id="search" placeholder="جستجوی نماد یا نام…" autocomplete="off">
+      <svg class="search-ico" aria-hidden="true" viewBox="0 0 16 16" fill="none"
+           stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/>
+      </svg>
+      <input type="text" id="search" placeholder="جستجوی نماد یا نام…"
+             autocomplete="off" aria-label="جستجوی نماد یا نام">
+      {#  ui.js already binds «/» to focus this field; saying so turns a hidden
+          shortcut into a discoverable one.  #}
+      <kbd class="search-kbd" aria-hidden="true">/</kbd>
       <div id="search-results" class="search-results"></div>
     </div>
 

@@ -3,6 +3,19 @@
 <html lang="fa" dir="rtl" data-theme="light">
 <head>
   <meta charset="utf-8">
+  {#  Theme before the first paint. auth.js applies it too, but that file loads
+      at the end of the body: a dark-theme visitor would see a white page flash
+      first, which is the single most-reported complaint about bolt-on dark
+      modes. Same key and same fallback order as base.html.  #}
+  <script>
+    (function () {
+      try {
+        var p = JSON.parse(localStorage.getItem("boursenegar-prefs") || "{}") || {};
+        var t = localStorage.getItem("boursenegar-theme") || p.theme;
+        if (t) document.documentElement.setAttribute("data-theme", t);
+      } catch (e) { /* private mode — light is a fine fallback */ }
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ 'ثبت‌نام' if is_reg else 'ورود' }} — بورس‌نگار</title>
 

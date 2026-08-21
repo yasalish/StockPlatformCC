@@ -59,6 +59,11 @@ function el(id) {
     disabled: false, className: "", value: "", checked: false,
     parentElement: { style: {} },
     addEventListener() {}, closest() { return null },
+    // The redesign put an <svg> icon and a <span class="btn-label"> inside the
+    // buttons whose words JavaScript rewrites, and label() reaches for that
+    // span — so a stand-in element has to be able to answer querySelector.
+    _label: { textContent: "" },
+    querySelector(sel) { return sel === ".btn-label" ? this._label : null },
   };
   return els[id];
 }
@@ -77,7 +82,10 @@ render(s);
 console.log(JSON.stringify({
   form: document.getElementById("form-panel").style.display,
   runDisabled: document.getElementById("run-btn").disabled,
-  runText: document.getElementById("run-btn").textContent,
+  runText: (function (b) {
+    const l = b.querySelector(".btn-label");
+    return l && l.textContent ? l.textContent : b.textContent;
+  })(document.getElementById("run-btn")),
   stop: document.getElementById("stop-btn").style.display,
   pause: document.getElementById("pause-btn").style.display,
   now: document.getElementById("prog-now").style.display,
