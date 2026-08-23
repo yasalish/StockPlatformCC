@@ -66,6 +66,15 @@ THEMES = [
     {"id": "dark",     "label": "تاریک",       "family": "dark",  "swatch": ("#0f151b", "#4d9bff")},
     {"id": "midnight", "label": "نیمه‌شب",     "family": "dark",  "swatch": ("#070b12", "#5b9dff")},
     {"id": "graphite", "label": "ذغالی",       "family": "dark",  "swatch": ("#121314", "#6ba3f5")},
+
+    {"id": "contrast",    "label": "کنتراست بالا", "family": "light", "swatch": ("#eaeef2", "#0b45c9")},
+    {"id": "azure",       "label": "آسمانی", "family": "light", "swatch": ("#eef2fa", "#3b5bdb")},
+    {"id": "sage",        "label": "مریم‌گلی", "family": "light", "swatch": ("#e9ece2", "#35669f")},
+    {"id": "ivory",       "label": "عاجی", "family": "light", "swatch": ("#f5f2ea", "#1c5bb8")},
+    {"id": "contrast-dark", "label": "کنتراست بالا — تاریک", "family": "dark", "swatch": ("#04060a", "#7ab8ff")},
+    {"id": "steel",       "label": "فولادی", "family": "dark", "swatch": ("#131c21", "#62b8e2")},
+    {"id": "indigo",      "label": "نیلی", "family": "dark", "swatch": ("#15162b", "#9d8cfa")},
+    {"id": "espresso",    "label": "اسپرسو", "family": "dark", "swatch": ("#17100b", "#cf9ce8")},
 ]
 THEME_IDS = tuple(t["id"] for t in THEMES)
 

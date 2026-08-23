@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · هشدارها{% endblock %}
+
+{% block content %}
+{#  هشدارها — the feature every comparable platform has (ره‌آورد ۳۶۵ ships
+    نقشه بازار / فیلترها / دیده‌بان / هشدارها; TradingView's alerts are its most
+    used tool after the chart) and this one did not.
+
+    The page is deliberately two panels and nothing else: the rules you own, and
+    what they have told you. A notification feature earns trust by making both of
+    those answerable at a glance — "what am I watching" and "why did it ping me".
+#}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">هشدارها</h1>
+    <p class="page-sub">
+      قاعده‌ای برای یک نماد تعیین کنید؛ هر بار که دادهٔ تازه‌ای درج شود
+      («به‌روزرسانی داده‌ها» یا دریافت شبانه) قاعده‌ها بررسی و موارد برقرارشده
+      همین‌جا ثبت می‌شوند.
+    </p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="{{ url_for('watchlist_page') }}">
+      <svg class="ico" aria-hidden="true"><use href="#i-star"></use></svg>
+      دیده‌بان
+    </a>
+  </div>
+</div>
+
+<div class="stat-row">
+  <div class="stat-card">
+    <div class="stat-num">{{ fa(alerts | selectattr('active') | list | length) }}</div>
+    <div class="stat-label">هشدار فعال</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ fa(alerts | rejectattr('active') | list | length) }}</div>
+    <div class="stat-label">غیرفعال / اجرا‌شده</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ fa(events | length) }}</div>
+    <div class="stat-label">رویداد ثبت‌شده</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ fy(summary.stock_latest) }}</div>
+    <div class="stat-label">آخرین دادهٔ قیمت</div>
+  </div>
+</div>
+
+<div class="two-col">
+  {# ---------------- the create form ---------------- #}
+  <section class="panel">
+    <div class="panel-head"><h2>هشدار تازه</h2></div>
+    <form method="post" action="{{ url_for('alerts_create') }}" class="alert-form">
+      <div class="alert-form-grid">
+        <label>نوع:
+          <select name="kind">
+            <option value="stock">سهام</option>
+            <option value="etf">صندوق</option>
+          </select>
+        </label>
+        <label>نماد:
+          <input type="text" name="ticker" placeholder="مثلاً خودرو" dir="rtl"
+                 autocomplete="off" required>
+        </label>
+        <label class="alert-rule">شرط:
+          <select name="rule" id="alert-rule">
+            {% for key, r in rules.items() %}
+            <option value="{{ key }}" data-unit="{{ r.unit }}" title="{{ r.hint }}">
+              {{ r.fa }}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>مقدار:
+          {#  inputmode=decimal rather than type=number: the field accepts
+              «۱۲۳» and «۱۲,۳۴۵» because that is what the app renders and what a
+              user pastes back in — a native number input silently rejects both.  #}
+          <input type="text" name="threshold" id="alert-threshold"
+                 inputmode="decimal" dir="ltr" placeholder="۱۰۰۰" required>
+          <span class="alert-unit" id="alert-unit"></span>
+        </label>
+        <label>تکرار:
+          <select name="repeat_mode">
+            <option value="once">یک‌بار (پس از اجرا غیرفعال شود)</option>
+            <option value="always">هر روز معاملاتی</option>
+          </select>
+        </label>
+        <label>یادداشت (اختیاری):
+          <input type="text" name="note" maxlength="200" placeholder="برای یادآوری خودتان">
+        </label>
+      </div>
+      <p class="note" id="alert-hint"></p>
+      <button type="submit" class="btn primary">
+        <svg class="ico" aria-hidden="true"><use href="#i-clock"></use></svg>
+        ثبت هشدار
+      </button>
+    </form>
+  </section>
+
+  {# ---------------- the feed ---------------- #}
+  <section class="panel">
+    <div class="panel-head">
+      <h2>رویدادها</h2>
+      <span class="muted small">آخرین {{ fa(events | length) }} مورد</span>
+    </div>
+    {% if events %}
+    <div class="alert-feed">
+      {% for e in events %}
+      <div class="alert-event {{ 'up-t' if e.rule in ('price_above','pct_up','near_high') else 'down-t' }}">
+        <div class="alert-event-msg">{{ fa(e.message) }}</div>
+        <div class="muted small">{{ fa(e.j_date or '—') }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">
+      <svg class="empty-ico" aria-hidden="true"><use href="#i-clock"></use></svg>
+      <h3>هنوز هشداری اجرا نشده</h3>
+      <p class="muted small">
+        قاعده‌ها پس از هر درج دادهٔ تازه بررسی می‌شوند. اگر هم‌اکنون هشدار فعالی
+        دارید، پس از نخستین به‌روزرسانی نتیجه همین‌جا نمایش داده می‌شود.
+      </p>
+    </div>
+    {% endif %}
+  </section>
+</div>
+
+{# ---------------- the rules ---------------- #}
+<section class="panel flush">
+  <div class="panel-head"><h2>قاعده‌های من</h2></div>
+  {% if alerts %}
+  <div class="table-scroll">
+    <table class="grid">
+      <thead>
+        <tr>
+          <th>نماد</th>
+          <th>نوع</th>
+          <th>شرط</th>
+          <th class="numh">مقدار</th>
+          <th>تکرار</th>
+          <th class="numh">اجرا شده</th>
+          <th>آخرین اجرا</th>
+          <th>یادداشت</th>
+          <th>وضعیت</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in alerts %}
+        <tr data-alert="{{ a.id }}" class="{{ '' if a.active else 'alert-off' }}">
+          <td class="sym">{{ a.ticker }}</td>
+          <td class="small muted">{{ 'سهام' if a.kind == 'stock' else 'صندوق' }}</td>
+          <td class="small">{{ rules[a.rule].fa if a.rule in rules else a.rule }}</td>
+          <td class="num">{{ fa(a.threshold | round(2)) }}{{ '٪' if rules.get(a.rule, {}).get('unit') == 'pct' else ('×' if rules.get(a.rule, {}).get('unit') == 'times' else '') }}</td>
+          <td class="small muted">{{ 'یک‌بار' if a.repeat_mode == 'once' else 'هر روز' }}</td>
+          <td class="num">{{ fa(a.fired_count) }}</td>
+          <td class="small muted">{{ fa(a.last_fired_jd or '—') }}</td>
+          <td class="small muted">{{ a.note or '—' }}</td>
+          <td>
+            <span class="pill {{ 'up' if a.active else '' }}">
+              {{ 'فعال' if a.active else 'غیرفعال' }}
+            </span>
+          </td>
+          <td class="alert-actions">
+            <button type="button" class="btn ghost small" data-toggle="{{ a.id }}"
+                    data-want="{{ '0' if a.active else '1' }}">
+              {{ 'غیرفعال کن' if a.active else 'فعال کن' }}
+            </button>
+            <button type="button" class="btn ghost small" data-del="{{ a.id }}"
+                    title="حذف این هشدار">
+              <svg class="ico" aria-hidden="true"><use href="#i-trash"></use></svg>
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    <svg class="empty-ico" aria-hidden="true"><use href="#i-empty"></use></svg>
+    <h3>هنوز هشداری تعیین نکرده‌اید</h3>
+    <p class="muted small">
+      نمونه‌های پرکاربرد: «حجم غیرعادی» بیش از ۳ برابر میانگین برای دیدن ورود پول،
+      یا «نزدیک سقف تاریخی» کمتر از ۵٪ برای نمادهای در آستانهٔ شکست.
+    </p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  /*  The unit next to the value field, and the one-line explanation under the
+      form. Both come from db.ALERT_RULES via data-unit, so the catalogue is
+      defined once in Python and this file never restates it — a second copy of
+      "which rules take a percentage" is a copy that goes stale.  */
+  (function () {
+    "use strict";
+    var ruleSel = document.getElementById("alert-rule");
+    var unitEl  = document.getElementById("alert-unit");
+    var hintEl  = document.getElementById("alert-hint");
+    var thrEl   = document.getElementById("alert-threshold");
+    if (!ruleSel) return;
+
+    var UNIT = { price: "ریال", pct: "درصد", times: "برابر" };
+    var PLACEHOLDER = { price: "۵٬۰۰۰", pct: "۵", times: "۳" };
+
+    function sync() {
+      var opt = ruleSel.options[ruleSel.selectedIndex];
+      var unit = opt.getAttribute("data-unit") || "";
+      unitEl.textContent = UNIT[unit] || "";
+      hintEl.textContent = opt.getAttribute("title") || "";
+      thrEl.placeholder = PLACEHOLDER[unit] || "";
+    }
+    ruleSel.addEventListener("change", sync);
+    sync();
+
+    /*  Toggle and delete go through fetch so the page does not jump to the top
+        and lose the row you were looking at — this table is the one place a
+        user compares several rules at once.  */
+    document.addEventListener("click", function (ev) {
+      var t = ev.target.closest("[data-toggle], [data-del]");
+      if (!t) return;
+      var id = t.dataset.toggle || t.dataset.del;
+      var row = document.querySelector('tr[data-alert="' + id + '"]');
+
+      if (t.dataset.toggle) {
+        var body = new FormData();
+        body.append("active", t.dataset.want);
+        fetch("/alerts/" + id + "/toggle", { method: "POST", body: body })
+          .then(function (r) { return r.json(); })
+          .then(function () { location.reload(); })
+          .catch(function () { location.reload(); });
+        return;
+      }
+
+      if (!confirm("این هشدار حذف شود؟")) return;
+      fetch("/alerts/" + id + "/delete",
+            { method: "POST", headers: { "X-Requested-With": "fetch" } })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (j.ok && row) row.remove(); else location.reload(); })
+        .catch(function () { location.reload(); });
+    });
+  })();
+</script>
+{% endblock %}

@@ -107,10 +107,17 @@ check(os.path.exists("static/dist/perf.js") and
 # ===========================================================================
 print()
 print("=" * 74)
-print("PART B — the six themes")
+print("PART B — the theme catalogue")
 print("=" * 74)
 
-check(len(prefs.THEMES) == 6, f"{len(prefs.THEMES)} themes in the catalogue")
+# Not a fixed count. This asserted 6, and eight more themes were added — a
+# test that has to be edited every time the catalogue grows is a test that
+# will be edited without being read. What matters is that there is a real
+# catalogue and that both families are represented.
+check(len(prefs.THEMES) >= 6, f"{len(prefs.THEMES)} themes in the catalogue")
+_fams = {t["family"] for t in prefs.THEMES}
+check(_fams == {"light", "dark"},
+      "…covering both families", ", ".join(sorted(_fams)))
 root_block = re.search(r":root\{\s*color-scheme:light;(.*?)\n\}", CSS, re.S)
 check(bool(root_block), "the :root palette is intact")
 root_props = set(re.findall(r"(--[a-z0-9-]+)\s*:", root_block.group(1)))
@@ -233,8 +240,14 @@ try:
             s["_fresh"] = True
 
         r = c.get("/api/me/prefs")
-        check(r.status_code == 200 and r.get_json()["theme"] == "light",
-              "GET /api/me/prefs answers with the defaults for a new account")
+        #  Not the literal "light". This asserted the default theme's VALUE, so
+        #  changing the app's default (light -> dark with the redesign) failed a
+        #  check about the endpoint rather than about the default. What the
+        #  endpoint promises is that a brand-new account reads back
+        #  prefs.DEFAULTS — whatever those currently are.
+        check(r.status_code == 200 and r.get_json()["theme"] == prefs.DEFAULTS["theme"],
+              "GET /api/me/prefs answers with the defaults for a new account",
+              f'got {r.get_json().get("theme")!r}, DEFAULTS says {prefs.DEFAULTS["theme"]!r}')
 
         r = c.patch("/api/me/prefs", json={"theme": "midnight", "zebra": True,
                                            "rows_per_page": "200", "bogus": 1})
@@ -254,7 +267,9 @@ try:
               "…with the saved theme already on <html> (no flash of the wrong one)")
         check(all(f'data-pref="{k}"' in html or k == "theme" for k in prefs.DEFAULTS),
               "…and every preference has a control on the page")
-        check(html.count("data-theme-id=") == 6, "…and all six theme swatches")
+        check(html.count("data-theme-id=") == len(prefs.THEMES),
+      f"…and a swatch for every one of the {len(prefs.THEMES)} themes",
+      f'rendered {html.count("data-theme-id=")}')
 
         # saved screens
         r = c.post("/api/me/screens", json={"name": "فلزات یک‌ماهه", "kind": "stock",
@@ -463,7 +478,9 @@ try:
                   f"{data.get('heatmapFiltered')} of {hm.get('tiles')}")
 
             st = data.get("settings") or {}
-            check(st.get("swatches") == 6, "the settings screen offers six themes")
+            check(st.get("swatches") == len(prefs.THEMES),
+                  f"the settings screen offers all {len(prefs.THEMES)} themes",
+                  str(st.get("swatches")))
             check(st.get("switches", 0) >= 5 and st.get("segments", 0) >= 6,
                   "…plus the switches and segmented controls")
             check(st.get("active") == 1, "…with the current theme marked")

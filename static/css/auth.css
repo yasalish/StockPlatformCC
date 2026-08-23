@@ -59,7 +59,11 @@
    listed here. */
 [data-theme="dark"],
 [data-theme="midnight"],
-[data-theme="graphite"] {
+[data-theme="graphite"],
+[data-theme="contrast-dark"],
+[data-theme="steel"],
+[data-theme="indigo"],
+[data-theme="espresso"] {
   --bg: #0f151b;
   --bg-elev: #161d25;
   --text: #e7eef5;

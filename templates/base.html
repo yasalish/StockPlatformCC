@@ -90,6 +90,9 @@
       {% if current_user.is_authenticated %}
       <a href="{{ url_for('watchlist_page') }}" class="{{ 'on' if request.endpoint == 'watchlist_page' }}">دیده‌بان{% if watch_count %} <span class="nav-badge">{{ fa(watch_count) }}</span>{% endif %}</a>
       {% endif %}
+      {% if current_user.is_authenticated %}
+      <a href="{{ url_for('alerts_page') }}" class="{{ 'on' if request.endpoint == 'alerts_page' }}">هشدارها{% if alert_unseen %} <span class="nav-badge">{{ fa(alert_unseen) }}</span>{% endif %}</a>
+      {% endif %}
       {% if current_user.is_authenticated and current_user.is_admin %}
       <a href="{{ url_for('update_page') }}" class="{{ 'on' if request.endpoint == 'update_page' }}">به‌روزرسانی</a>
       {% endif %}
@@ -128,6 +131,9 @@
         </div>
         <a href="{{ url_for('settings_page') }}"><span class="menu-ico">⚙</span>تنظیمات</a>
         <a href="{{ url_for('watchlist_page') }}"><span class="menu-ico">★</span>دیده‌بان</a>
+        <a href="{{ url_for('alerts_page') }}"><span class="menu-ico">
+          <svg class="ico" aria-hidden="true"><use href="#i-clock"></use></svg>
+        </span>هشدارها{% if alert_unseen %} <span class="nav-badge">{{ fa(alert_unseen) }}</span>{% endif %}</a>
         <a href="{{ url_for('help_page') }}"><span class="menu-ico">؟</span>راهنما</a>
         <a href="{{ url_for('about_page') }}"><span class="menu-ico">ⓘ</span>درباره</a>
         {% if current_user.is_admin %}

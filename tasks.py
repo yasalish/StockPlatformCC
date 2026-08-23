@@ -233,6 +233,14 @@ def finalize_update(job_id):
     counts = jobs.summary_counts(job_id)
     log.info("job %s finished: ok=%s failed=%s of %s",
              job_id, counts["ok"], counts["failed"], counts["total"])
+    # New prices exist as of this moment, so this is where an alert about
+    # today's close becomes possible. Enqueued rather than called inline: the
+    # analytics rebuild above already held this worker for minutes, and a
+    # failure in alert evaluation must not mark a good update as failed.
+    try:
+        evaluate_alerts.apply_async(queue=MAINTENANCE_QUEUE)
+    except Exception as e:
+        log.error("job %s: could not queue alert evaluation: %s", job_id, e)
     return {"job_id": job_id, "timings": timings, **counts}
 
 
@@ -272,6 +280,26 @@ def refresh_analytics_only(reason=""):
     finally:
         db.clear_cache()
         cache.release_refresh()
+
+
+@app.task(name="tasks.evaluate_alerts", acks_late=False)
+def evaluate_alerts():
+    """Check every active هشدار and record what fired.
+
+    NOT acks_late: a lost evaluation is re-run by the next update or the next
+    Beat tick, and the per-session guard in db.evaluate_alerts() means a repeat
+    cannot duplicate an event — whereas an acks_late redelivery of a task that
+    writes user-visible notifications is a task that can report the same move
+    twice after a worker is killed."""
+    import db
+    out = db.evaluate_alerts()
+    if out["fired"]:
+        log.info("alerts: %s of %s rules fired", out["fired"], out["checked"])
+        for e in out["events"]:
+            log.info("alert fired: %s", e["message"])
+    else:
+        log.info("alerts: none of %s rules fired", out["checked"])
+    return out
 
 
 @app.task(name="tasks.nightly_update")

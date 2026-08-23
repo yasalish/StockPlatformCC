@@ -344,6 +344,26 @@ def inject_watchlist():
     return {"watched": keys, "watch_count": len(keys)}
 
 
+@app.context_processor
+def inject_alerts():
+    """The UNREAD هشدار count, for the nav badge.
+
+    Unread rather than total: a badge means "there is something here you have
+    not seen", and a badge showing how many rules you own never changes and so
+    teaches people to ignore it. One indexed count per render for a signed-in
+    user, on the partial index over (user_id, seen).
+
+    Swallows its own errors on purpose — a database created before this feature
+    has no alert_events table, and a missing badge must not take every page down
+    with it."""
+    if not current_user.is_authenticated:
+        return {"alert_unseen": 0}
+    try:
+        return {"alert_unseen": db.unseen_alert_count(current_user.id)}
+    except Exception:
+        return {"alert_unseen": 0}
+
+
 def _find_period_row(ticker, prefer_kind, as_of):
     """Locate a ticker's finer-period gains — searching the current page's kind
     first, then the other — so the compare box accepts an ETF *or* a stock.
@@ -1020,6 +1040,86 @@ def api_watchlist_toggle():
         eid = None
     watched = db.toggle_watch(current_user.id, kind, ticker, eid)
     return jsonify({"ok": True, "watched": watched, "count": db.watch_count(current_user.id)})
+
+
+# ---------------------------------------------------------------------------
+# هشدارها — alerts
+# ---------------------------------------------------------------------------
+@app.route("/alerts")
+@login_required
+def alerts_page():
+    """The rules a user has set, and what they have fired.
+
+    Opening this page marks the feed read: the badge in the nav exists to bring
+    someone here, and a badge that survives the visit it asked for is a badge
+    people learn to ignore."""
+    events = db.alert_events(current_user.id, limit=60)
+    db.mark_alerts_seen(current_user.id)
+    return render_template("alerts.html",
+                           alerts=db.list_alerts(current_user.id),
+                           events=events,
+                           rules=db.ALERT_RULES,
+                           summary=db.db_summary())
+
+
+@app.route("/alerts/new", methods=["POST"])
+@login_required
+def alerts_create():
+    kind = (request.form.get("kind") or "stock").strip()
+    ticker = (request.form.get("ticker") or "").strip()
+    rule = (request.form.get("rule") or "").strip()
+    repeat_mode = (request.form.get("repeat_mode") or "once").strip()
+    raw = (request.form.get("threshold") or "").strip()
+    #  Persian digits in a number field are the normal case here, not an edge
+    #  one: the whole app renders «۱۲۳» and a user copying a price back into
+    #  this form pastes exactly that.
+    raw = raw.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹٫،", "0123456789.,")).replace(",", "")
+    try:
+        threshold = float(raw)
+    except ValueError:
+        flash("مقدار آستانه را به عدد وارد کنید.", "error")
+        return redirect(url_for("alerts_page"))
+    if not ticker:
+        flash("نماد را وارد کنید.", "error")
+        return redirect(url_for("alerts_page"))
+    if rule not in db.ALERT_RULES:
+        flash("نوع هشدار نامعتبر است.", "error")
+        return redirect(url_for("alerts_page"))
+
+    #  Reject a ticker the price tables have never heard of, here rather than
+    #  letting it become a rule that silently never fires. That is the worst
+    #  failure mode a notification feature has: nothing errors, nothing arrives,
+    #  and the user concludes the alerts are broken. The evaluator joins on the
+    #  ticker, so this is exactly the value that has to exist.
+    if not db.ticker_exists(kind, ticker):
+        flash(f"نمادی با نام «{ticker}» در پایگاه داده یافت نشد.", "error")
+        return redirect(url_for("alerts_page"))
+    row = db.create_alert(current_user.id, kind, ticker, rule, threshold,
+                          note=request.form.get("note", ""),
+                          repeat_mode=repeat_mode)
+    if row is None:
+        flash("این هشدار از قبل ثبت شده است.", "error")
+    else:
+        flash(f"هشدار برای «{ticker}» ثبت شد.", "ok")
+    return redirect(url_for("alerts_page"))
+
+
+@app.route("/alerts/<int:alert_id>/toggle", methods=["POST"])
+@login_required
+def alerts_toggle(alert_id):
+    want = (request.form.get("active") or "").strip() == "1"
+    ok = db.set_alert_active(alert_id, current_user.id, want)
+    return jsonify({"ok": ok, "active": want})
+
+
+@app.route("/alerts/<int:alert_id>/delete", methods=["POST"])
+@login_required
+def alerts_delete(alert_id):
+    ok = db.delete_alert(alert_id, current_user.id)
+    if not request.headers.get("X-Requested-With"):
+        flash("هشدار حذف شد." if ok else "هشدار یافت نشد.", "ok" if ok else "error")
+        return redirect(url_for("alerts_page"))
+    return jsonify({"ok": ok})
 
 
 @app.route("/update")

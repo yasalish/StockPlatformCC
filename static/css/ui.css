@@ -1011,3 +1011,43 @@ html[dir="ltr"] .switch input:checked + .track::before{ transform:translateX(18p
   border-radius:var(--radius-sm); font-size:var(--fs-12);
 }
 .set-saved{ color:var(--accent); font-size:var(--fs-12); font-weight:700 }
+
+/* ---------------------------------------------------------------------------
+   23. هشدارها — alerts
+   ---------------------------------------------------------------------------
+   The create form is a grid rather than a .filterbar row: six controls in one
+   line would each be too narrow to read their own label, and this form is used
+   once per rule rather than repeatedly, so vertical space is the cheap axis.
+   --------------------------------------------------------------------------- */
+.alert-form-grid{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:var(--sp-3); margin-bottom:var(--sp-3);
+}
+.alert-form-grid label{
+  display:flex; flex-direction:column; gap:5px; min-width:0;
+}
+.alert-form-grid .alert-rule{ grid-column:span 2 }
+@media (max-width:700px){ .alert-form-grid .alert-rule{ grid-column:auto } }
+.alert-unit{
+  align-self:flex-start; margin-top:3px;
+  color:var(--ink-3); font-size:var(--fs-11);
+}
+#alert-hint{ min-height:1.4em; margin:0 0 var(--sp-3) }
+
+/* The feed: one line per occurrence, the direction carried by the text colour
+   like every other figure in the app. */
+.alert-feed{ display:grid; gap:2px; max-height:340px; overflow:auto }
+.alert-event{
+  display:flex; align-items:baseline; justify-content:space-between;
+  gap:var(--sp-3); padding:7px 9px; border-radius:var(--radius-sm);
+  font-size:var(--fs-13);
+}
+.alert-event:hover{ background:var(--surface-2) }
+.alert-event-msg{ min-width:0 }
+
+/* A rule that is off is still information — it says what you were watching and
+   that it already fired — so it recedes rather than disappearing. */
+table.grid tr.alert-off td{ color:var(--ink-3) }
+table.grid tr.alert-off .sym{ color:var(--ink-2) }
+.alert-actions{ display:flex; gap:5px; white-space:nowrap }
+.alert-actions .btn.small svg{ width:13px; height:13px }

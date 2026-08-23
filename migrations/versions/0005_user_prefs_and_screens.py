@@ -38,7 +38,10 @@ depends_on = None
 # spelled out rather than derived so the ALTER statements read as the plain SQL
 # they are.
 _PREF_COLUMNS = [
-    ("theme",          sa.Text,    "TEXT",    "'light'"),
+    # Mirrors prefs.DEFAULTS["theme"] and the DDL in db.py. All three are the
+    # same default in three places; when they drift, a new account gets a
+    # different theme depending on which path created its row.
+    ("theme",          sa.Text,    "TEXT",    "'dark'"),
     ("digits",         sa.Text,    "TEXT",    "'fa'"),
     ("default_kind",   sa.Text,    "TEXT",    "'stock'"),
     ("rows_per_page",  sa.Integer, "INTEGER", "50"),

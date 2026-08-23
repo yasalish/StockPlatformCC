@@ -2707,6 +2707,66 @@ def init_db():
                 """
             )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_watchlist_user ON watchlist(user_id)")
+
+            # هشدارها — the feature every comparable platform has and this one
+            # did not. Two tables, because a rule and an occurrence are
+            # different things with different lifetimes: the rule is edited and
+            # lives until deleted, the occurrence is a fact about one session
+            # that must survive the rule being turned off (otherwise the answer
+            # to "why did it tell me that?" disappears with the switch).
+            #
+            # Alerts are evaluated against the PRICE TABLES, not the indicator
+            # views: mv_ind_* is refreshed with the analytics and its `i`
+            # ordering runs oldest-first, while an alert has to see the row the
+            # update just wrote. Reading the source of truth costs one indexed
+            # scan per watched symbol and cannot be stale.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS price_alerts (
+                    id            BIGSERIAL PRIMARY KEY,
+                    user_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    kind          TEXT NOT NULL,
+                    ticker        TEXT NOT NULL,
+                    entity_id     BIGINT,
+                    rule          TEXT NOT NULL,
+                    threshold     DOUBLE PRECISION NOT NULL,
+                    note          TEXT NOT NULL DEFAULT '',
+                    active        BOOLEAN NOT NULL DEFAULT TRUE,
+                    repeat_mode   TEXT NOT NULL DEFAULT 'once',
+                    created_at    TEXT NOT NULL,
+                    last_fired_at TEXT,
+                    last_fired_jd TEXT,
+                    -- The same rule twice on the same symbol is a mistake, not a
+                    -- preference: it would fire twice and read as a bug in the
+                    -- alerting rather than as two rules.
+                    UNIQUE (user_id, kind, ticker, rule, threshold)
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_user ON price_alerts(user_id)")
+            # The evaluator's own access path: every active rule, grouped by the
+            # symbol it watches. Without this it is a full scan per update.
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_active "
+                        "ON price_alerts(kind, ticker) WHERE active")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS alert_events (
+                    id       BIGSERIAL PRIMARY KEY,
+                    alert_id BIGINT REFERENCES price_alerts(id) ON DELETE CASCADE,
+                    user_id  BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    kind     TEXT NOT NULL,
+                    ticker   TEXT NOT NULL,
+                    rule     TEXT NOT NULL,
+                    value    DOUBLE PRECISION,
+                    j_date   TEXT,
+                    message  TEXT NOT NULL,
+                    seen     BOOLEAN NOT NULL DEFAULT FALSE,
+                    fired_at TEXT NOT NULL
+                )
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_alert_events_user "
+                        "ON alert_events(user_id, seen)")
             # Per-user settings («تنظیمات») — one row, updated in place, never an
             # event log: nothing is ever asked of this table except "what does
             # this user see right now". The column defaults MUST equal
@@ -2723,7 +2783,11 @@ def init_db():
                 """
                 CREATE TABLE IF NOT EXISTS user_prefs (
                     user_id        BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-                    theme          TEXT    NOT NULL DEFAULT 'light',
+                    -- Mirrors prefs.DEFAULTS['theme']. A row created by SQL rather
+                    -- than through prefs.payload() takes this value, so when the two
+                    -- disagree a new account silently gets a different theme from the
+                    -- one every other path hands out. verify_order09.py compares them.
+                    theme          TEXT    NOT NULL DEFAULT 'dark',
                     digits         TEXT    NOT NULL DEFAULT 'fa',
                     default_kind   TEXT    NOT NULL DEFAULT 'stock',
                     rows_per_page  INTEGER NOT NULL DEFAULT 50,
@@ -3209,3 +3273,310 @@ def market_breadth(kind, as_of=None, period="p20"):
         "worst": ranked[-5:][::-1],
         "groups": groups[:12],
     }
+
+
+# ---------------------------------------------------------------------------
+# هشدارها — alerts
+# ---------------------------------------------------------------------------
+# The rule catalogue. Kept here rather than in the template because three
+# places need it and they must not drift: the create form offers it, the
+# evaluator implements it, and the event message names it in Persian.
+#
+# `unit` is what the threshold MEANS, and it is the field that stops the form
+# from asking for "a number" — a price rule wants ریال, a percentage rule wants
+# ٪, and a volume rule wants a multiplier. Getting that wrong is how a user sets
+# "volume above 3" and never hears from it again.
+ALERT_RULES = {
+    "price_above": {"fa": "قیمت پایانی بالاتر از", "unit": "price",
+                    "hint": "وقتی قیمت پایانی از این مقدار عبور کند"},
+    "price_below": {"fa": "قیمت پایانی پایین‌تر از", "unit": "price",
+                    "hint": "وقتی قیمت پایانی از این مقدار پایین‌تر بیاید"},
+    "pct_up":      {"fa": "رشد روزانه بیش از", "unit": "pct",
+                    "hint": "درصد تغییر پایانی نسبت به روز معاملاتی قبل"},
+    "pct_down":    {"fa": "افت روزانه بیش از", "unit": "pct",
+                    "hint": "درصد افت پایانی نسبت به روز معاملاتی قبل"},
+    "vol_spike":   {"fa": "حجم غیرعادی (چند برابر میانگین)", "unit": "times",
+                    "hint": "حجم امروز تقسیم بر میانگین حجم ۲۰ روز گذشته"},
+    "near_high":   {"fa": "نزدیک سقف تاریخی (کمتر از)", "unit": "pct",
+                    "hint": "فاصلهٔ قیمت پایانی تا بیشترین قیمت تاریخ نماد"},
+    "near_low":    {"fa": "نزدیک کف تاریخی (کمتر از)", "unit": "pct",
+                    "hint": "فاصلهٔ قیمت پایانی تا کمترین قیمت تاریخ نماد"},
+}
+
+REPEAT_MODES = ("once", "always")
+
+
+def ticker_exists(kind, ticker):
+    """Is this a symbol the price tables actually carry?
+
+    Checked when an alert is created. A rule on a mistyped ticker is the worst
+    kind of bug a notification feature can have: nothing raises, nothing ever
+    fires, and the user concludes the alerts do not work."""
+    table = {"stock": "stockpricehistory", "etf": "etfpricehistory"}.get(kind)
+    if not table:
+        return False
+    return bool(_one(f"SELECT 1 AS x FROM {table} WHERE ticker = %s LIMIT 1",
+                     (ticker,)))
+
+
+def list_alerts(user_id):
+    """This user's rules, newest first, each with its latest occurrence."""
+    return _rows(
+        """SELECT a.*,
+                  (SELECT count(*) FROM alert_events e WHERE e.alert_id = a.id) AS fired_count
+             FROM price_alerts a
+            WHERE a.user_id = %s
+            ORDER BY a.active DESC, a.id DESC""", (user_id,))
+
+
+def alert_events(user_id, limit=50, unseen_only=False):
+    return _rows(
+        """SELECT * FROM alert_events
+            WHERE user_id = %s {}
+            ORDER BY id DESC LIMIT %s""".format("AND NOT seen" if unseen_only else ""),
+        (user_id, limit))
+
+
+def unseen_alert_count(user_id):
+    """For the nav badge. One indexed count; called on every page render, so it
+    uses the partial index on (user_id, seen) rather than counting the table."""
+    r = _one("SELECT count(*) AS n FROM alert_events WHERE user_id = %s AND NOT seen",
+             (user_id,))
+    return int(r["n"]) if r else 0
+
+
+def create_alert(user_id, kind, ticker, rule, threshold, note="",
+                 repeat_mode="once", entity_id=None):
+    """Add a rule. Returns the row, or None when the user already has it.
+
+    None rather than an exception, exactly as create_screen() does: "you already
+    have this alert" is something the user acts on, not a failure."""
+    if kind not in ("stock", "etf") or rule not in ALERT_RULES:
+        return None
+    if repeat_mode not in REPEAT_MODES:
+        repeat_mode = "once"
+    conn = get_db()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """INSERT INTO price_alerts
+                     (user_id, kind, ticker, entity_id, rule, threshold, note,
+                      repeat_mode, created_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+                (user_id, kind, ticker, entity_id, rule, float(threshold),
+                 (note or "")[:200], repeat_mode, _utcnow()))
+            row = dict(cur.fetchone())
+        conn.commit()
+        return row
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return None
+    finally:
+        release(conn)
+
+
+def set_alert_active(alert_id, user_id, active):
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE price_alerts SET active = %s "
+                        "WHERE id = %s AND user_id = %s", (bool(active), alert_id, user_id))
+            changed = bool(cur.rowcount)
+        conn.commit()
+        return changed
+    finally:
+        release(conn)
+
+
+def delete_alert(alert_id, user_id):
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM price_alerts WHERE id = %s AND user_id = %s",
+                        (alert_id, user_id))
+            gone = bool(cur.rowcount)
+        conn.commit()
+        return gone
+    finally:
+        release(conn)
+
+
+def mark_alerts_seen(user_id):
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE alert_events SET seen = TRUE "
+                        "WHERE user_id = %s AND NOT seen", (user_id,))
+            n = cur.rowcount
+        conn.commit()
+        return n
+    finally:
+        release(conn)
+
+
+# The window the volume-spike rule measures against. Twenty sessions is the
+# convention every screener uses for "average volume", and it is long enough
+# that one quiet week does not make the next ordinary day look unusual.
+VOL_WINDOW = 20
+
+
+def _alert_snapshot(kind):
+    """{ticker: {...}} for every symbol some ACTIVE rule watches.
+
+    One statement per kind, and only for watched symbols — a user with three
+    alerts must not cost a scan of 782. Everything a rule needs is here, so the
+    evaluation itself is arithmetic in Python and can be unit-tested without a
+    database.
+    """
+    cfg = {"stock": ("stockpricehistory", "mv_alltime_stock"),
+           "etf": ("etfpricehistory", "mv_alltime_etf")}[kind]
+    table, alltime = cfg
+    rows = _rows(
+        f"""
+        WITH watched AS (
+            SELECT DISTINCT ticker FROM price_alerts WHERE active AND kind = %s
+        ), ranked AS (
+            SELECT p.ticker, p.j_date, p.adj_final, p.volume,
+                   row_number() OVER (PARTITION BY p.ticker ORDER BY p.date DESC) AS rn
+              FROM {table} p JOIN watched w ON w.ticker = p.ticker
+             WHERE p.adj_final > 0
+        )
+        SELECT r.ticker,
+               max(CASE WHEN rn = 1 THEN r.j_date END)     AS j_date,
+               max(CASE WHEN rn = 1 THEN r.adj_final END)  AS final,
+               max(CASE WHEN rn = 2 THEN r.adj_final END)  AS prev_final,
+               max(CASE WHEN rn = 1 THEN r.volume END)     AS volume,
+               -- rn 2..21: the twenty sessions BEFORE today, so today's own
+               -- volume is not part of the average it is compared against.
+               avg(CASE WHEN rn BETWEEN 2 AND %s THEN r.volume END) AS vol_avg,
+               a.mx AS hi, a.mn AS lo
+          FROM ranked r
+          LEFT JOIN {alltime} a ON a.ticker = r.ticker
+         WHERE rn <= %s
+         GROUP BY r.ticker, a.mx, a.mn
+        """, (kind, VOL_WINDOW + 1, VOL_WINDOW + 1))
+    return {r["ticker"]: dict(r) for r in rows}
+
+
+def check_alert_rule(rule, threshold, snap):
+    """Does this rule fire on this snapshot? -> (fired, value) or (False, None).
+
+    Pure arithmetic on purpose: the SQL above gathers, this decides, and the
+    decision is the part worth testing. `value` is what tripped it, and it is
+    what the message shows — an alert that says only "fired" makes the user go
+    and look up the number themselves.
+    """
+    # Coerce once, here. PostgreSQL returns avg() as numeric, which psycopg2
+    # hands back as Decimal, and a Decimal that reaches an f-string format spec
+    # or gets multiplied by a float later is a TypeError in a code path that
+    # only runs when an alert actually fires — the worst place to find one.
+    def num(v):
+        return None if v is None else float(v)
+
+    final = num(snap.get("final"))
+    if final is None:
+        return False, None
+
+    if rule == "price_above":
+        return final >= threshold, final
+    if rule == "price_below":
+        return final <= threshold, final
+
+    if rule in ("pct_up", "pct_down"):
+        prev = num(snap.get("prev_final"))
+        # No previous session means no change to measure — a newly listed symbol
+        # must not read as a 0% day and fire a "fell more than 0%" rule.
+        if not prev:
+            return False, None
+        pct = (final - prev) / prev * 100.0
+        if rule == "pct_up":
+            return pct >= threshold, pct
+        return pct <= -abs(threshold), pct
+
+    if rule == "vol_spike":
+        vol, avg = num(snap.get("volume")), num(snap.get("vol_avg"))
+        if not vol or not avg:
+            return False, None
+        times = vol / avg
+        return times >= threshold, times
+
+    if rule in ("near_high", "near_low"):
+        ref = num(snap.get("hi") if rule == "near_high" else snap.get("lo"))
+        if not ref:
+            return False, None
+        # Distance as a percentage OF THE EXTREME, so the number means the same
+        # thing for a 20-rial symbol and a 200,000-rial one.
+        gap = abs(final - ref) / ref * 100.0
+        return gap <= threshold, gap
+    return False, None
+
+
+def _alert_message(rule, ticker, value, threshold, snap):
+    fa = ALERT_RULES[rule]["fa"]
+    unit = ALERT_RULES[rule]["unit"]
+    if unit == "price":
+        shown = f"{value:,.0f} ریال"
+    elif unit == "pct":
+        shown = f"{value:+.2f}٪" if rule in ("pct_up", "pct_down") else f"{value:.2f}٪"
+    else:
+        shown = f"{value:.1f}×"
+    return f"«{ticker}» — {fa} {threshold:g}: {shown} در {snap.get('j_date') or '—'}"
+
+
+def evaluate_alerts():
+    """Check every active rule and record what fired. Returns a summary dict.
+
+    Called by the Celery worker at the end of an update — the moment new prices
+    exist — and on the Beat schedule as a safety net. Idempotent within a
+    session: a rule that already fired for a given j_date does not fire again,
+    which is what stops a re-run of the evaluator from filling the feed with
+    duplicates of the same event.
+    """
+    fired, checked = [], 0
+    for kind in ("stock", "etf"):
+        alerts = _rows(
+            "SELECT * FROM price_alerts WHERE active AND kind = %s ORDER BY id",
+            (kind,))
+        if not alerts:
+            continue
+        snapshot = _alert_snapshot(kind)
+        for a in alerts:
+            checked += 1
+            snap = snapshot.get(a["ticker"])
+            if not snap:
+                continue
+            ok, value = check_alert_rule(a["rule"], float(a["threshold"]), snap)
+            if not ok:
+                continue
+            # One event per session per rule. Without this, every evaluator run
+            # between two updates re-reports the same day's move.
+            if a["last_fired_jd"] and a["last_fired_jd"] == snap.get("j_date"):
+                continue
+            msg = _alert_message(a["rule"], a["ticker"], value,
+                                 float(a["threshold"]), snap)
+            conn = get_db()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO alert_events
+                             (alert_id, user_id, kind, ticker, rule, value,
+                              j_date, message, fired_at)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                        (a["id"], a["user_id"], kind, a["ticker"], a["rule"],
+                         float(value), snap.get("j_date"), msg, _utcnow()))
+                    # 'once' switches itself off, so a price crossing a level
+                    # does not report every day it stays above it. 'always'
+                    # keeps watching and relies on the per-session guard above.
+                    cur.execute(
+                        """UPDATE price_alerts
+                              SET last_fired_at = %s, last_fired_jd = %s,
+                                  active = CASE WHEN repeat_mode = 'once'
+                                                THEN FALSE ELSE active END
+                            WHERE id = %s""",
+                        (_utcnow(), snap.get("j_date"), a["id"]))
+                conn.commit()
+            finally:
+                release(conn)
+            fired.append({"alert_id": a["id"], "ticker": a["ticker"],
+                          "rule": a["rule"], "message": msg})
+    return {"checked": checked, "fired": len(fired), "events": fired}

@@ -135,6 +135,7 @@ app.conf.update(
         "tasks.finalize_update": {"queue": MAINTENANCE_QUEUE},
         "tasks.refresh_analytics_only": {"queue": MAINTENANCE_QUEUE},
         "tasks.reconcile": {"queue": MAINTENANCE_QUEUE},
+        "tasks.evaluate_alerts": {"queue": MAINTENANCE_QUEUE},
         "tasks.nightly_update": {"queue": MAINTENANCE_QUEUE},
     },
 )
@@ -174,6 +175,16 @@ app.conf.beat_schedule = {
                             day_of_week=TRADING_DAYS),
         "kwargs": {"kind": "etf"},
         "options": {"queue": MAINTENANCE_QUEUE, "expires": 6 * 3600},
+    },
+    "evaluate-alerts": {
+        # The safety net, not the main path: finalize_update() evaluates alerts
+        # the moment it writes new prices. This covers the case where prices
+        # arrived some other way (a manual delete, a restored backup) and the
+        # hour after the nightly fetch, when a user who set a rule at midnight
+        # should not wait until tomorrow to hear about it.
+        "task": "tasks.evaluate_alerts",
+        "schedule": crontab(minute=15, hour="*/3"),
+        "options": {"queue": MAINTENANCE_QUEUE, "expires": 3600},
     },
     "reconcile-stalled-jobs": {
         # The safety net for work Celery cannot recover by itself: a batch whose

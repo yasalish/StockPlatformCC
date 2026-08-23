@@ -368,6 +368,487 @@
   --shadow-lg:0 20px 48px -16px rgba(0,0,0,.7),0 6px 16px -6px rgba(0,0,0,.5);
 }
 
+
+/* کنتراست بالا — the accessibility light theme: AAA body text and a --line you cannot miss. The only light theme where a dense table's row rules are a real border rather than rhythm. */
+[data-theme="contrast"]{
+  color-scheme:light;
+  --surface-0:#eaeef2;
+  --surface-1:#ffffff;
+  --surface-2:#d8dee5;
+  --surface-3:#ffffff;
+  --bg:var(--surface-0);
+  --panel:var(--surface-1);
+  --hover:var(--surface-2);
+  --input-bg:var(--surface-1);
+  --code-bg:#e8ecf1;
+  --total-bg:#e4e9ee;
+  --overlay:rgba(0,0,0,.62);
+  --ink:#000000;
+  --ink-2:#232c35;
+  --ink-3:#454f5a;
+  --muted:var(--ink-2);
+  --line:#808c99;
+  --line-strong:#3c4652;
+  --line-soft:#b3bcc5;
+  --accent:#0b45c9;
+  --accent-hover:#08349c;
+  --accent-soft:#dde7ff;
+  --on-accent:#ffffff;
+  --focus:#0b45c999;
+  --up:#0a6b34;
+  --up-bg:#d6f0e0;
+  --down:#8f100d;
+  --down-bg:#fbdcd9;
+  --down-strong:#6b0c0a;
+  --mid:#6f4703;
+  --mid-bg:#f6ead0;
+  --mute-fill:#8e99a4;
+  --brand:#7a5a00;
+  --brand2:#5b4300;
+  --brand-soft:#f2e8c5;
+  --gold-grad:linear-gradient(180deg,#5b4300 0%,#7a5a00 100%);
+  --on-brand:#ffffff;
+  --on-gold:#ffffff;
+  --hero-badge:#f0d79a;
+  --star:#8f6400;
+  --star-bg:#fbf1d4;
+  --pin-bg:#fbf1d4;
+  --pin-bg-hover:#f2e8c5;
+  --header1:#000000;
+  --header2:#0d1116;
+  --header3:#1a222c;
+  --on-header:#ffffff;
+  --sbar-track:#e0e5eb;
+  --sbar-thumb:#6f7b88;
+  --sbar-thumb-hover:#3c4652;
+  --radius:10px;
+  --radius-sm:6px;
+  --radius-lg:14px;
+  --shadow:0 1px 2px rgba(0,0,0,.14),0 1px 3px rgba(0,0,0,.10);
+  --shadow-md:0 4px 12px -2px rgba(0,0,0,.20),0 2px 6px -2px rgba(0,0,0,.14);
+  --shadow-lg:0 16px 40px -12px rgba(0,0,0,.38),0 4px 12px -4px rgba(0,0,0,.20);
+}
+
+/* آسمانی — a blue-tinted light of the kind SaaS dashboards use: three visibly distinct blue-grey surfaces, so a white panel lifts off the page without a heavy shadow. */
+[data-theme="azure"]{
+  color-scheme:light;
+  --surface-0:#eef2fa;
+  --surface-1:#ffffff;
+  --surface-2:#e1e8f6;
+  --surface-3:#ffffff;
+  --bg:var(--surface-0);
+  --panel:var(--surface-1);
+  --hover:var(--surface-2);
+  --input-bg:var(--surface-1);
+  --code-bg:#eaeff9;
+  --total-bg:#f1f5fc;
+  --overlay:rgba(13,22,40,.45);
+  --ink:#101a2e;
+  --ink-2:#44506a;
+  --ink-3:#6f7c96;
+  --muted:var(--ink-2);
+  --line:#d0d8e8;
+  --line-strong:#b1bed6;
+  --line-soft:#e5eaf6;
+  --accent:#3b5bdb;
+  --accent-hover:#2f49b8;
+  --accent-soft:#e7ecfd;
+  --on-accent:#ffffff;
+  --focus:#3b5bdb59;
+  --up:#0f7549;
+  --up-bg:#e6f7ee;
+  --down:#ae2114;
+  --down-bg:#fdeae7;
+  --down-strong:#8c170c;
+  --mid:#9c6b0c;
+  --mid-bg:#f9eed4;
+  --mute-fill:#c6cfe0;
+  --brand:#9a7a1c;
+  --brand2:#7d6112;
+  --brand-soft:#f4eed7;
+  --gold-grad:linear-gradient(180deg,#7d6112 0%,#9a7a1c 100%);
+  --on-brand:#ffffff;
+  --on-gold:#f4f7fd;
+  --hero-badge:#e6cf8e;
+  --star:#d69c14;
+  --star-bg:#fdf5e0;
+  --pin-bg:#fdf5e0;
+  --pin-bg-hover:#f4eed7;
+  --header1:#0c1526;
+  --header2:#142033;
+  --header3:#1e2d47;
+  --on-header:#f2f6fd;
+  --sbar-track:#e6ebf6;
+  --sbar-thumb:#aeb9d2;
+  --sbar-thumb-hover:#8794b0;
+  --radius:10px;
+  --radius-sm:6px;
+  --radius-lg:14px;
+  --shadow:0 1px 2px rgba(16,26,46,.06),0 1px 3px rgba(16,26,46,.04);
+  --shadow-md:0 4px 12px -2px rgba(16,26,46,.10),0 2px 6px -2px rgba(16,26,46,.06);
+  --shadow-lg:0 16px 40px -12px rgba(16,26,46,.22),0 4px 12px -4px rgba(16,26,46,.10);
+}
+
+/* مریم‌گلی — low-glare and neutral, not warm. The only theme whose panel sits BELOW white, which is what actually takes the peak luminance down over a three-hour screening session. */
+[data-theme="sage"]{
+  color-scheme:light;
+  --surface-0:#e9ece2;
+  --surface-1:#f8f9f4;
+  --surface-2:#dfe4d7;
+  --surface-3:#fcfdf9;
+  --bg:var(--surface-0);
+  --panel:var(--surface-1);
+  --hover:var(--surface-2);
+  --input-bg:var(--surface-1);
+  --code-bg:#e6eadd;
+  --total-bg:#eff1e9;
+  --overlay:rgba(26,32,22,.45);
+  --ink:#1a2018;
+  --ink-2:#4a5245;
+  --ink-3:#757e6a;
+  --muted:var(--ink-2);
+  --line:#cbd2bd;
+  --line-strong:#aeb89c;
+  --line-soft:#dee3d2;
+  --accent:#35669f;
+  --accent-hover:#274f80;
+  --accent-soft:#e2eaf4;
+  --on-accent:#ffffff;
+  --focus:#35669f59;
+  --up:#12764a;
+  --up-bg:#d6eede;
+  --down:#a82c21;
+  --down-bg:#f4dcd6;
+  --down-strong:#87211a;
+  --mid:#855b0e;
+  --mid-bg:#f1e4c2;
+  --mute-fill:#bcc4ad;
+  --brand:#86671a;
+  --brand2:#6b5210;
+  --brand-soft:#ece3c4;
+  --gold-grad:linear-gradient(180deg,#6b5210 0%,#86671a 100%);
+  --on-brand:#ffffff;
+  --on-gold:#f8f9f4;
+  --hero-badge:#dfc98d;
+  --star:#b3820f;
+  --star-bg:#f3ebcf;
+  --pin-bg:#f3ebcf;
+  --pin-bg-hover:#ece3c4;
+  --header1:#1a1f16;
+  --header2:#242b1f;
+  --header3:#333b2b;
+  --on-header:#f2f4ea;
+  --sbar-track:#dee3d2;
+  --sbar-thumb:#b0b99f;
+  --sbar-thumb-hover:#8b9578;
+  --radius:10px;
+  --radius-sm:6px;
+  --radius-lg:14px;
+  --shadow:0 1px 2px rgba(26,32,22,.06),0 1px 3px rgba(26,32,22,.04);
+  --shadow-md:0 4px 12px -2px rgba(26,32,22,.10),0 2px 6px -2px rgba(26,32,22,.06);
+  --shadow-lg:0 16px 40px -12px rgba(26,32,22,.22),0 4px 12px -4px rgba(26,32,22,.10);
+}
+
+/* عاجی — warm without sepia's yellow: a cooler, less saturated paper for anyone who finds سپیا muddy on an sRGB panel. */
+[data-theme="ivory"]{
+  color-scheme:light;
+  --surface-0:#f5f2ea;
+  --surface-1:#fdfcf7;
+  --surface-2:#ebe7dc;
+  --surface-3:#fffef9;
+  --bg:var(--surface-0);
+  --panel:var(--surface-1);
+  --hover:var(--surface-2);
+  --input-bg:var(--surface-1);
+  --code-bg:#f0ece1;
+  --total-bg:#f7f4ec;
+  --overlay:rgba(30,26,18,.44);
+  --ink:#1a1712;
+  --ink-2:#4f4a3f;
+  --ink-3:#7d7768;
+  --muted:var(--ink-2);
+  --line:#d4cbb7;
+  --line-strong:#bcb198;
+  --line-soft:#e6e0d2;
+  --accent:#1c5bb8;
+  --accent-hover:#16499a;
+  --accent-soft:#e4ecfa;
+  --on-accent:#ffffff;
+  --focus:#1c5bb859;
+  --up:#137a4d;
+  --up-bg:#e7f5ec;
+  --down:#ac2618;
+  --down-bg:#fae4de;
+  --down-strong:#891d13;
+  --mid:#96660d;
+  --mid-bg:#f5e9cc;
+  --mute-fill:#cbc3b1;
+  --brand:#90711b;
+  --brand2:#745911;
+  --brand-soft:#f0e8cd;
+  --gold-grad:linear-gradient(180deg,#745911 0%,#90711b 100%);
+  --on-brand:#ffffff;
+  --on-gold:#fdfcf7;
+  --hero-badge:#e4cd91;
+  --star:#cf9714;
+  --star-bg:#fbf3db;
+  --pin-bg:#fbf3db;
+  --pin-bg-hover:#f0e8cd;
+  --header1:#191712;
+  --header2:#23201a;
+  --header3:#322d24;
+  --on-header:#faf7ef;
+  --sbar-track:#ece6d8;
+  --sbar-thumb:#c6bda9;
+  --sbar-thumb-hover:#9c927c;
+  --radius:10px;
+  --radius-sm:6px;
+  --radius-lg:14px;
+  --shadow:0 1px 2px rgba(30,26,18,.06),0 1px 3px rgba(30,26,18,.04);
+  --shadow-md:0 4px 12px -2px rgba(30,26,18,.10),0 2px 6px -2px rgba(30,26,18,.06);
+  --shadow-lg:0 16px 40px -12px rgba(30,26,18,.22),0 4px 12px -4px rgba(30,26,18,.10);
+}
+
+/* کنتراست بالا (تاریک) — the accessibility dark theme: near-black surfaces, AAA text, borders that survive a cheap panel at low brightness. */
+[data-theme="contrast-dark"]{
+  color-scheme:dark;
+  --surface-0:#04060a;
+  --surface-1:#0b0f14;
+  --surface-2:#161c23;
+  --surface-3:#1e262f;
+  --bg:var(--surface-0);
+  --panel:var(--surface-1);
+  --hover:var(--surface-2);
+  --input-bg:var(--surface-1);
+  --code-bg:#12171d;
+  --total-bg:#101620;
+  --overlay:rgba(0,0,0,.78);
+  --ink:#f6fafe;
+  --ink-2:#d3dce5;
+  --ink-3:#a3aeba;
+  --muted:var(--ink-2);
+  --line:#3d4854;
+  --line-strong:#5d6a77;
+  --line-soft:#2a333c;
+  --accent:#7ab8ff;
+  --accent-hover:#9ecbff;
+  --accent-soft:#10233a;
+  --on-accent:#00060d;
+  --focus:#7ab8ffaa;
+  --up:#45dd7d;
+  --up-bg:#08331d;
+  --down:#ff7a70;
+  --down-bg:#3d1512;
+  --down-strong:#ff9d95;
+  --mid:#f0b429;
+  --mid-bg:#3a2a05;
+  --mute-fill:#4a5560;
+  --brand:#e0c56f;
+  --brand2:#f0dc9d;
+  --brand-soft:#2e2814;
+  --gold-grad:linear-gradient(180deg,#f0dc9d 0%,#e0c56f 100%);
+  --on-brand:#00060d;
+  --on-gold:#f4f8fc;
+  --hero-badge:#e2c980;
+  --star:#f2c02e;
+  --star-bg:#362a08;
+  --pin-bg:#362a08;
+  --pin-bg-hover:#2e2814;
+  --header1:#000204;
+  --header2:#080d13;
+  --header3:#121a23;
+  --on-header:#ffffff;
+  --sbar-track:#0b0f14;
+  --sbar-thumb:#46515d;
+  --sbar-thumb-hover:#7ab8ff;
+  --radius:10px;
+  --radius-sm:6px;
+  --radius-lg:14px;
+  --shadow:0 1px 2px rgba(0,0,0,.6),0 1px 3px rgba(0,0,0,.5);
+  --shadow-md:0 6px 16px -4px rgba(0,0,0,.7),0 2px 6px -2px rgba(0,0,0,.55);
+  --shadow-lg:0 20px 48px -16px rgba(0,0,0,.85),0 6px 16px -6px rgba(0,0,0,.65);
+}
+
+/* فولادی — the cool steel-blue dark traders recognise from Nord. Calmer than «تاریک» at the same lightness, for long sessions. */
+[data-theme="steel"]{
+  color-scheme:dark;
+  --surface-0:#131c21;
+  --surface-1:#19242a;
+  --surface-2:#213038;
+  --surface-3:#26383f;
+  --bg:var(--surface-0);
+  --panel:var(--surface-1);
+  --hover:var(--surface-2);
+  --input-bg:var(--surface-1);
+  --code-bg:#1d2a31;
+  --total-bg:#1c2a30;
+  --overlay:rgba(4,12,16,.64);
+  --ink:#e3edf1;
+  --ink-2:#a3b8c0;
+  --ink-3:#758c96;
+  --muted:var(--ink-2);
+  --line:#2e4149;
+  --line-strong:#415961;
+  --line-soft:#202e34;
+  --accent:#62b8e2;
+  --accent-hover:#86cbee;
+  --accent-soft:#102a38;
+  --on-accent:#04141c;
+  --focus:#62b8e266;
+  --up:#5fd08a;
+  --up-bg:#0f2c22;
+  --down:#f0736c;
+  --down-bg:#3a1f1e;
+  --down-strong:#ff9a94;
+  --mid:#dfae5c;
+  --mid-bg:#2f2712;
+  --mute-fill:#3a4a52;
+  --brand:#cdb877;
+  --brand2:#e0cf9c;
+  --brand-soft:#262518;
+  --gold-grad:linear-gradient(180deg,#e0cf9c 0%,#cdb877 100%);
+  --on-brand:#04141c;
+  --on-gold:#ecf3f6;
+  --hero-badge:#e2c980;
+  --star:#e6bc4e;
+  --star-bg:#2c2611;
+  --pin-bg:#2c2611;
+  --pin-bg-hover:#262518;
+  --header1:#101a1f;
+  --header2:#17242b;
+  --header3:#1f3138;
+  --on-header:#ecf3f6;
+  --sbar-track:#19242a;
+  --sbar-thumb:#354a52;
+  --sbar-thumb-hover:#62b8e2;
+  --radius:10px;
+  --radius-sm:6px;
+  --radius-lg:14px;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 1px 3px rgba(0,0,0,.3);
+  --shadow-md:0 6px 16px -4px rgba(0,0,0,.5),0 2px 6px -2px rgba(0,0,0,.4);
+  --shadow-lg:0 20px 48px -16px rgba(0,0,0,.7),0 6px 16px -6px rgba(0,0,0,.5);
+}
+
+/* نیلی — an indigo-violet dark of the Dracula / Tokyo-Night family: the accent hue is carried by the SURFACE, so the accent itself has to sit further from it. */
+[data-theme="indigo"]{
+  color-scheme:dark;
+  --surface-0:#15162b;
+  --surface-1:#1c1e35;
+  --surface-2:#24273f;
+  --surface-3:#2a2e49;
+  --bg:var(--surface-0);
+  --panel:var(--surface-1);
+  --hover:var(--surface-2);
+  --input-bg:var(--surface-1);
+  --code-bg:#202339;
+  --total-bg:#21243b;
+  --overlay:rgba(6,4,18,.66);
+  --ink:#e6e6f5;
+  --ink-2:#a9a9c8;
+  --ink-3:#7d7da0;
+  --muted:var(--ink-2);
+  --line:#343858;
+  --line-strong:#464b70;
+  --line-soft:#24273e;
+  --accent:#9d8cfa;
+  --accent-hover:#b7abfd;
+  --accent-soft:#241f45;
+  --on-accent:#0b0818;
+  --focus:#9d8cfa66;
+  --up:#66d99d;
+  --up-bg:#0f3128;
+  --down:#ff7a93;
+  --down-bg:#3b1a28;
+  --down-strong:#ff9db0;
+  --mid:#e0b25c;
+  --mid-bg:#322813;
+  --mute-fill:#3d4160;
+  --brand:#d3bd77;
+  --brand2:#e6d29d;
+  --brand-soft:#2a2519;
+  --gold-grad:linear-gradient(180deg,#e6d29d 0%,#d3bd77 100%);
+  --on-brand:#0b0818;
+  --on-gold:#eeeefa;
+  --hero-badge:#e2c980;
+  --star:#e9bf52;
+  --star-bg:#2f2812;
+  --pin-bg:#2f2812;
+  --pin-bg-hover:#2a2519;
+  --header1:#101127;
+  --header2:#191a30;
+  --header3:#232544;
+  --on-header:#eeeefa;
+  --sbar-track:#1c1e35;
+  --sbar-thumb:#3b3f66;
+  --sbar-thumb-hover:#9d8cfa;
+  --radius:10px;
+  --radius-sm:6px;
+  --radius-lg:14px;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 1px 3px rgba(0,0,0,.3);
+  --shadow-md:0 6px 16px -4px rgba(0,0,0,.5),0 2px 6px -2px rgba(0,0,0,.4);
+  --shadow-lg:0 20px 48px -16px rgba(0,0,0,.7),0 6px 16px -6px rgba(0,0,0,.5);
+}
+
+/* اسپرسو — the warm low-blue-light dark for night use. No surface in it is blue, which is the entire point; --up and --down have to work harder to stand out on a warm ground. */
+[data-theme="espresso"]{
+  color-scheme:dark;
+  --surface-0:#17100b;
+  --surface-1:#1f1711;
+  --surface-2:#2a2018;
+  --surface-3:#33271e;
+  --bg:var(--surface-0);
+  --panel:var(--surface-1);
+  --hover:var(--surface-2);
+  --input-bg:var(--surface-1);
+  --code-bg:#261d15;
+  --total-bg:#251c14;
+  --overlay:rgba(12,6,2,.68);
+  --ink:#f4e8dc;
+  --ink-2:#c7b0a0;
+  --ink-3:#9d8877;
+  --muted:var(--ink-2);
+  --line:#42342a;
+  --line-strong:#594435;
+  --line-soft:#281e17;
+  --accent:#cf9ce8;
+  --accent-hover:#e0b9f2;
+  --accent-soft:#322338;
+  --on-accent:#1a0d20;
+  --focus:#cf9ce866;
+  --up:#74c96f;
+  --up-bg:#1c3016;
+  --down:#f2705f;
+  --down-bg:#3a1a14;
+  --down-strong:#ff9b8f;
+  --mid:#dfae5c;
+  --mid-bg:#33260f;
+  --mute-fill:#48382d;
+  --brand:#dfbe6e;
+  --brand2:#efd598;
+  --brand-soft:#322715;
+  --gold-grad:linear-gradient(180deg,#efd598 0%,#dfbe6e 100%);
+  --on-brand:#1a0f07;
+  --on-gold:#f6ece1;
+  --hero-badge:#e2c980;
+  --star:#ecbc45;
+  --star-bg:#33270f;
+  --pin-bg:#33270f;
+  --pin-bg-hover:#322715;
+  --header1:#140d09;
+  --header2:#1d1510;
+  --header3:#2a1f17;
+  --on-header:#f6ece1;
+  --sbar-track:#1f1711;
+  --sbar-thumb:#513e30;
+  --sbar-thumb-hover:#cf9ce8;
+  --radius:10px;
+  --radius-sm:6px;
+  --radius-lg:14px;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 1px 3px rgba(0,0,0,.3);
+  --shadow-md:0 6px 16px -4px rgba(0,0,0,.5),0 2px 6px -2px rgba(0,0,0,.4);
+  --shadow-lg:0 20px 48px -16px rgba(0,0,0,.7),0 6px 16px -6px rgba(0,0,0,.5);
+}
+
 /* رنگ صعود و نزول — the colour-blind alternative, layered on top of whichever
    theme is active. Blue rises, amber falls: that pair stays distinguishable
    under deuteranopia and protanopia, where green and red collapse into one
@@ -389,6 +870,17 @@
   --down-strong:#f2b366; --mid:#a78bfa; --mid-bg:#241c3d;
   --accent:#a78bfa; --accent-hover:#c4b1fd; --accent-soft:#241c3d;
 }
+/* The accessibility theme keeps its guarantee under the colour-blind scheme.
+   The generic override above is tuned for the ordinary light themes: on
+   «کنتراست بالا» its blue lands at 4.63:1 and its amber at 4.16:1, so a theme
+   chosen FOR its contrast would quietly drop to AA the moment a colour-blind
+   user turned the scheme on. These are the same hues, darkened. */
+[data-updown="colorblind"][data-theme="contrast"]{
+  --up:#10499f; --up-bg:#dde7ff; --down:#8a4405; --down-bg:#fbeadb;
+  --down-strong:#6b3404; --mid:#57299f; --mid-bg:#ece3fb;
+  --accent:#57299f; --accent-hover:#411d7c; --accent-soft:#ece3fb;
+}
+
 
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
