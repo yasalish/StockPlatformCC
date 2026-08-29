@@ -14,6 +14,7 @@
 import { computed, ref } from "vue";
 import type { ScanRow } from "./types";
 import { fa } from "./format";
+import { handledInRow, openDetail } from "./nav";
 
 const props = defineProps<{
   rows: ScanRow[];
@@ -69,8 +70,13 @@ function rsiClass(v: number | null | undefined) {
   return v < 30 ? "down-t" : v > 70 ? "up-t" : "";
 }
 
-function go(row: ScanRow) {
-  window.location.href = `${props.detailBase}${row.id}`;
+function rowHref(row: ScanRow) {
+  return `${props.detailBase}${row.id}`;
+}
+
+function go(event: MouseEvent, row: ScanRow) {
+  if (handledInRow(event)) return;
+  openDetail(rowHref(row));
 }
 </script>
 
@@ -95,10 +101,16 @@ function go(row: ScanRow) {
           :key="r.id"
           class="clickable"
           :data-ticker="r.ticker"
-          @click="go(r)"
+          @click="go($event, r)"
         >
-          <td class="sym">{{ r.ticker }}</td>
-          <td class="rtl-name">{{ r.name }}</td>
+          <td class="sym">
+            <a class="row-link" :href="rowHref(r)" target="_blank" rel="noopener"
+               @click.stop>{{ r.ticker }}</a>
+          </td>
+          <td class="rtl-name">
+            <a class="row-link" :href="rowHref(r)" target="_blank" rel="noopener"
+               @click.stop>{{ r.name }}</a>
+          </td>
           <td class="small"><span class="muted">{{ r.group || '—' }}</span></td>
           <td class="num" :data-v="r.latest || 0">{{ fa(r.latest) }}</td>
           <td class="num" :data-v="r.rsi ?? -1">

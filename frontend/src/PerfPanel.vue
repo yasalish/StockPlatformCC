@@ -321,6 +321,7 @@ const scopeLabel = computed(() => (data.value.group ? `«${data.value.group}»` 
     :filter-text="text"
     :pinned="data.compare ? data.compare.ticker : null"
     :detail-base="detailBase"
+    :as-of="data.as_of"
     @watch-toggled="onWatchToggled"
   />
 </template>

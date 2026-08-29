@@ -205,3 +205,76 @@ def test_app_guards_the_autostart_behind_the_script_path():
 
 def _must_not_run(*args, **kwargs):
     raise AssertionError("must not be called")
+
+
+# ---------------------------------------------------------------------------
+# The flashing console window.
+#
+# Redis has no fork() on Windows: every BGSAVE starts a fresh redis-server.exe
+# with CreateProcess and no creation flags, so the child inherits its parent's
+# console. Started with DETACHED_PROCESS the parent has no console, and Windows
+# then gives that child a NEW one — window and all — which appeared on the
+# desktop for the half second the save took, every few minutes. Measured, not
+# reasoned: a probe child of a DETACHED_PROCESS parent reported
+# IsWindowVisible(GetConsoleWindow()) == 1; under CREATE_NO_WINDOW it had no
+# console window at all.
+#
+# CREATE_NEW_PROCESS_GROUP is what keeps the property DETACHED_PROCESS was
+# there for — Ctrl+C on the app must not take Redis, or the Celery worker that
+# depends on it, down.
+# ---------------------------------------------------------------------------
+CREATE_NO_WINDOW = 0x08000000
+CREATE_NEW_PROCESS_GROUP = 0x00000200
+DETACHED_PROCESS = 0x00000008
+
+
+class _FakeProc:
+    pid = 4321
+    returncode = None
+
+    def poll(self):
+        return None
+
+
+def _captured_flags(monkeypatch, module, call):
+    seen = {}
+
+    def fake_popen(argv, **kwargs):
+        seen["argv"] = argv
+        seen["kwargs"] = kwargs
+        return _FakeProc()
+
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+    call()
+    assert "kwargs" in seen, "Popen was never called"
+    return seen["kwargs"].get("creationflags", 0)
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="Windows-only flags")
+def test_redis_is_launched_without_a_console_window(monkeypatch):
+    flags = _captured_flags(
+        monkeypatch, redis_boot,
+        lambda: redis_boot._launch("redis-server.exe", 6399, None))
+    assert flags & CREATE_NO_WINDOW, (
+        "redis-server must be started with CREATE_NO_WINDOW — its BGSAVE "
+        "children inherit this console and would otherwise flash a window")
+    assert flags & CREATE_NEW_PROCESS_GROUP, "Ctrl+C on the app must not reach it"
+    assert not flags & DETACHED_PROCESS
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="Windows-only flags")
+def test_the_celery_worker_is_launched_without_a_console_window(monkeypatch,
+                                                                tmp_path):
+    import dev_boot
+
+    monkeypatch.setattr(dev_boot, "TOOLS_DIR", str(tmp_path))
+    monkeypatch.setattr(dev_boot, "WORKER_PID_FILE", str(tmp_path / "w.pid"))
+    monkeypatch.setattr(dev_boot.redis_boot, "ping", lambda *a, **k: True)
+    monkeypatch.setattr(dev_boot, "worker_running", lambda *a, **k: False)
+    monkeypatch.setattr(dev_boot.time, "sleep", lambda *_: None)
+
+    flags = _captured_flags(monkeypatch, dev_boot,
+                            lambda: dev_boot.ensure_worker(dev_boot.FETCH))
+    assert flags & CREATE_NO_WINDOW
+    assert flags & CREATE_NEW_PROCESS_GROUP
+    assert not flags & DETACHED_PROCESS

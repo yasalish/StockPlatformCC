@@ -370,9 +370,25 @@ try:
                "initNavLoader")),
           "app.js still exports everything it did — order 09 put its behaviour in "
           "new files beside it rather than restructuring it")
-    check(subprocess.run(["git", "diff", "--quiet", "--", "static/js/app.js"],
-                         capture_output=True).returncode == 0,
-          "…in fact app.js is byte-identical to the committed version")
+    # This used to be `git diff --quiet -- static/js/app.js`, i.e. "app.js has no
+    # uncommitted changes". That was a fair proxy while order 09 was in flight —
+    # the claim being made was that the islands went in BESIDE app.js rather than
+    # through it. As a standing check it says something else: that app.js may
+    # never be touched again. It duly failed on a one-line bug fix to the nav
+    # loader (a Vue island's submit is preventDefault'ed and never navigates, so
+    # the overlay it raised was never hidden and «در حال محاسبه…» stuck until the
+    # user reloaded). So it now asserts the STRUCTURE the original claim was
+    # about — one IIFE exposing the same API, with the same three initialisers
+    # wired on DOMContentLoaded — which a restructuring would break and a
+    # targeted fix does not.
+    check(appjs.count("(function") == 1 and appjs.rstrip().endswith("})();"),
+          "app.js is still one IIFE — not restructured into modules")
+    check(all(f'DOMContentLoaded", {name})' in appjs
+              for name in ("initSearch", "initTabs", "initNavLoader")),
+          "…and still wires its three initialisers on DOMContentLoaded")
+    check("return { initSearch, initTable, initTabs, priceChart, fmt, toggleWatch };"
+          in appjs,
+          "…and exposes exactly the same public API")
     for bundle in ("market.js", "perf.js", "scan.js", "screener.js"):
         check(os.path.exists(f"static/dist/{bundle}"), f"island bundle {bundle} is built")
 

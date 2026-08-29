@@ -21,7 +21,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useWindowVirtualizer } from "@tanstack/vue-virtual";
 import type { PerfCol, Row } from "./types";
-import { fa, pill } from "./format";
+import { fa, fy, pill } from "./format";
+import { handledInRow, openDetail } from "./nav";
 
 const props = defineProps<{
   rows: Row[];
@@ -34,7 +35,24 @@ const props = defineProps<{
   /** Ticker to float to the top — the symbol being compared, as `.pinned`. */
   pinned?: string | null;
   detailBase: string;
+  /** The table's base date, so a symbol that has not traded since can say so. */
+  asOf?: string | null;
 }>();
+
+/** See MarketGrid.staleSince(): ۰٪ across every window means «متوقف», not flat. */
+function staleSince(row: Row): string | null {
+  const d = row.ldate;
+  if (!d || !props.asOf || d === props.asOf) return null;
+  return d;
+}
+
+function staleTip(row: Row): string | undefined {
+  const d = staleSince(row);
+  return d === null
+    ? undefined
+    : `آخرین معاملهٔ این نماد ${fy(d)} بوده. بازدهی هر دوره روی روزهای معاملاتی `
+      + `بازار حساب می‌شود، پس دوره‌هایی که تمامشان در بازهٔ توقف بوده‌اند ۰٪ هستند.`;
+}
 
 const emit = defineEmits<{ (e: "watch-toggled", key: string, on: boolean): void }>();
 
@@ -278,9 +296,13 @@ async function onStar(event: MouseEvent, row: Row) {
   emit("watch-toggled", `${props.kind}:${row.ticker}`, btn.classList.contains("on"));
 }
 
+function rowHref(row: Row) {
+  return `${props.detailBase}${row.id}`;
+}
+
 function go(event: MouseEvent, row: Row) {
-  if ((event.target as HTMLElement).closest(".watch-star")) return;
-  window.location.href = `${props.detailBase}${row.id}`;
+  if (handledInRow(event)) return;
+  openDetail(rowHref(row));
 }
 
 function tagColor(t: string | null) {
@@ -349,7 +371,11 @@ defineExpose({ visibleCount: computed(() => visibleRows.value.length) });
           :data-ticker="visibleRows[vr.index].ticker"
           @click="go($event, visibleRows[vr.index])"
         >
-          <td class="sym">
+          <td
+            class="sym"
+            :class="{ stale: staleSince(visibleRows[vr.index]) }"
+            :title="staleTip(visibleRows[vr.index])"
+          >
             <button
               type="button"
               class="watch-star"
@@ -360,7 +386,13 @@ defineExpose({ visibleCount: computed(() => visibleRows.value.length) });
               title="افزودن/حذف از دیده‌بان"
               aria-label="دیده‌بان"
               @click="onStar($event, visibleRows[vr.index])"
-            >★</button>{{ visibleRows[vr.index].ticker }}
+            >★</button><a
+              class="row-link"
+              :href="rowHref(visibleRows[vr.index])"
+              target="_blank"
+              rel="noopener"
+              @click.stop
+            >{{ visibleRows[vr.index].ticker }}</a>
           </td>
 
           <td class="small">

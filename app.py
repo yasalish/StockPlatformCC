@@ -1143,6 +1143,11 @@ def update_run():
     # optional single symbol: blank → update every symbol of this kind
     ticker = (request.form.get("ticker") or "").strip()
     tickers = [ticker] if ticker else None
+    # «رد کردن نمادهای انجام‌شده» — on by default, so re-running a range after a
+    # run that died part-way continues instead of re-downloading what worked.
+    # Unchecking it forces every symbol to be fetched again, which is what you
+    # want when the window ends today and the prices have since moved.
+    resume = request.form.get("refetch") != "1"
     if full:
         # dates are ignored by finpy when ignore_date=False; pass sensible bounds
         start = start or "1380-01-01"
@@ -1151,12 +1156,17 @@ def update_run():
         flash("تاریخ شروع و پایان را وارد کنید.", "error")
         return redirect(url_for("update_page"))
     try:
-        market.start_job(kind, start, end, full=full, tickers=tickers,
-                         created_by=getattr(current_user, "username", None))
+        job_id = market.start_job(
+            kind, start, end, full=full, tickers=tickers, resume=resume,
+            created_by=getattr(current_user, "username", None))
+        carried = market.job_skipped_count(job_id)
         scope = f"نماد «{ticker}»" if ticker else ("کل سابقه" if full else "همهٔ نمادها")
         msg = (f"دریافت {scope} در پس‌زمینه آغاز شد (ممکن است طولانی باشد). "
                "پیشرفت در همین صفحه نمایش داده می‌شود.") if full else \
               f"به‌روزرسانی {scope} در پس‌زمینه آغاز شد. پیشرفت در همین صفحه نمایش داده می‌شود."
+        if carried:
+            msg += (f" {db.to_persian(carried)} نماد در همین بازه قبلاً دریافت شده بود "
+                    "و دوباره دانلود نمی‌شود.")
         flash(msg, "ok")
     except Exception as e:
         flash(f"خطا در شروع به‌روزرسانی: {e}", "error")
@@ -1192,26 +1202,72 @@ def update_retry():
         return jsonify({"ok": False, "error": str(e)}), 409
 
 
+@app.route("/update/redispatch", methods=["POST"])
+def update_redispatch():
+    """Re-queue whatever is left of the current job.
+
+    NOT /update/resume — that is the un-pause of «مکث», a different thing. This
+    is for a job nothing is working on any more.
+
+    The automatic recovery (tasks.reconcile) is itself a Celery task armed on a
+    Redis key, so the one situation it cannot rescue is the one where the worker
+    or the broker is the thing that died — and that is exactly when the page sits
+    at «۵۰۰ از ۷۸۲» with nothing moving. This runs in the WEB process: it starts
+    a local worker if there is none, releases the symbols still marked 'running'
+    by a worker that is gone, and dispatches the remainder. market.resume_job_tasks()
+    has existed since order 06 and until now had no caller.
+    """
+    try:
+        market.ensure_local_worker()
+        res = market.resume_job_tasks()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    if not res:
+        return jsonify({"ok": False, "error": "کار فعالی برای ادامه یافت نشد."}), 404
+    return jsonify({"ok": True, **res})
+
+
 @app.route("/update/delete", methods=["POST"])
 def update_delete():
     """Delete price-history rows for one symbol (or ALL symbols) inside a Jalali
-    from/to range. Returns JSON with the number of rows removed."""
+    from/to range. Returns JSON with the number of rows removed.
+
+    Two switches widen what «حذف» reaches, and they are independent:
+      · kind="all"      — both tables, سهام and صندوق‌ها together;
+      · all_history=1   — «کلیهٔ سوابق», the entire history rather than a range,
+                          in which case the from/to fields are ignored.
+    With both set and no ticker, this empties stockpricehistory and
+    etfpricehistory. The page asks for a second confirmation before sending
+    that; there is nothing to undo it with afterwards."""
     data = request.get_json(silent=True) or {}
     kind = data.get("kind", "stock")
     ticker = (data.get("ticker") or "").strip() or None
     start = (data.get("start_date") or "").strip()
     end = (data.get("end_date") or "").strip()
-    if kind not in ("stock", "etf"):
+    all_history = bool(data.get("all_history"))
+    if kind not in ("stock", "etf", "all"):
         return jsonify({"ok": False, "error": "نوع نامعتبر است."}), 400
-    if not start or not end:
-        return jsonify({"ok": False, "error": "تاریخ «از» و «تا» را وارد کنید."}), 400
-    if start > end:
-        return jsonify({"ok": False, "error": "تاریخ «از» نباید بعد از «تا» باشد."}), 400
+    if not all_history:
+        if not start or not end:
+            return jsonify({"ok": False, "error": "تاریخ «از» و «تا» را وارد کنید."}), 400
+        if start > end:
+            return jsonify({"ok": False, "error": "تاریخ «از» نباید بعد از «تا» باشد."}), 400
+    kinds = ("stock", "etf") if kind == "all" else (kind,)
     try:
-        deleted = db.delete_price_history(kind, ticker=ticker, start=start, end=end)
+        deleted = 0
+        for k in kinds:
+            deleted += db.delete_price_history(k, ticker=ticker, start=start,
+                                               end=end, all_history=all_history)
+            # The rows are gone, so an earlier run's "already fetched this
+            # symbol for this window" is no longer true. Left standing, it makes
+            # the next incremental run skip exactly the symbols that were just
+            # emptied — see jobs.forget_completed().
+            market.forget_completed(k, ticker=ticker, start=start, end=end,
+                                    all_history=all_history)
         market.refresh_analytics_async("rows deleted")
-        return jsonify({"ok": True, "deleted": deleted,
-                        "ticker": ticker, "all": ticker is None})
+        return jsonify({"ok": True, "deleted": deleted, "kind": kind,
+                        "ticker": ticker, "all": ticker is None,
+                        "all_history": all_history})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

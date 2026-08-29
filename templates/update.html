@@ -60,6 +60,7 @@
     <div class="tile"><div class="tile-l">پردازش‌شده</div><div class="tile-v" id="prog-processed">۰</div></div>
     <div class="tile tile-btn" id="tile-success"><div class="tile-l">موفق ▾</div><div class="tile-v up-t" id="prog-success">۰</div></div>
     <div class="tile tile-btn" id="tile-failed"><div class="tile-l">ناموفق / بدون داده ▾</div><div class="tile-v down-t" id="prog-failed">۰</div></div>
+    <div class="tile" id="tile-skipped" style="display:none"><div class="tile-l">قبلاً انجام‌شده</div><div class="tile-v" id="prog-skipped">۰</div></div>
     <div class="tile"><div class="tile-l">زمان سپری‌شده</div><div class="tile-v" id="prog-elapsed">۰ث</div></div>
   </div>
   <div class="progbar"><span id="prog-fill"></span></div>
@@ -68,6 +69,16 @@
        answer to «چرا هیچ نمادی نشان داده نمی‌شود؟»: either a worker is missing or
        recovery is under way, and both are actionable, unlike a silent spinner. -->
   <p class="down-t small note" id="prog-stall" style="display:none"></p>
+  {#  The manual way out of a stall. tasks.reconcile() is itself a Celery task
+      armed on a Redis key, so the one case it cannot rescue is the worker or the
+      broker being what died — which is exactly when this panel goes quiet.  #}
+  <p id="prog-resume-wrap" style="display:none;margin:0 0 4px">
+    <button type="button" class="btn ghost small" id="resume-btn">
+      <svg class="ico" aria-hidden="true"><use href="#i-refresh"></use></svg>
+      ادامه از جایی که مانده
+    </button>
+    <span class="muted small" id="resume-msg"></span>
+  </p>
 
   <div class="list-box" id="success-box" style="display:none">
     <h3 class="up-t">نمادهای موفق (<span id="succ-count">۰</span>)</h3>
@@ -116,6 +127,18 @@
     <p class="muted small note" style="margin:0 0 12px">
       برای به‌روزرسانی فقط یک نماد، آن را در کادر «نماد» وارد کنید؛ برای همهٔ نمادها آن را خالی بگذارید.
     </p>
+    {#  Resume is the DEFAULT, so the checkbox is the opt-OUT and its value is
+        only submitted when the user asks for a re-download. A run that dies at
+        symbol 500 of 782 used to re-fetch all 782 when started again.  #}
+    <label class="chk" id="lbl-refetch" style="margin:0 0 8px">
+      <input type="checkbox" name="refetch" value="1" id="upd-refetch">
+      <span>همهٔ نمادها را دوباره دانلود کن (نمادهای انجام‌شدهٔ همین بازه را هم)</span>
+    </label>
+    <p class="muted small note" style="margin:0 0 12px">
+      به‌طور پیش‌فرض نمادهایی که <b>در همین بازهٔ تاریخی</b> قبلاً با موفقیت دریافت شده‌اند رد می‌شوند،
+      تا اجرای دوباره از جایی که مانده ادامه یابد. اگر بازه به امروز می‌رسد و می‌خواهید قیمت‌ها
+      تازه‌سازی شوند، این گزینه را علامت بزنید.
+    </p>
     <p class="flash error small" id="full-warn" style="display:none;margin:0 0 12px">
       ⚠ در حالت «کل سابقه» تمام تاریخچهٔ هر نماد از روز نخست دریافت می‌شود (تاریخ‌ها نادیده گرفته می‌شوند).
       این عملیات طولانی است؛ پیش از اجرا مطمئن شوید جدول قیمت خالی است تا رکورد تکراری ایجاد نشود.
@@ -132,17 +155,19 @@
 <section class="panel danger-zone" id="delete-panel">
   <div class="panel-head">
     <h2 class="down-t"><svg class="ico" aria-hidden="true"><use href="#i-trash"></use></svg> حذف داده‌های قیمت</h2>
-    <span class="muted small">حذف رکوردهای قیمت یک نماد یا همهٔ نمادها در یک بازهٔ تاریخ</span>
+    <span class="muted small">حذف رکوردهای قیمت یک نماد یا همهٔ نمادها، در یک بازهٔ تاریخ یا کلیهٔ سوابق</span>
   </div>
   <p class="flash error small" style="margin:0 0 14px">
     ⚠ این عملیات رکوردهای قیمت را برای همیشه از پایگاه داده حذف می‌کند و بازگشت‌پذیر نیست.
-    پیش از حذف از تاریخ‌های «از» و «تا» مطمئن شوید.
+    پیش از حذف از تاریخ‌های «از» و «تا» مطمئن شوید. با انتخاب «کلیهٔ سوابق»
+    بازهٔ تاریخ نادیده گرفته می‌شود و تمام تاریخچهٔ موجود پاک خواهد شد.
   </p>
   <div class="update-grid">
     <label>نوع:
       <select id="del-kind">
         <option value="stock">سهام</option>
         <option value="etf">صندوق‌ها</option>
+        <option value="all">همه (سهام و صندوق‌ها)</option>
       </select>
     </label>
     <label id="del-ticker-lbl">نماد:
@@ -152,11 +177,15 @@
       <span>&nbsp;</span>
       <label class="chk"><input type="checkbox" id="del-all"> حذف همهٔ نمادها</label>
     </label>
-    <label>از تاریخ (YYYY-MM-DD):
+    <label id="del-start-lbl">از تاریخ (YYYY-MM-DD):
       <input type="text" id="del-start" value="{{ yesterday }}" dir="ltr" data-jdate readonly>
     </label>
-    <label>تا تاریخ (YYYY-MM-DD):
+    <label id="del-end-lbl">تا تاریخ (YYYY-MM-DD):
       <input type="text" id="del-end" value="{{ yesterday }}" dir="ltr" data-jdate readonly>
+    </label>
+    <label class="chk-cell">
+      <span>&nbsp;</span>
+      <label class="chk"><input type="checkbox" id="del-history"> کلیهٔ سوابق</label>
     </label>
   </div>
   <button type="button" class="btn danger" id="del-btn"><svg class="ico" aria-hidden="true"><use href="#i-trash"></use></svg><span class="btn-label">حذف داده‌ها</span></button>
@@ -190,36 +219,64 @@
     delTickerLbl.style.opacity = delAll.checked ? ".45" : "";
   });
 
+  /*  «کلیهٔ سوابق» drops the date range from the request altogether, so the two
+      date fields grey out rather than keep showing bounds that no longer apply
+      — the panel should never state a limit the delete will not honour.  */
+  const delHistory = document.getElementById("del-history");
+  const delStart = document.getElementById("del-start");
+  const delEnd = document.getElementById("del-end");
+  delHistory.addEventListener("change", () => {
+    const off = delHistory.checked;
+    [delStart, delEnd].forEach(i => { i.disabled = off; });
+    ["del-start-lbl", "del-end-lbl"].forEach(id => {
+      document.getElementById(id).style.opacity = off ? ".45" : "";
+    });
+  });
+
   function showDel(text, ok) {
     const el = document.getElementById("del-msg");
     el.style.display = ""; el.textContent = text;
     el.className = "note " + (ok ? "up-t" : "down-t");
   }
 
+  const KIND_FA = { stock: "سهام", etf: "صندوق‌ها", all: "سهام و صندوق‌ها" };
+
   document.getElementById("del-btn").addEventListener("click", async () => {
     const kind = document.getElementById("del-kind").value;
     const ticker = delAll.checked ? "" : delTicker.value.trim();
-    const start = document.getElementById("del-start").value.trim();
-    const end = document.getElementById("del-end").value.trim();
-    if (!start || !end) { showDel("تاریخ «از» و «تا» را وارد کنید.", false); return; }
-    if (start > end) { showDel("تاریخ «از» نباید بعد از «تا» باشد.", false); return; }
+    const allHistory = delHistory.checked;
+    const start = delStart.value.trim();
+    const end = delEnd.value.trim();
+    if (!allHistory) {
+      if (!start || !end) { showDel("تاریخ «از» و «تا» را وارد کنید.", false); return; }
+      if (start > end) { showDel("تاریخ «از» نباید بعد از «تا» باشد.", false); return; }
+    }
     if (!delAll.checked && !ticker) {
       showDel("یک نماد وارد کنید یا گزینهٔ «حذف همهٔ نمادها» را انتخاب کنید.", false); return;
     }
-    const target = ticker ? `نماد «${ticker}»` : "همهٔ نمادها";
-    if (!confirm(`حذف داده‌های قیمت ${target} از ${start} تا ${end}؟\nاین عملیات بازگشت‌پذیر نیست.`)) return;
+    const target = ticker ? `نماد «${ticker}»` : `همهٔ نمادها (${KIND_FA[kind]})`;
+    const span = allHistory ? "کلیهٔ سوابق" : `از ${start} تا ${end}`;
+    if (!confirm(`حذف داده‌های قیمت ${target} — ${span}؟\nاین عملیات بازگشت‌پذیر نیست.`)) return;
+    /*  Everything, for everyone: the one combination that leaves the platform
+        with no prices at all. It gets a second, differently worded prompt so it
+        cannot be reached by clicking through the first one out of habit.  */
+    if (allHistory && !ticker &&
+        !confirm(`تأیید نهایی: کلیهٔ سوابق قیمت ${KIND_FA[kind]} برای تمام نمادها حذف می‌شود `
+                 + `و پایگاه داده خالی خواهد شد. ادامه می‌دهید؟`)) return;
 
     const btn = document.getElementById("del-btn");
-    btn.disabled = true; btn.textContent = "در حال حذف…";
+    btn.disabled = true; label(btn, "در حال حذف…");
     try {
       const res = await fetch(DELETE_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, ticker, start_date: start, end_date: end }),
+        body: JSON.stringify({ kind, ticker, start_date: start, end_date: end,
+                               all_history: allHistory }),
       });
       const j = await res.json();
       if (j.ok) {
-        const scope = j.all ? "همهٔ نمادها" : "نماد " + ticker;
-        showDel(`✅ ${fa(j.deleted)} رکورد حذف شد (${scope}، ${fa(start)} تا ${fa(end)}).`, true);
+        const scope = j.all ? `همهٔ نمادها (${KIND_FA[kind]})` : "نماد " + ticker;
+        const range = allHistory ? "کلیهٔ سوابق" : `${fa(start)} تا ${fa(end)}`;
+        showDel(`✅ ${fa(j.deleted)} رکورد حذف شد (${scope}، ${range}).`, true);
       } else {
         showDel("⛔ " + (j.error || "خطا در حذف"), false);
       }
@@ -360,6 +417,17 @@
       // moved and `stalled` is the server's own verdict on it — say it plainly,
       // including which of the two workers is missing, since that is the thing
       // the reader can actually fix.
+      // Carried over from an earlier run of the same window. Shown only when
+      // there are any, so an ordinary first run keeps three tiles.
+      const skipTile = document.getElementById("tile-skipped");
+      if (skipTile) {
+        skipTile.style.display = s.skipped ? "" : "none";
+        document.getElementById("prog-skipped").textContent = fa(s.skipped || 0);
+      }
+      // «ادامه از جایی که مانده» appears exactly when the automatic recovery
+      // cannot help: outstanding work, nothing moving.
+      const resumeWrap = document.getElementById("prog-resume-wrap");
+      if (resumeWrap) resumeWrap.style.display = s.stalled ? "" : "none";
       stallMsg.style.display = s.stalled ? "" : "none";
       if (s.stalled) {
         const dead = Object.entries(s.workers || {})
@@ -369,8 +437,8 @@
           : `${fa(s.idle)} ثانیه از آخرین پیشرفت گذشته`;
         stallMsg.textContent = dead.length
           ? `⚠ ${idleTxt} — کارگر «${dead.join("، ")}» در حال اجرا نیست. `
-            + "برنامه را دوباره اجرا کنید یا «توقف» را بزنید و از نو شروع کنید."
-          : `⚠ ${idleTxt} — بازیابی خودکار در جریان است؛ اگر ادامه یافت «توقف» را بزنید.`;
+            + "دکمهٔ «ادامه از جایی که مانده» کارگر را بالا می‌آورد و باقی نمادها را دوباره در صف می‌گذارد."
+          : `⚠ ${idleTxt} — بازیابی خودکار در جریان است؛ اگر ادامه نیافت «ادامه از جایی که مانده» را بزنید.`;
       }
       // The form is NEVER hidden. It used to be, for the whole of a run and for
       // the whole of the analytics rebuild after it, and both read as the
@@ -432,6 +500,29 @@ ${f.detail}` : ""} — برای تلاش دوباره کلیک کنید">${f.tic
     const retryAll = document.getElementById("retry-all-btn");
     if (retryAll) retryAll.disabled = busyNow(s) || !fail.length;
   }
+
+  // Nudge a stalled job. Deliberately NOT automatic on a timer: re-dispatching
+  // is cheap but not free, and a job that is merely slow would be nudged for
+  // ever. The user can see the panel is quiet; this gives them the one action.
+  const resumeBtn = document.getElementById("resume-btn");
+  if (resumeBtn) resumeBtn.addEventListener("click", async () => {
+    const note = document.getElementById("resume-msg");
+    resumeBtn.disabled = true;
+    note.textContent = "در حال صف‌بندی دوباره…";
+    try {
+      const res = await fetch("{{ url_for('update_redispatch') }}", { method: "POST" });
+      const d = await res.json();
+      note.textContent = d.ok
+        ? (d.remaining
+            ? `${fa(d.remaining)} نماد دوباره در صف قرار گرفت.`
+            : "همهٔ نمادها تمام شده بودند؛ بازسازی تحلیل‌ها در صف قرار گرفت.")
+        : `خطا: ${d.error || "نامشخص"}`;
+    } catch (e) {
+      note.textContent = "خطا در ارتباط با سرور.";
+    }
+    resumeBtn.disabled = false;
+    poll();
+  });
 
   document.getElementById("stop-btn").addEventListener("click", async () => {
     const btn = document.getElementById("stop-btn");

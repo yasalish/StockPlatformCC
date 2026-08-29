@@ -447,9 +447,17 @@ table.grid tbody tr:last-child td{ border-bottom:0 }
 table.grid tbody tr:hover td{ background:var(--surface-2) }
 table.grid tbody tr.clickable{ cursor:pointer }
 
-/* numeric cells: same alignment in header and body so digits stack */
-table.grid .num,table.grid .numh,
-table.grid td.num,table.grid th.numh{ text-align:end }
+/* Numeric headers are CENTRED, over centred values.
+   Read the cascade before changing this: style.css has `.num{text-align:center}`
+   as the base and `.grid td.num[data-v]{text-align:center}` at a specificity the
+   rule below cannot reach, so every value cell the islands render — they all
+   carry data-v, for sorting — is centred no matter what is written here. The
+   headers were the one half still pushed to the edge, which left «۵ روز» and
+   «سقف»/«کف» against the column border with their own numbers centred beneath
+   them. Centring the header is what puts the label over the column it names.
+   `td.num` keeps `end` for the few grid cells with no data-v. */
+table.grid .num,table.grid td.num{ text-align:end }
+table.grid .numh,table.grid th.numh{ text-align:center }
 
 /* the symbol column: the row's identity, so it carries the weight */
 table.grid .sym,table.grid td.sym{
@@ -457,6 +465,18 @@ table.grid .sym,table.grid td.sym{
 }
 table.grid .sym a{ color:var(--ink) }
 table.grid tbody tr:hover .sym a{ color:var(--accent) }
+
+/*  A row's ticker and name are real <a target="_blank"> now — the security
+    opens in a new tab, so the list keeps its filter, sort and scroll position.
+    They must still READ as table text: a browser-default blue underlined link
+    in every row would turn the grid into a wall of links. The underline on
+    hover is what says "this one goes somewhere", and the focus ring is what
+    makes the same reachable from the keyboard.  */
+table.grid td .row-link{ color:inherit; text-decoration:none }
+table.grid td .row-link:hover{ text-decoration:underline }
+table.grid td .row-link:focus-visible{
+  outline:2px solid var(--accent); outline-offset:2px; border-radius:4px;
+}
 .mname,table.grid .rtl-name{ color:var(--ink-2) }
 
 /* a sortable header says so */
@@ -773,9 +793,11 @@ table.grid .pill.up{ color:var(--up) }
 table.grid .pill.down{ color:var(--down) }
 table.grid .pill.mid{ color:var(--mid) }
 
-/* The header of a numeric column and its cells must agree, or the digits stop
-   forming a column. The islands mark headers .numh and cells .num. */
-table.grid th.numh,table.grid td.num{ text-align:end }
+/* The islands mark numeric headers .numh and numeric cells .num. The header is
+   centred over the column it labels; see the fuller note on the cascade at the
+   first copy of this rule above. */
+table.grid td.num{ text-align:end }
+table.grid th.numh{ text-align:center }
 table.grid td.num .pill{ direction:ltr; unicode-bidi:plaintext }
 
 /* The search box was collapsing: the eleven-item nav is flex:1 and won, so the

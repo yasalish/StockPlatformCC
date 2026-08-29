@@ -898,7 +898,14 @@ a{color:inherit;text-decoration:none}
   align-items:center;justify-content:center;
   background:rgba(20,30,60,.35);backdrop-filter:blur(2px);
 }
-.nav-loader.on{display:flex}
+/*  It only appears for a navigation that has already taken 400 ms (see
+    initNavLoader), so it is never a flash — but it should not POP into place
+    either. A short fade is the difference between "something is happening" and
+    "something went wrong". display: goes none→flex, which no transition can
+    animate, so this is a keyframe rather than a transition.  */
+.nav-loader.on{display:flex;animation:nav-loader-in .16s ease-out}
+@keyframes nav-loader-in{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.nav-loader.on{animation:none}}
 .nav-loader-box{
   display:flex;flex-direction:column;align-items:center;gap:14px;
   background:var(--panel);color:var(--ink);
@@ -1023,6 +1030,15 @@ code{background:var(--code-bg);padding:1px 6px;border-radius:6px;direction:ltr;d
 .num{text-align:center;font-variant-numeric:tabular-nums}
 .grid td.num[data-v]{text-align:center}
 .sym,.sym-big{font-weight:700;color:var(--brand)}
+/* «متوقف» marker. Every trailing-period column is measured over the MARKET's
+   last n sessions, so a symbol that has not traded in them correctly reads
+   ۰٪ — indistinguishable, at a glance, from one that traded flat. The ticker
+   goes muted and its cell carries the symbol's own last session as a title.
+   Colour and cursor only, deliberately: a glyph or a border would widen the
+   نماد column, and verify_order08 holds this table to the column widths the
+   pre-island version rendered. */
+.sym.stale{color:var(--muted);cursor:help}
+.sym.stale:hover{color:var(--warn,var(--muted))}
 .sym-big{font-size:26px}
 .rtl-name{font-weight:600}
 .chev{color:var(--muted);text-align:left;font-size:18px}
@@ -1132,6 +1148,8 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
   padding:5px 11px;cursor:pointer;transition:all .12s;line-height:1.4}
 .cbtn:hover{border-color:var(--brand2);color:var(--brand2)}
 .cbtn.on{background:var(--brand2);border-color:var(--brand2);color:var(--on-brand)}
+/* A two-item menu does not need the indicator picker's 252px. */
+.bnc-menu.bnc-menu-sm{min-width:150px}
 
 /* indicator dropdown menu */
 .bnc-menu{position:absolute;top:calc(100% + 8px);inset-inline-start:0;z-index:60;
@@ -1212,6 +1230,13 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
   border-radius:6px;font-weight:600}
 .pro-chart .cbtn:hover{background:var(--tv-hover);color:var(--tv-ink);border-color:transparent}
 .pro-chart .cbtn.on{background:var(--tv-active);color:var(--tv-blue);border-color:transparent}
+/* The basis dropdown's open list. It is our own markup now, not an OS popup,
+   so it inherits Vazirmatn from the page and takes the chart palette here. */
+.pro-chart .bnc-menu{background:var(--tv-bg);color:var(--tv-ink)}
+.pro-chart .bnc-mi{color:var(--tv-ink)}
+.pro-chart .bnc-mi:hover{background:var(--tv-hover)}
+.pro-chart .bnc-mi.on{background:var(--tv-active)}
+.pro-chart .bnc-mi-check{color:var(--tv-blue)}
 .pro-chart .bnc-body{border-radius:0 0 8px 8px}
 .pro-chart .bnc-tools{background:var(--tv-bg);border-inline-end:1px solid var(--tv-line)}
 .pro-chart .toolbtn{color:var(--tv-muted);border-radius:6px}
@@ -1254,9 +1279,42 @@ svg text{fill:var(--muted);font-size:11px;font-family:Tahoma}
 /* ---- data-history table ---- */
 .hist-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .hist-scroll{max-height:520px;overflow-y:auto;border:1px solid var(--line);border-radius:10px}
-.hist-table{margin:0}
+/* Every column the same width. Left to auto layout the browser sizes each
+   column to its widest cell, and the widest cell of «آخرین معامله تعدیل‌شده» is
+   its own 22-character HEADER — 198px against ~100px for باز/کمترین/بیشترین. The
+   values inside then sat in a column half again as roomy as their neighbours.
+   table-layout:fixed divides the width evenly instead; the two long headers wrap
+   onto a second line rather than stretching their column to fit.
+   `table.grid.hist-table` beats ui.css's `table.grid thead th{white-space:nowrap}`
+   on specificity — .hist-table alone ties it and loses on load order. */
+.hist-table{margin:0;table-layout:fixed;width:100%}
 .hist-table thead th{position:sticky;top:0;background:var(--panel);z-index:2;
   border-bottom:2px solid var(--line);font-size:12.5px;text-align:center}
+/* Eleven columns need tighter cells than the six-column market grids, so the
+   horizontal padding is one step below --cell-x — still derived from it, so the
+   «تراکم» (density) preference keeps working here. Row height is untouched and
+   still follows --row-h. white-space:normal lets a header that does not fit wrap
+   instead of widening its column. */
+table.grid.hist-table thead th{
+  white-space:normal;height:auto;padding:7px calc(var(--cell-x) - 4px);
+  line-height:1.35;vertical-align:middle}
+/* CENTRED, headers and values alike — which is what the two rules just below
+   have always asked for; ui.css's `table.grid thead th{text-align:start}` and
+   `table.grid td.num{text-align:end}` tie them on specificity and win on load
+   order, so they need `table.grid.hist-table` to take effect.
+   Why it matters here and not on the market grids: with start alignment every
+   header hugged the right edge with a 6px gap, but the LEFT gap ran from ~100px
+   on «باز» down to 13px on «آخرین معامله تعدیل‌شده». A label that fills its cell
+   stops reading as right-aligned next to one floating against the edge, so the
+   two «تعدیل‌شده» columns looked like a different treatment from the other nine.
+   Centring is symmetric, so a long label and a short one look alike. */
+table.grid.hist-table thead th,
+table.grid.hist-table tbody td,
+table.grid.hist-table tbody td.num{ text-align:center }
+/* Values must not wrap — «۵.۸۱ میلیارد» breaking across two lines would undo
+   the even row height that makes the column scannable. */
+table.grid.hist-table tbody td{
+  padding:0 calc(var(--cell-x) - 4px);white-space:nowrap;max-width:none}
 .hist-table td{font-size:13px;text-align:center}
 /* Cells are centered — headers included, so a label sits over its own column.
    `direction:ltr` stays: it keeps the digits and the «−» sign in Latin order
@@ -1339,6 +1397,9 @@ button.jdp-title:hover{color:var(--brand2)}
 .chk-cell{justify-content:flex-end}
 .chk{flex-direction:row!important;align-items:center;gap:7px;font-weight:600;color:var(--ink);cursor:pointer}
 .chk input{width:16px;height:16px;accent-color:var(--down);cursor:pointer}
+/* .chk's red accent belongs to the delete panel it was written for. The
+   update form's «دوباره دانلود کن» is expensive but not destructive. */
+#lbl-refetch input{accent-color:var(--brand2)}
 .progbar{height:10px;border-radius:6px;background:var(--line);overflow:hidden}
 .progbar span{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brand2),var(--brand));transition:width .4s}
 .up-t{color:var(--up)}.down-t{color:var(--down)}

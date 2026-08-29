@@ -126,7 +126,13 @@ check(client.get("/api/performance/bogus").status_code == 404,
       "an unknown kind is a 404")
 
 first = payload["rows"][0]
-for field in ("ticker", "id", "latest", "sector", "m1_ceil", "m1_floor", "first_gain"):
+# Period keys come from db.PERF_PERIODS rather than being spelled out. They were
+# 'm1_ceil'/'m1_floor' when this was written, and the day-based ladder («۵ روز»…
+# «۷۲۰ روز») renamed every one of them — a literal here just goes stale and
+# reports a missing field that is not missing.
+_mid = db.PERF_PERIODS[len(db.PERF_PERIODS) // 2]["key"]
+for field in ("ticker", "id", "latest", "sector",
+              f"{_mid}_ceil", f"{_mid}_floor", "first_gain"):
     check(field in first, f"row field: {field}")
 
 # filters are applied SERVER-side, so the island never has to reproduce them
@@ -184,7 +190,8 @@ for query in ({}, {"group": grp}, {"cmp": tk}):
     same_numbers = all(
         abs((g.get(k) or 0) - (e.get(k) or 0)) < 1e-9
         for g, e in zip(got["rows"][:50], expected["rows"][:50])
-        for k in ("latest", "m1_ceil", "m1_floor", "y1_ceil", "first_floor"))
+        for k in ("latest", f"{_mid}_ceil", f"{_mid}_floor",
+                  f'{db.PERF_PERIODS[-1]["key"]}_ceil', "first_floor"))
     check(same_numbers, f"{label}: the numbers are identical to the page's")
 
 # The endpoint ships doubles at full precision. Shortening them looks free — it

@@ -99,6 +99,7 @@ const heading = computed(
     :filter-text="text"
     :pinned="pinned"
     :detail-base="detailBase"
+    :as-of="payload.as_of"
     @watch-toggled="onWatchToggled"
   />
 </template>

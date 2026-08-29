@@ -320,7 +320,7 @@ def nightly_update(kind="stock"):
         return {"skipped": True, "active_job": active}
 
     latest = db.latest_date(kind)
-    start = market.next_day(latest) if latest else "1400-01-01"
+    start = market.next_day(latest)      # market.FIRST_JALALI when there is none
     end = market.yesterday_jalali()
     if start > end:
         log.info("nightly %s: already up to date (latest %s)", kind, latest)

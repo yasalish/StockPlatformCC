@@ -49,7 +49,16 @@ def yesterday_jalali():
     return str(jdatetime.date.fromgregorian(year=g.year, month=g.month, day=g.day))
 
 
+#  Where an incremental run starts when the price table holds nothing at all.
+#  That state used to only happen on a fresh install; «کلیهٔ سوابق» on the
+#  delete panel makes it a normal, one-click destination, and next_day(None)
+#  used to hand the form the string "None" as its «از تاریخ».
+FIRST_JALALI = "1400-01-01"
+
+
 def next_day(jdate):
+    if not jdate:
+        return FIRST_JALALI
     try:
         y, m, d = map(int, str(jdate).split("-"))
         return str(jdatetime.date(y, m, d) + jdatetime.timedelta(days=1))
@@ -61,7 +70,7 @@ def next_day(jdate):
 # Starting and controlling a run
 # ---------------------------------------------------------------------------
 def start_job(kind, start, end, full=False, tickers=None, carry_failed=False,
-              created_by=None, source="manual"):
+              created_by=None, source="manual", resume=True):
     """Create the job and queue its batches. Returns the job id.
 
     `carry_failed` is accepted for signature compatibility with the old
@@ -69,6 +78,12 @@ def start_job(kind, start, end, full=False, tickers=None, carry_failed=False,
     update_job_ticker, so a retry of three symbols cannot hide the other
     forty that are still failing — they are simply still there, in their own
     job, with their own attempt counts.
+
+    `resume` (default) carries over the symbols an earlier run already completed
+    for this same window, so a run that died part-way continues instead of
+    starting over — see jobs.already_done_elsewhere(). Pass False to force every
+    symbol to be fetched again. Ignored for a full rebuild, which is by
+    definition a request to refetch everything.
     """
     import jobs
     import tasks
@@ -103,8 +118,20 @@ def start_job(kind, start, end, full=False, tickers=None, carry_failed=False,
         raise RuntimeError(_busy_message(blocking))
 
     job_id = jobs.create_job(kind, start, end, full=full, tickers=tickers,
-                             created_by=created_by, source=source)
-    work = [t for _, t in jobs.tse_reference(kind, tickers)]
+                             created_by=created_by, source=source, resume=resume)
+    # Only what is actually outstanding. create_job() may have pre-marked
+    # already-completed symbols as 'skipped', and dispatching those too would
+    # still be CORRECT — claim_ticker() refuses them — but it would ship ~780
+    # no-ops through the broker and bury the real work in batches that are mostly
+    # empty. pending_tickers() is the same query reconcile() re-dispatches from.
+    work = jobs.pending_tickers(job_id)
+    if not work:
+        # Everything in this window was already done. Close the job out here
+        # rather than queueing nothing and leaving a 'queued' row that the page
+        # would show as a run that never starts.
+        log.info("job %s: every symbol already covered — nothing to fetch", job_id)
+        tasks.finalize_update.delay(job_id)
+        return job_id
     try:
         tasks.dispatch_job(job_id, kind, work, start, end, full)
     except Exception as e:
@@ -114,6 +141,22 @@ def start_job(kind, start, end, full=False, tickers=None, carry_failed=False,
                         result=f"RESULT error=broker_unavailable: {e}")
         raise RuntimeError(f"صف کاری در دسترس نیست (Redis/Celery): {e}") from e
     return job_id
+
+
+def forget_completed(kind, ticker=None, start=None, end=None, all_history=False):
+    """Tell the job layer that deleted rows are no longer "already fetched".
+    Never raises: the delete itself has already happened and succeeded, and a
+    failure here costs a redundant download, not data."""
+    import jobs
+    try:
+        n = jobs.forget_completed(kind, ticker=ticker, start=start, end=end,
+                                  all_history=all_history)
+        if n:
+            log.info("delete: cleared %s resume mark(s) for %s", n, kind)
+        return n
+    except Exception as e:
+        log.warning("delete: could not clear resume marks for %s: %s", kind, e)
+        return 0
 
 
 def _busy_message(job_id):
@@ -295,6 +338,17 @@ def job_status():
                 "success_list": [], "failed_list": [], "current": None,
                 "result": None, "elapsed": 0, "job_id": None, "total": 0,
                 "idle": None, "stalled": False, "error": str(e)}
+
+
+def job_skipped_count(job_id):
+    """How many symbols this job carried over from an earlier run of the same
+    window. Reported in the flash message so the user can see the fetch was
+    shortened rather than wondering why the count jumped."""
+    import jobs
+    try:
+        return int(jobs.summary_counts(job_id).get("skipped") or 0)
+    except Exception:
+        return 0
 
 
 def last_job_params():

@@ -98,13 +98,19 @@ def ensure_tables():
 # Small helpers over db's pool. These need their own commit handling because
 # db._rows() rolls back on release (it is a read helper).
 # ---------------------------------------------------------------------------
-def _write(sql, params=(), fetch=False):
+def _write(sql, params=(), fetch=False, count=False):
+    """Run a write. `fetch` returns its first RETURNING row; `count` returns how
+    many rows it changed — which RETURNING cannot tell you, because a RETURNING
+    subquery is evaluated against the statement's own pre-update snapshot."""
     conn = db.get_db()
     try:
         with conn.cursor(cursor_factory=db.psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
             row = cur.fetchone() if (fetch and cur.description) else None
+            n = cur.rowcount
         conn.commit()
+        if count:
+            return n
         return dict(row) if row else None
     except Exception:
         conn.rollback()
@@ -116,13 +122,106 @@ def _write(sql, params=(), fetch=False):
 # ---------------------------------------------------------------------------
 # Creating a job
 # ---------------------------------------------------------------------------
+SKIPPED_DONE_MARK = "already-done|قبلاً در همین بازه دریافت شده بود"
+
+
+def already_done_elsewhere(job_id, kind, start, end, full):
+    """Mark, as 'skipped', every symbol an EARLIER job already completed for this
+    exact window. Returns how many.
+
+    Why this exists. Resume-safety used to stop at the edge of a single job:
+    claim_ticker() will not hand out a symbol this job has finished, but a run
+    that dies at symbol 500 of 782 and is started again from the form was a
+    brand-new job whose 782 rows were all 'pending' — so it re-downloaded the
+    500 that already worked. On a link that fetches a few symbols a second that
+    is most of an hour of pointless traffic before it reaches the symbols that
+    still need doing, which is why re-running felt like starting over.
+
+    The match is on (kind, start_date, end_date, full_rebuild) and status 'ok',
+    so it is a fact rather than a guess: that symbol WAS fetched and stored for
+    exactly these dates. Deliberately NOT inferred from the price table — a
+    halted symbol legitimately has no rows for days it did not trade, so
+    "does it have every date in the range" can never be true for it and would
+    re-fetch those symbols for ever.
+
+    A 'failed' symbol is not skipped: retrying it is the point. Neither is a
+    full rebuild, where the user is explicitly asking to refetch everything.
+    """
+    if full:
+        return 0
+    return _write(
+        """UPDATE update_job_ticker t
+              SET status = 'skipped', rows_written = 0, finished_at = now(),
+                  error = %s
+            WHERE t.job_id = %s AND t.status = 'pending'
+              AND EXISTS (SELECT 1
+                            FROM update_job_ticker p
+                            JOIN update_job pj ON pj.id = p.job_id
+                           WHERE p.ticker = t.ticker
+                             AND p.status = 'ok'
+                             AND pj.id <> %s
+                             AND pj.kind = %s
+                             AND pj.start_date = %s
+                             AND pj.end_date = %s
+                             AND pj.full_rebuild = %s)""",
+        (SKIPPED_DONE_MARK, job_id, job_id, kind, start, end, full),
+        count=True)
+
+
+PURGED_MARK = "purged|رکوردهای این نماد پس از این اجرا حذف شدند"
+
+
+def forget_completed(kind, ticker=None, start=None, end=None, all_history=False):
+    """Drop the «قبلاً دریافت شده» marks that a delete has just made untrue.
+    Returns how many.
+
+    already_done_elsewhere() above skips a symbol because an EARLIER job is on
+    record as having fetched it for exactly this window. That record is a fact
+    about the fetch, not about the table — which is right for a resumed run and
+    wrong the moment the rows themselves are deleted. Without this, the obvious
+    use of «کلیهٔ سوابق» — wipe a kind and download it again — ends with every
+    symbol marked «قبلاً در همین بازه دریافت شده بود» and nothing fetched, and
+    the only way out is a checkbox («دوباره دانلود کن») the user has no reason
+    to connect to the delete they just did.
+
+    Matching mirrors the delete: every finished job of this kind whose window
+    OVERLAPS the deleted range (any window at all, for «کلیهٔ سوابق»), narrowed
+    to one symbol when the delete was. The rows are kept, as 'purged', so a
+    past run's history still shows what it did rather than losing the symbol.
+
+    Only finished jobs: a run in flight owns its own rows, and rewriting them
+    underneath it would put symbols it has already fetched back in the queue.
+    """
+    clauses = ["t.status = 'ok'", "j.kind = %s", "j.finished_at IS NOT NULL"]
+    params = [kind]
+    if not all_history:
+        # Overlap, not equality: deleting one day out of a month invalidates the
+        # month's mark too — the run can no longer be said to have covered it.
+        clauses += ["j.start_date <= %s", "j.end_date >= %s"]
+        params += [end, start]
+    if ticker:
+        clauses.append("t.ticker = %s")
+        params.append(ticker)
+    return _write(
+        """UPDATE update_job_ticker t
+              SET status = 'purged', error = %s
+             FROM update_job j
+            WHERE j.id = t.job_id AND """ + " AND ".join(clauses),
+        [PURGED_MARK] + params, count=True)
+
+
 def create_job(kind, start, end, full=False, tickers=None, created_by=None,
-               source="manual"):
+               source="manual", resume=False):
     """Insert the job row and one row per symbol it will touch.
 
     The work list is materialised UP FRONT rather than discovered as the run
     goes. That is what lets progress be reported as "142 of 782" instead of the
-    old "142 so far", and what lets a resumed run know exactly what is left."""
+    old "142 so far", and what lets a resumed run know exactly what is left.
+
+    `resume` additionally pre-marks the symbols an earlier run already finished
+    for this same window — see already_done_elsewhere(). They stay in `total`, so
+    the denominator is still every symbol the range covers; they are simply
+    already accounted for."""
     work = tse_reference(kind, tickers)
     if not work:
         raise RuntimeError("هیچ نمادی برای به‌روزرسانی یافت نشد.")
@@ -151,6 +250,8 @@ def create_job(kind, start, end, full=False, tickers=None, created_by=None,
         raise
     finally:
         db.release(conn)
+    if resume:
+        already_done_elsewhere(job_id, kind, start, end, full)
     return job_id
 
 
@@ -581,6 +682,7 @@ def snapshot(job_id=None, list_limit=800):
         return {"active": False, "running": False, "kind": None, "start": None,
                 "end": None, "full": False, "subset": 0, "stopped": False,
                 "paused": False, "processed": 0, "success": 0, "failed": 0,
+                "skipped": 0,
                 "success_list": [], "failed_list": [], "current": None,
                 "result": None, "elapsed": 0, "job_id": None, "total": 0,
                 "queued": False, "attempts_total": 0, "idle": None,
@@ -642,6 +744,10 @@ def snapshot(job_id=None, list_limit=800):
         "processed": counts["ok"] + counts["failed"] + counts["skipped"],
         "success": counts["ok"],
         "failed": counts["failed"],
+        # Carried over from an earlier run of the same window — see
+        # already_done_elsewhere(). Counted inside `processed`, but reported
+        # separately so "۵۰۰ از ۷۸۲" does not look like this run fetched them.
+        "skipped": counts["skipped"],
         "success_list": [r["ticker"] for r in ok_rows],
         "failed_list": failed_list,
         "current": live[0]["ticker"] if (live and running) else None,

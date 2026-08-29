@@ -35,8 +35,9 @@ Deliberate boundaries:
     pretending otherwise would mask a config error.
   * It never raises. Every failure path logs what went wrong and returns, so the
     app still starts degraded exactly as it did before.
-  * The server it starts is detached from this console, so Ctrl+C on the app
-    leaves it — and therefore the Celery worker that depends on it — alive.
+  * The server it starts runs in its own process group with no console window,
+    so Ctrl+C on the app leaves it — and therefore the Celery worker that
+    depends on it — alive, and its BGSAVE children draw nothing on screen.
     `.\\start_local.ps1 -Stop` stops it.
 
 Environment:
@@ -165,10 +166,24 @@ def _launch(exe, port, password):
         "close_fds": True,
     }
     if os.name == "nt":
-        # DETACHED_PROCESS: no console window, and — the point — Ctrl+C in this
-        # terminal stops the app without taking Redis (and the Celery worker
-        # that depends on it) down with it.
-        kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        # CREATE_NO_WINDOW, not DETACHED_PROCESS, and the difference is visible
+        # to the user. Redis has no fork() on Windows, so BGSAVE is emulated by
+        # CreateProcess-ing a fresh redis-server.exe every time the save rules
+        # fire (`* N changes in 300 seconds. Saving…` / `# fork operation
+        # complete` in .tools/redis-server.log). That child is created with no
+        # creation flags of its own, so it inherits whatever console its parent
+        # has — and DETACHED_PROCESS leaves the parent with none at all, which
+        # makes Windows hand the child a brand new console *with a visible
+        # window*. The result was a console flashing open and shut on the
+        # desktop every few minutes for the length of a background save.
+        # CREATE_NO_WINDOW gives this server a console that has no window, the
+        # forked children inherit that, and nothing is ever drawn.
+        # CREATE_NEW_PROCESS_GROUP keeps the original promise of the detached
+        # spawn: Ctrl+C in this terminal stops the app without taking Redis
+        # (and the Celery worker that depends on it) down with it.
+        kwargs["creationflags"] = (
+            getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
     else:
         kwargs["start_new_session"] = True
     return subprocess.Popen(argv, **kwargs)

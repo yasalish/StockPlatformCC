@@ -282,13 +282,40 @@ def _latest_cached(kind):
                             lambda: latest_date(kind))
 
 
+def _view_as_of(kind):
+    """The trading date the analytics views last finished refreshing FOR.
+
+    Read from mv_analytics_stamp_<kind>, which refresh_analytics() rebuilds LAST
+    — see analytics_views.stamp(). That ordering is the whole point: this is NOT
+    necessarily latest_date(). A data update that has not been followed by
+    refresh_analytics(), one that failed part-way, and one still in progress all
+    leave the views behind the price table, and readers must notice."""
+    def build():
+        try:
+            r = _one(f"SELECT as_of FROM mv_analytics_stamp_{kind}")
+        except Exception as e:               # view absent / unreachable DB
+            log.warning("analytics stamp unreadable",
+                        extra={"kind": kind, "error": str(e)})
+            return None
+        return (r or {}).get("as_of")
+    return cache.get_or_set("vasof", ("__vasof__", kind), build)
+
+
 def _use_view(kind, as_of):
-    """The views are materialized for ONE as_of: the latest trading date. A
-    caller asking for a historical date (e.g. /stocks?as_of=…) still gets the
-    live computation."""
+    """The views are materialized for ONE as_of. A caller asking for any other
+    date — a historical one (e.g. /stocks?as_of=…), or today's when the views
+    have not caught up with the price table yet — gets the live computation.
+
+    Comparing against the VIEWS' own as_of rather than against latest_date() is
+    what keeps «۵ روز» meaning five days from the market's last session. When the
+    two disagreed the views were still read, so the page announced today's date
+    in its header and filled the table with last session's numbers — the whole
+    table silently shifted one session back. Falling back costs a few seconds per
+    uncached read and heals itself the moment refresh_analytics() runs."""
     if not analytics_ready():
         return False
-    return as_of is None or as_of == _latest_cached(kind)
+    want = as_of or _latest_cached(kind)
+    return want is not None and want == _view_as_of(kind)
 
 
 def _rows(sql, params=()):
@@ -361,17 +388,32 @@ CALC_PERIODS = [
 # fixed windows the old Streamlit stock_gain analyzer showed, each with its own
 # gain / سقف (ceil) / کف (floor). Trading-day based so it matches the rest of the
 # app; the special «از ابتدا» (from-first) column is handled separately.
+# /performance uses the SAME ladder of trading-day windows as the calculator
+# table on /stocks and /etfs (CALC_PERIODS), so a «۲۰ روز» number means the same
+# thing on both pages and the two can be read side by side. It used to be nine
+# windows named in months and years — «۱ هفته», «۳ ماه», «۱۸ ماه» — which forced
+# the reader to translate before comparing, and offered nothing between one week
+# and one month. The two windows longer than the calculator's 360 are kept, in
+# days for a consistent header row, so the two- and three-year views survive.
 PERF_PERIODS = [
-    {"key": "w1",  "n": 5,   "label": "۱ هفته"},
-    {"key": "m1",  "n": 20,  "label": "۱ ماه"},
-    {"key": "m3",  "n": 60,  "label": "۳ ماه"},
-    {"key": "m6",  "n": 120, "label": "۶ ماه"},
-    {"key": "m9",  "n": 180, "label": "۹ ماه"},
-    {"key": "y1",  "n": 240, "label": "۱ سال"},
-    {"key": "y1h", "n": 360, "label": "۱۸ ماه"},
-    {"key": "y2",  "n": 480, "label": "۲ سال"},
-    {"key": "y3",  "n": 720, "label": "۳ سال"},
+    {"key": "d5",   "n": 5,   "label": "۵ روز"},
+    {"key": "d10",  "n": 10,  "label": "۱۰ روز"},
+    {"key": "d15",  "n": 15,  "label": "۱۵ روز"},
+    {"key": "d20",  "n": 20,  "label": "۲۰ روز"},
+    {"key": "d25",  "n": 25,  "label": "۲۵ روز"},
+    {"key": "d30",  "n": 30,  "label": "۳۰ روز"},
+    {"key": "d60",  "n": 60,  "label": "۶۰ روز"},
+    {"key": "d90",  "n": 90,  "label": "۹۰ روز"},
+    {"key": "d120", "n": 120, "label": "۱۲۰ روز"},
+    {"key": "d180", "n": 180, "label": "۱۸۰ روز"},
+    {"key": "d360", "n": 360, "label": "۳۶۰ روز"},
+    {"key": "d480", "n": 480, "label": "۴۸۰ روز"},
+    {"key": "d720", "n": 720, "label": "۷۲۰ روز"},
 ]
+# Which window /performance sorts by out of the box: 20 trading days, about a
+# month. Named here rather than spelled into _perf_multi_all(), because a literal
+# there is a KeyError the moment a key in the list above is renamed.
+PERF_SORT_KEY = "d20"
 
 ETF_TYPE_COLORS = {
     "ثابت": "#2f6db3",
@@ -480,10 +522,36 @@ def _window(kind, as_of, years=2):
 # ---------------------------------------------------------------------------
 # Market-wide gainer (the heart of stock_gainer.py / etf_gainer.py)
 # ---------------------------------------------------------------------------
+def _market_cal_sql(price_tbl, hi="%s", lo="%s"):
+    """A `cal` CTE numbering the MARKET's trading days back from as_of.
+
+    Every trailing-period column on the market / calculator / performance pages
+    means "n trading days before the last session the exchange had" — not "n bars
+    before whatever this symbol last traded". The two used to be the same
+    expression (ROW_NUMBER() PARTITION BY ticker), which quietly made the ۱ هفته
+    column of a halted symbol describe the week before its own final bar. For a
+    symbol whose last data point is two years old that produced a real-looking
+    −۵۸٪ in the five-day column and put it at the bottom of the sort.
+
+    `k` here is a property of the DATE, shared by every symbol, so k = 6 is the
+    same session for all of them. Callers resolve a period to the smallest k a
+    symbol actually has at or beyond the target — see _gainer / _perf_prices.
+
+    Takes the SAME (as_of, cutoff) parameter pair as the query that follows it,
+    so the caller passes _window(...) twice.
+    """
+    return f"""cal AS (
+        SELECT date, ROW_NUMBER() OVER (ORDER BY date DESC) k
+        FROM (SELECT DISTINCT date FROM {price_tbl}
+              WHERE date <= {hi} AND date >= {lo}) d
+    )"""
+
+
 def _gainer(kind, as_of=None, periods=PERIODS, sort_key="p20"):
     """Return EVERY ticker with its % gain over each period as of `as_of`
     (latest trading date if None). One fast query using FILTER aggregation over
-    a recent slice of the price table. `periods` selects which offsets to compute
+    a recent slice of the price table, anchored to the MARKET trading calendar —
+    see _market_cal_sql(). `periods` selects which offsets to compute
     (defaults to the coarse PERIODS shown in the market table; the calculator
     passes the finer CALC_PERIODS). `sort_key` is the period key rows sort by.
 
@@ -499,25 +567,32 @@ def _gainer(kind, as_of=None, periods=PERIODS, sort_key="p20"):
     if as_of is None:
         return [], None
 
+    anchors = ",\n".join(
+        f"MIN(k) FILTER (WHERE k >= {p['n'] + 1}) k_{p['key']}" for p in periods
+    )
     filters = ",\n".join(
-        f"MAX(v) FILTER (WHERE rn={p['n'] + 1}) {p['key']}" for p in periods
+        f"MAX(w.v) FILTER (WHERE w.k = a.k_{p['key']}) {p['key']}" for p in periods
     )
     sql = f"""
-    WITH ranked AS (
-        SELECT ticker, adj_final::float v, j_date,
-               ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) rn
-        FROM {price_tbl}
-        WHERE adj_final > 0 AND date <= %s AND date >= %s
+    WITH {_market_cal_sql(price_tbl)},
+    win AS (
+        SELECT p.ticker, p.j_date, p.adj_final::float v, c.k
+        FROM {price_tbl} p JOIN cal c ON c.date = p.date
+        WHERE p.adj_final > 0 AND p.date <= %s AND p.date >= %s
+    ),
+    anc AS (
+        SELECT ticker, MIN(k) k0, {anchors}
+        FROM win GROUP BY ticker
     )
-    SELECT ticker,
-           MAX(j_date) FILTER (WHERE rn=1) AS ldate,
-           MAX(v)      FILTER (WHERE rn=1) AS latest,
+    SELECT a.ticker,
+           MAX(w.j_date) FILTER (WHERE w.k = a.k0) AS ldate,
+           MAX(w.v)      FILTER (WHERE w.k = a.k0) AS latest,
            {filters}
-    FROM ranked
-    GROUP BY ticker
-    HAVING MAX(v) FILTER (WHERE rn=1) IS NOT NULL
+    FROM win w JOIN anc a ON a.ticker = w.ticker
+    GROUP BY a.ticker
+    HAVING MAX(w.v) FILTER (WHERE w.k = a.k0) IS NOT NULL
     """
-    price_rows = _rows(sql, _window(kind, as_of))
+    price_rows = _rows(sql, _window(kind, as_of) * 2)
     price = {r["ticker"]: r for r in price_rows}
 
     # Join to the reference table (name / market / sector / sub_sector / type / id)
@@ -716,9 +791,12 @@ def _perf_prices(kind, as_of):
     keyed by ticker.
 
     Trailing windows (1W…3Y) come from a recent slice of the price table with the
-    same FILTER-aggregation trick as _gainer: for a window of N trading days, `g`
-    is the close N days back (rn=N+1) for the gain, and `cmax`/`fmin` are the
-    max/min INSIDE the window (rn≤N+1) for ceil/floor. The «از ابتدا» column needs
+    same FILTER-aggregation trick as _gainer, on the same market-calendar anchor:
+    for a window of N trading days, `g` is the close at the resolved anchor (the
+    ticker's last bar at or before N market days back) for the gain, and
+    `cmax`/`fmin` are the max/min INSIDE that window for ceil/floor. A halted
+    symbol therefore reports ۰٪ across the board instead of the returns of
+    whatever week its own history happens to end on. The «از ابتدا» column needs
     the whole history, so all-time min/max come from a plain GROUP BY and the very
     first close from an index-backed LATERAL lookup (cheap: one seek per ticker).
     All bounded by `as_of` so the page is reproducible for a past date."""
@@ -726,29 +804,38 @@ def _perf_prices(kind, as_of):
     ref_tbl = "stocks" if kind == "stock" else "etf"
 
     # --- trailing windows: gain source + running max/min per period ---
-    parts = []
+    anchors, parts = [], []
     for p in PERF_PERIODS:
         k, rn = p["key"], p["n"] + 1
-        parts.append(f"MAX(v) FILTER (WHERE rn={rn})  g_{k}")
-        parts.append(f"MAX(v) FILTER (WHERE rn<={rn}) cmax_{k}")
-        parts.append(f"MIN(v) FILTER (WHERE rn<={rn}) fmin_{k}")
+        anchors.append(f"MIN(k) FILTER (WHERE k >= {rn}) k_{k}")
+        span = f"w.k <= COALESCE(a.k_{k}, {rn})"
+        parts.append(f"MAX(w.v) FILTER (WHERE w.k = a.k_{k}) g_{k}")
+        parts.append(f"MAX(w.v) FILTER (WHERE {span}) cmax_{k}")
+        parts.append(f"MIN(w.v) FILTER (WHERE {span}) fmin_{k}")
+    anchors_sql = ",\n               ".join(anchors)
     trailing = ",\n           ".join(parts)
     # 4 calendar years of slice comfortably covers the 720-trading-day (3y) window.
     sql = f"""
-    WITH ranked AS (
-        SELECT ticker, adj_final::float v,
-               ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) rn
-        FROM {price_tbl}
-        WHERE adj_final > 0 AND date <= %s AND date >= %s
+    WITH {_market_cal_sql(price_tbl)},
+    win AS (
+        SELECT p.ticker, p.j_date, p.adj_final::float v, c.k
+        FROM {price_tbl} p JOIN cal c ON c.date = p.date
+        WHERE p.adj_final > 0 AND p.date <= %s AND p.date >= %s
+    ),
+    anc AS (
+        SELECT ticker, MIN(k) k0,
+               {anchors_sql}
+        FROM win GROUP BY ticker
     )
-    SELECT ticker,
-           MAX(v) FILTER (WHERE rn=1) AS latest,
+    SELECT a.ticker,
+           MAX(w.j_date) FILTER (WHERE w.k = a.k0) AS ldate,
+           MAX(w.v)      FILTER (WHERE w.k = a.k0) AS latest,
            {trailing}
-    FROM ranked
-    GROUP BY ticker
-    HAVING MAX(v) FILTER (WHERE rn=1) IS NOT NULL
+    FROM win w JOIN anc a ON a.ticker = w.ticker
+    GROUP BY a.ticker
+    HAVING MAX(w.v) FILTER (WHERE w.k = a.k0) IS NOT NULL
     """
-    trail = {r["ticker"]: r for r in _rows(sql, _window(kind, as_of, years=4))}
+    trail = {r["ticker"]: r for r in _rows(sql, _window(kind, as_of, years=4) * 2)}
 
     # --- «از ابتدا»: all-time min/max, then the very first recorded close ---
     allt = {r["ticker"]: r for r in _rows(
@@ -764,7 +851,7 @@ def _perf_prices(kind, as_of):
     out = {}
     for t, tr in trail.items():
         latest = tr["latest"]
-        row = {"latest": latest}
+        row = {"latest": latest, "ldate": tr["ldate"]}
         for p in PERF_PERIODS:
             k = p["key"]
             row[f"{k}_gain"] = _pct(latest, tr[f"g_{k}"])
@@ -822,7 +909,8 @@ def _perf_multi_all(kind, as_of):
                        market=m.get("market"), sector=m.get("sector"),
                        sub_sector=m.get("sub_sector"), type=m.get("type"))
             out.append(row)
-        out.sort(key=lambda r: (r["m1_gain"] is None, -(r["m1_gain"] or 0)))
+        sort_col = f"{PERF_SORT_KEY}_gain"
+        out.sort(key=lambda r: (r.get(sort_col) is None, -(r.get(sort_col) or 0)))
         return out
 
     return cache.get_or_set("perfm", ("__perfm__", kind, as_of), build)
@@ -869,7 +957,8 @@ def clear_cache():
     return cache.bump_version()
 
 
-def delete_price_history(kind, ticker=None, start=None, end=None):
+def delete_price_history(kind, ticker=None, start=None, end=None,
+                         all_history=False):
     """Delete price-history rows for one ticker (or ALL tickers when ticker is
     empty) within a Jalali date range. `start`/`end` are inclusive Jalali bounds
     — required so a stray call can never wipe the whole table. They are resolved
@@ -878,21 +967,32 @@ def delete_price_history(kind, ticker=None, start=None, end=None):
     comparisons. An out-of-range bound resolves to NULL, which matches no rows —
     the same (safe) outcome the string comparison gave.
 
+    `all_history=True` is the «کلیهٔ سوابق» option on the update page: it drops
+    the date bounds entirely and removes every row for the ticker — or, with no
+    ticker, empties the whole table. The range is what normally keeps a stray
+    call from wiping everything, so the flag has to be passed deliberately; it
+    is never inferred from missing dates, which still raise.
+
     Returns the number of rows deleted."""
     if kind not in ("stock", "etf"):
         raise ValueError("kind must be 'stock' or 'etf'")
-    if not start or not end:
+    if not all_history and (not start or not end):
         raise ValueError("a from/to date range is required")
     tbl = "stockpricehistory" if kind == "stock" else "etfpricehistory"
-    clauses = ["date >= %s", "date <= %s"]
-    params = [_date_for(kind, start, "lo"), _date_for(kind, end, "hi")]
+    clauses, params = [], []
+    if not all_history:
+        clauses += ["date >= %s", "date <= %s"]
+        params += [_date_for(kind, start, "lo"), _date_for(kind, end, "hi")]
     if ticker:
         clauses.append("ticker = %s")
         params.append(ticker)
     conn = get_db()
     try:
         with conn.cursor() as cur:
-            cur.execute(f"DELETE FROM {tbl} WHERE " + " AND ".join(clauses), params)
+            # No clauses at all = «کلیهٔ سوابق» over every symbol. TRUNCATE would
+            # be faster, but it reports no row count and the page shows one.
+            where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+            cur.execute(f"DELETE FROM {tbl}{where}", params)
             n = cur.rowcount
         conn.commit()
         # Invalidate here, synchronously, rather than leaving it to the analytics
@@ -2478,14 +2578,25 @@ def _tv_rating(avg):
 
 
 def ohlc_history(kind, ticker):
-    """Full adjusted OHLCV candle history (oldest→newest) for one ticker.
+    """Full OHLCV candle history (oldest→newest) for one ticker, BOTH series.
 
-    Feeds the professional chart and the raw-data history table. Uses the
-    ADJUSTED series (adj_open/high/low/close) so splits/dividends don't create
-    artificial gaps; `final` (weighted close) and traded value/volume come along
-    for the tooltip and history table. `date` is the Gregorian calendar date —
-    the chart needs a real timestamp for its x-axis, while `j_date` (Jalali) is
-    what we actually show the user.
+    Feeds the professional chart and the «سابقهٔ داده‌ها» history table.
+
+    `open/high/low/close/final` are the ADJUSTED series (adj_open…adj_final), so
+    splits and dividends do not put artificial gaps in the candles. Those keys
+    keep their names because the chart reads them directly, and the adjusted
+    series is the one every return in this module is computed from.
+
+    `raw_*` are the unadjusted numbers exactly as TSETMC reported the session.
+    The history table shows both side by side: «آخرین معامله» / «پایانی» are the
+    raw close and the raw weighted close, «آخرین معامله تعدیل‌شده» / «پایانی
+    تعدیل‌شده» are adj_close and adj_final. Before this they were one pair of
+    columns carrying the ADJUSTED numbers under the unadjusted labels, which is
+    why a symbol with a split showed a «پایانی» that did not match its
+    broker statement.
+
+    `date` is the Gregorian calendar date — the chart needs a real timestamp for
+    its x-axis, while `j_date` (Jalali) is what we actually show the user.
     """
     tbl = "stockpricehistory" if kind == "stock" else "etfpricehistory"
     rows = _rows(
@@ -2495,6 +2606,11 @@ def ohlc_history(kind, ticker):
                    adj_low::float   AS low,
                    adj_close::float AS close,
                    adj_final::float AS final,
+                   open::float      AS raw_open,
+                   high::float      AS raw_high,
+                   low::float       AS raw_low,
+                   close::float     AS raw_close,
+                   final::float     AS raw_final,
                    volume, value
             FROM {tbl}
             WHERE ticker=%s AND adj_close>0
@@ -2511,6 +2627,14 @@ def ohlc_history(kind, ticker):
             "open": r["open"], "high": r["high"],
             "low": r["low"], "close": r["close"],
             "final": r["final"],
+            # A row imported before the raw columns were populated would show a
+            # blank cell, so each falls back to its adjusted twin rather than
+            # leaving a hole in the middle of the table.
+            "raw_open": r["raw_open"] if r["raw_open"] is not None else r["open"],
+            "raw_high": r["raw_high"] if r["raw_high"] is not None else r["high"],
+            "raw_low": r["raw_low"] if r["raw_low"] is not None else r["low"],
+            "raw_close": r["raw_close"] if r["raw_close"] is not None else r["close"],
+            "raw_final": r["raw_final"] if r["raw_final"] is not None else r["final"],
             "volume": int(r["volume"]) if r["volume"] is not None else 0,
             "turnover": int(r["value"]) if r["value"] is not None else 0,
         })
@@ -3131,8 +3255,10 @@ def last_session(kind, as_of=None):
     at/at-or-before `as_of`.
 
     `chg` is the ONE-DAY change, which nothing else in this module reports:
-    PERIODS starts at five trading days. It is computed here from the two most
-    recent bars instead of being added to PERIODS on purpose — a new period key
+    PERIODS starts at five trading days. It is the move from the previous MARKET
+    session (or the ticker's last bar at or before it, so a halted symbol reports
+    ۰٪ rather than the move it made on its final day), computed here instead of
+    being added to PERIODS on purpose — a new period key
     changes the column list of mv_market_gainer_*, and until those views were
     rebuilt every market page would fail on a missing column. This query touches
     no view at all, so it is safe to add to a running deployment.
@@ -3154,24 +3280,34 @@ def last_session(kind, as_of=None):
             return {}
         rows = _rows(
             f"""
-            WITH ranked AS (
-                SELECT ticker, j_date, adj_final::float8 AS v,
-                       COALESCE(volume, 0)::float8 AS vol,
-                       COALESCE(value, 0)::float8   AS val,
-                       ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) rn
-                FROM {tbl}
-                WHERE adj_final > 0 AND date <= %s AND date >= %s::date - INTERVAL '30 days'
+            WITH cal AS (
+                SELECT date, ROW_NUMBER() OVER (ORDER BY date DESC) k
+                FROM (SELECT DISTINCT date FROM {tbl}
+                      WHERE date <= %s AND date >= %s::date - INTERVAL '30 days') d
+            ),
+            win AS (
+                SELECT p.ticker, p.j_date, p.adj_final::float8 AS v,
+                       COALESCE(p.volume, 0)::float8 AS vol,
+                       COALESCE(p.value, 0)::float8   AS val,
+                       c.k
+                FROM {tbl} p JOIN cal c ON c.date = p.date
+                WHERE p.adj_final > 0 AND p.date <= %s
+                  AND p.date >= %s::date - INTERVAL '30 days'
+            ),
+            anc AS (
+                SELECT ticker, MIN(k) k0, MIN(k) FILTER (WHERE k >= 2) k1
+                FROM win GROUP BY ticker
             )
-            SELECT ticker,
-                   MAX(j_date) FILTER (WHERE rn = 1) AS jdate,
-                   MAX(v)      FILTER (WHERE rn = 1) AS last_v,
-                   MAX(v)      FILTER (WHERE rn = 2) AS prev_v,
-                   MAX(vol)    FILTER (WHERE rn = 1) AS volume,
-                   MAX(val)    FILTER (WHERE rn = 1) AS value
-            FROM ranked
-            WHERE rn <= 2
-            GROUP BY ticker
-            """, (hi, hi))
+            SELECT a.ticker,
+                   MAX(w.j_date) FILTER (WHERE w.k = a.k0) AS jdate,
+                   MAX(w.v)      FILTER (WHERE w.k = a.k0) AS last_v,
+                   MAX(w.v)      FILTER (WHERE w.k = a.k1) AS prev_v,
+                   MAX(w.vol)    FILTER (WHERE w.k = a.k0) AS volume,
+                   MAX(w.val)    FILTER (WHERE w.k = a.k0) AS value
+            FROM win w JOIN anc a ON a.ticker = w.ticker
+            WHERE w.k = a.k0 OR w.k = a.k1
+            GROUP BY a.ticker
+            """, (hi, hi, hi, hi))
         out = {}
         for r in rows:
             last_v, prev_v = r["last_v"], r["prev_v"]

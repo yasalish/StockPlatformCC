@@ -34,6 +34,8 @@ to the old live computation when a caller asks for a different (historical) date
 
 # The base view keeps 800 bars/ticker: enough for _perf_prices' 720-day window
 # (rn <= 721). rn_c <= rn always, so it covers the filter scan's ranking too.
+# It also carries `k`, the MARKET-calendar countdown every trailing period keys
+# on — see bars() and _anchor_sql().
 MAX_RN = 800
 # db.py's three scans all fetch `WHERE rn <= 300`.
 SCAN_BARS = 300
@@ -121,12 +123,26 @@ def _neumaier(cte, src, val, order, limit=None):
 # layer 1 — raw bars + all-time stats
 # --------------------------------------------------------------------------
 def bars(kind):
+    """One row per (ticker, bar) with TWO independent countdowns.
+
+    `rn` counts the ticker's OWN bars back from its own last one; `k` counts
+    MARKET trading days back from the market's as_of. They differ for any symbol
+    that missed a session — and by months for a halted (متوقف) one. Everything
+    that reads a *trailing window* ("the last 5 days") must key on `k`: a symbol
+    whose final bar is two years old still has an `rn = 6`, and reading it as
+    "five days ago" is what used to put delisted symbols at the top and bottom of
+    the ۱ هفته column. `rn` stays for the indicator scans, which legitimately
+    want the ticker's own last 300 bars however far apart they sit."""
     price, _ = TBL[kind]
     return f"""
 CREATE MATERIALIZED VIEW mv_bars_{kind} AS
 WITH w AS ({_bounds(kind, 4)}
+), mcal AS (
+    SELECT c.date, ROW_NUMBER() OVER (ORDER BY c.date DESC) AS k
+    FROM mv_cal_{kind} c, w
+    WHERE c.date <= w.as_of AND c.date >= w.cutoff
 ), ranked AS (
-    SELECT p.ticker, p.j_date, p.date,
+    SELECT p.ticker, p.j_date, p.date, mcal.k,
            ROW_NUMBER() OVER (PARTITION BY p.ticker ORDER BY p.date DESC) AS rn,
            CASE WHEN p.adj_close > 0 THEN ROW_NUMBER() OVER (
                 PARTITION BY p.ticker, (p.adj_close > 0) ORDER BY p.date DESC)
@@ -134,10 +150,13 @@ WITH w AS ({_bounds(kind, 4)}
            p.adj_open::float8  AS o, p.adj_high::float8 AS h,
            p.adj_low::float8   AS l, p.adj_close::float8 AS c,
            p.adj_final::float8 AS v
-    FROM {price} p, w
+    FROM {price} p
+    JOIN mcal ON mcal.date = p.date
+    CROSS JOIN w
     WHERE p.adj_final > 0 AND p.date <= w.as_of AND p.date >= w.cutoff
 )
-SELECT ticker, j_date, date, rn, rn_c, o, h, l, c, v FROM ranked WHERE rn <= {MAX_RN}
+SELECT ticker, j_date, date, rn, rn_c, k, o, h, l, c, v
+FROM ranked WHERE rn <= {MAX_RN}
 """
 
 
@@ -168,23 +187,45 @@ FROM agg a FULL OUTER JOIN firsts f ON f.ticker = a.ticker
 # --------------------------------------------------------------------------
 # layer 2a — the gainer tables (db._gainer)
 # --------------------------------------------------------------------------
+def _anchor_sql(periods, prefix="k_"):
+    """MIN(k) FILTER (WHERE k >= n+1) per period — the SQL twin of db._anchor_cols.
+
+    The bar that "n trading days ago" resolves to is the most recent one at or
+    before that market date: the smallest k no closer than n+1. For a symbol that
+    traded every session that IS k = n+1; for one that missed sessions it steps
+    back to its last real bar (last-observation-carried-forward); and for a
+    halted symbol it collapses onto the symbol's own final bar, which reports ۰٪
+    — the truth — instead of a window that ended months or years ago."""
+    return ",\n           ".join(
+        f"MIN(k) FILTER (WHERE k >= {p['n'] + 1}) AS {prefix}{p['key']}"
+        for p in periods)
+
+
 def gainer(kind, periods, name):
     price, _ = TBL[kind]
+    anchors = _anchor_sql(periods)
     picks = ",\n           ".join(
-        f"MAX(v) FILTER (WHERE rn = {p['n'] + 1}) AS raw_{p['key']}" for p in periods)
+        f"MAX(w.v) FILTER (WHERE w.k = a.k_{p['key']}) AS raw_{p['key']}"
+        for p in periods)
     pcts = ",\n       ".join(f"{_pct('b.raw_' + p['key'])} AS {p['key']}" for p in periods)
     return f"""
 CREATE MATERIALIZED VIEW {name}_{kind} AS
 WITH lim AS ({_bounds(kind, 2)}
+), win AS (
+    SELECT b.ticker, b.k, b.j_date, b.v
+    FROM mv_bars_{kind} b, lim
+    WHERE b.date <= lim.as_of AND b.date >= lim.cutoff
+), anc AS (
+    SELECT ticker, MIN(k) AS k0, {anchors}
+    FROM win GROUP BY ticker
 ), base AS (
-    SELECT ticker,
-           MAX(j_date) FILTER (WHERE rn = 1) AS ldate,
-           MAX(v)      FILTER (WHERE rn = 1) AS latest,
+    SELECT a.ticker,
+           MAX(w.j_date) FILTER (WHERE w.k = a.k0) AS ldate,
+           MAX(w.v)      FILTER (WHERE w.k = a.k0) AS latest,
            {picks}
-    FROM mv_bars_{kind}, lim
-    WHERE date <= lim.as_of AND date >= lim.cutoff
-    GROUP BY ticker
-    HAVING MAX(v) FILTER (WHERE rn = 1) IS NOT NULL
+    FROM win w JOIN anc a ON a.ticker = w.ticker
+    GROUP BY a.ticker
+    HAVING MAX(w.v) FILTER (WHERE w.k = a.k0) IS NOT NULL
 )
 SELECT m.id, m.ticker, m.name, m.market, m.sector, m.sub_sector, m.type,
        b.latest, b.ldate,
@@ -196,12 +237,18 @@ JOIN base b ON b.ticker = m.ticker
 
 def perf(kind, perf_periods):
     price, _ = TBL[kind]
+    anchors = _anchor_sql(perf_periods)
     picks, cols = [], []
     for p in perf_periods:
         k, rn = p["key"], p["n"] + 1
-        picks.append(f"MAX(v) FILTER (WHERE rn = {rn})  AS g_{k}")
-        picks.append(f"MAX(v) FILTER (WHERE rn <= {rn}) AS cmax_{k}")
-        picks.append(f"MIN(v) FILTER (WHERE rn <= {rn}) AS fmin_{k}")
+        # The سقف/کف window ends at the SAME resolved anchor as the gain, so a
+        # halted symbol measures its last bar against itself (۰٪). COALESCE keeps
+        # the pre-calendar behaviour for a symbol younger than the window: if no
+        # bar is that far back, every bar it has counts.
+        span = f"w.k <= COALESCE(a.k_{k}, {rn})"
+        picks.append(f"MAX(w.v) FILTER (WHERE w.k = a.k_{k}) AS g_{k}")
+        picks.append(f"MAX(w.v) FILTER (WHERE {span})        AS cmax_{k}")
+        picks.append(f"MIN(w.v) FILTER (WHERE {span})        AS fmin_{k}")
         cols.append(f"{_pct('b.g_' + k)} AS {k}_gain")
         cols.append(f"{_pct('b.cmax_' + k)} AS {k}_ceil")
         cols.append(f"{_pct('b.fmin_' + k)} AS {k}_floor")
@@ -210,16 +257,23 @@ def perf(kind, perf_periods):
     return f"""
 CREATE MATERIALIZED VIEW mv_perf_prices_{kind} AS
 WITH lim AS ({_bounds(kind, 4)}
+), win AS (
+    SELECT b.ticker, b.k, b.j_date, b.v
+    FROM mv_bars_{kind} b, lim
+    WHERE b.date <= lim.as_of AND b.date >= lim.cutoff
+), anc AS (
+    SELECT ticker, MIN(k) AS k0, {anchors}
+    FROM win GROUP BY ticker
 ), base AS (
-    SELECT ticker,
-           MAX(v) FILTER (WHERE rn = 1) AS latest,
+    SELECT a.ticker,
+           MAX(w.j_date) FILTER (WHERE w.k = a.k0) AS ldate,
+           MAX(w.v)      FILTER (WHERE w.k = a.k0) AS latest,
            {picks_sql}
-    FROM mv_bars_{kind}, lim
-    WHERE date <= lim.as_of AND date >= lim.cutoff
-    GROUP BY ticker
-    HAVING MAX(v) FILTER (WHERE rn = 1) IS NOT NULL
+    FROM win w JOIN anc a ON a.ticker = w.ticker
+    GROUP BY a.ticker
+    HAVING MAX(w.v) FILTER (WHERE w.k = a.k0) IS NOT NULL
 )
-SELECT b.ticker, b.latest,
+SELECT b.ticker, b.latest, b.ldate,
        {cols_sql},
        {_pct('a.first_v')} AS first_gain,
        {_pct('a.mx')}      AS first_ceil,
@@ -705,12 +759,31 @@ FROM comp
 # --------------------------------------------------------------------------
 # the catalogue, in dependency order
 # --------------------------------------------------------------------------
+def stamp(kind):
+    """One row: the as_of the WHOLE chain has finished refreshing for.
+
+    It is the LAST entry in all_views(), so it flips to the new date only once
+    every view a reader can consult already holds it. db._use_view() needs that
+    ordering to be safe. Reading mv_cal instead would flip FIRST — mv_cal leads
+    the refresh — and for the half hour mv_ind_stock takes to rebuild, readers
+    would believe the chain was current while the gainer, perf and scan tables
+    still held the previous session, i.e. the page would print today's date over
+    yesterday's numbers.
+
+    Cheap enough to refresh unconditionally: one row read off mv_cal's index."""
+    return f"""
+CREATE MATERIALIZED VIEW mv_analytics_stamp_{kind} AS
+SELECT '{kind}'::text AS kind, MAX(j_date) AS as_of FROM mv_cal_{kind}
+"""
+
+
 def all_views(periods, calc_periods, perf_periods, weights):
     """[(view_name, create_ddl, unique_index_columns)] in REFRESH order.
 
     Dependencies: mv_bars -> mv_ind -> the three scans; mv_bars (+ mv_alltime)
     -> the gainer / perf tables. Refreshing in list order therefore always sees
-    freshly-rebuilt inputs.
+    freshly-rebuilt inputs, and mv_analytics_stamp_* comes last so it marks the
+    whole chain — not just its own inputs — as current.
     """
     out = []
     for kind in ("stock", "etf"):
@@ -730,4 +803,6 @@ def all_views(periods, calc_periods, perf_periods, weights):
         out.append((f"mv_strategy_{kind}", strategy(kind), "ticker, id"))
         out.append((f"mv_filter_{kind}", filters(kind), "ticker, id"))
         out.append((f"mv_score_{kind}", score(kind, weights), "ticker, id"))
+    for kind in ("stock", "etf"):
+        out.append((f"mv_analytics_stamp_{kind}", stamp(kind), "kind"))
     return out

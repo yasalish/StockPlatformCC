@@ -42,9 +42,12 @@
     <tbody>
       {% for r in rows %}
       {% set url = url_for('stock_detail', stock_id=r.id) if kind == 'stock' else url_for('etf_detail', etf_id=r.id) %}
-      <tr class="clickable" data-ticker="{{ r.ticker }}" onclick="location.href='{{ url }}'">
-        <td class="sym">{% set ticker = r.ticker %}{% set eid = r.id %}{% include "_star.html" %}{{ r.ticker }}</td>
-        <td class="rtl-name">{{ r.name }}</td>
+      {#  data-href, not onclick: app.js opens it in a new tab so the watchlist
+          you are working through stays where it is. The ticker and the name are
+          real links to the same place, for hover, middle-click and keyboard.  #}
+      <tr class="clickable" data-ticker="{{ r.ticker }}" data-href="{{ url }}">
+        <td class="sym">{% set ticker = r.ticker %}{% set eid = r.id %}{% include "_star.html" %}<a class="row-link" href="{{ url }}" target="_blank" rel="noopener">{{ r.ticker }}</a></td>
+        <td class="rtl-name"><a class="row-link" href="{{ url }}" target="_blank" rel="noopener">{{ r.name }}</a></td>
         <td class="small">
           {% if kind == 'etf' %}<span class="tag" style="background:{{ ETF_TYPE_COLORS.get(r.type,'#868fa3') }}">{{ r.type }}</span>
           {% else %}<span class="muted">{{ r.market }}</span>{% endif %}

@@ -386,6 +386,10 @@ def test_a_background_rebuild_does_not_block_a_new_run(monkeypatch, market_mod):
         reap_dead_job=lambda jid, grace=None: order.append("reap") or False,
         create_job=lambda *a, **k: order.append("create") or 11,
         tse_reference=lambda kind, tickers: [(1, "خودرو")],
+        # start_job() dispatches what is OUTSTANDING, not the whole reference
+        # list: create_job() may pre-mark the symbols an earlier run of the
+        # same window already finished. See jobs.already_done_elsewhere().
+        pending_tickers=lambda jid: ["خودرو"],
         finish_job=lambda *a, **k: None,
         get_job=lambda jid: _fake_job(status="finalizing"),
     )
@@ -428,6 +432,10 @@ def test_start_job_reaps_before_it_refuses(monkeypatch, market_mod):
         reap_dead_job=fake_reap,
         create_job=lambda *a, **k: order.append("create") or 11,
         tse_reference=lambda kind, tickers: [(1, "خودرو")],
+        # start_job() dispatches what is OUTSTANDING, not the whole reference
+        # list: create_job() may pre-mark the symbols an earlier run of the
+        # same window already finished. See jobs.already_done_elsewhere().
+        pending_tickers=lambda jid: ["خودرو"],
         finish_job=lambda *a, **k: None,
     )
     fake_tasks = types.SimpleNamespace(

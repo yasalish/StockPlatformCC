@@ -283,6 +283,46 @@
     { n: 22, label: "۱م" }, { n: 66, label: "۳م" }, { n: 132, label: "۶م" },
     { n: 250, label: "۱س" }, { n: 750, label: "۳س" }, { n: 0, label: "کل" },
   ];
+  // The price basis the chart draws. /api/ohlc carries BOTH series per bar:
+  // open/high/low/close/final are adjusted, raw_* are the session as TSETMC
+  // reported it. klinecharts only ever reads the unprefixed keys, so switching
+  // basis is a re-projection of the same rows — no refetch, and every indicator
+  // and the legend follow automatically because they read those keys too.
+  const BASES = [
+    { key: "adj", label: "تعدیل‌شده",
+      title: "قیمت تعدیل‌شده بابت افزایش سرمایه و سود نقدی (adj) — همان مبنایی که "
+           + "بازدهی‌های سایت روی آن حساب می‌شود" },
+    { key: "raw", label: "بدون تعدیل",
+      title: "قیمت معامله‌شدهٔ همان روز، بدون تعدیل. توجه: در روز افزایش سرمایه یا "
+           + "سود نقدی یک افت ظاهری دیده می‌شود که معامله‌ای واقعی نیست" },
+  ];
+  const DEFAULT_BASIS = "adj";
+
+  /** The rows as klinecharts should see them for `basis`.
+   *
+   * The adjusted basis is the API shape already, so it is returned untouched
+   * rather than copied — it is the default and the common case. The raw basis
+   * shallow-copies each bar with the raw_* values moved onto the plain keys,
+   * keeping raw_* too so switching back and forth is lossless.
+   */
+  function project(rows, basis) {
+    if (basis !== "raw") return rows;
+    return rows.map((r) => Object.assign({}, r, {
+      open: r.raw_open, high: r.raw_high, low: r.raw_low,
+      close: r.raw_close, final: r.raw_final,
+    }));
+  }
+
+  // n = 0 is «کل»: every bar the symbol has, starting at its FIRST trading day.
+  // That is the default. It used to be 250 (۱س), which silently cut the chart to
+  // the last year — a symbol listed in 1390 opened showing 1404 onward, and
+  // nothing on screen said the rest existed. One constant for both the initial
+  // load and the pressed button, so they cannot drift apart.
+  const DEFAULT_RANGE_N = 0;
+
+  // klinecharts clamps bar width to [1, 50] px (MIN/MAX_BAR_SPACE in v9.8).
+  const MIN_BAR_SPACE = 1;
+  const MAX_BAR_SPACE = 50;
 
   function button(label, title, cls) {
     const b = document.createElement("button");
@@ -302,6 +342,7 @@
     root.innerHTML = `
       <div class="bnc-top">
         <div class="bnc-group" data-role="types"></div>
+        <div class="bnc-group" data-role="adjust"></div>
         <div class="bnc-group" data-role="ranges"></div>
         <div class="bnc-group bnc-dd" data-role="inds"></div>
         <div class="bnc-group bnc-right" data-role="actions"></div>
@@ -329,10 +370,17 @@
     chart.setStyles(chartStyles());
     chart.setCustomApi({ formatDate: (_f, ts) => jLabel(ts) });
 
-    const state = { all: candles, activeInds: {}, activeTool: "cursor" };
-    applyRange(chart, state, 250);
+    const state = {
+      rows: candles,                       // both series, straight from the API
+      basis: DEFAULT_BASIS,
+      all: project(candles, DEFAULT_BASIS),  // what the chart is currently drawing
+      rangeN: DEFAULT_RANGE_N,
+      activeInds: {}, activeTool: "cursor",
+    };
+    applyRange(chart, state, DEFAULT_RANGE_N);
 
     buildTypeButtons(root, chart);
+    buildBasisSelect(root, chart, state);
     buildRangeButtons(root, chart, state);
     buildIndicatorMenu(root, chart, state);
     buildDrawTools(root, chart, state);
@@ -342,7 +390,7 @@
     toggleIndicator(chart, state, "VOL", true);
     syncIndButtons(root, state);
 
-    const ro = new ResizeObserver(() => chart.resize());
+    const ro = new ResizeObserver(() => { chart.resize(); fitToCanvas(chart); });
     ro.observe(root.querySelector(".bnc-canvas"));
     window.BNChartInstance = chart;
 
@@ -364,8 +412,12 @@
     const rows = (data.candles || []).slice();
     if (!rows.length) { host.innerHTML = '<p class="muted">دادهٔ تاریخی موجود نیست.</p>'; return; }
 
-    // «پایانی» (adj_final) per row, falling back to the last trade when a row
-    // carries no final — _fin is what both the change column and the CSV use.
+    // _fin is «پایانی تعدیل‌شده» (adj_final), falling back to the adjusted last
+    // trade when a row carries no final. It is what the change column and the
+    // CSV use, because EVERY return this platform reports — the ۵/۱۰/۲۰ روز
+    // columns, the performance windows, the alerts — is computed from adj_final.
+    // Measuring the day-over-day change on anything else would make this table
+    // disagree with every other page.
     for (let i = 0; i < rows.length; i++) {
       rows[i]._fin = rows[i].final != null ? rows[i].final : rows[i].close;
     }
@@ -378,9 +430,20 @@
     }
     const desc = rows.slice().reverse(); // newest first for display
 
+    // Raw session numbers first, then the two adjusted prices. The «تعدیل‌شده»
+    // pair is what the chart draws and what every return is computed from; the
+    // unadjusted pair is what the symbol actually traded at that day, which is
+    // what a user reconciling against a broker statement needs. They differ for
+    // any symbol that has had a split, a rights issue or a dividend.
+    // They are plain columns: the label already says «تعدیل‌شده», so tinting or
+    // boxing them only adds furniture to a table that is read by scanning down
+    // one column at a time.
     const head = `<tr>
         <th>تاریخ</th><th>باز</th><th>کمترین</th><th>بیشترین</th>
-        <th>آخرین معامله</th><th>پایانی</th><th>تغییر</th>
+        <th>آخرین معامله</th><th>پایانی</th>
+        <th>آخرین معامله تعدیل‌شده</th>
+        <th>پایانی تعدیل‌شده</th>
+        <th>تغییر</th>
         <th>حجم</th><th>ارزش</th></tr>`;
 
     const render = (limit) => desc.slice(0, limit).map((r) => {
@@ -389,11 +452,13 @@
       const chgTxt = chg == null ? "—" : (chg >= 0 ? "+" : "") + faDigits(chg.toFixed(2)) + "٪";
       return `<tr>
         <td class="jd">${faDigits(r.jdate)}</td>
-        <td class="num">${faNum(r.open)}</td>
-        <td class="num">${faNum(r.low)}</td>
-        <td class="num">${faNum(r.high)}</td>
+        <td class="num">${faNum(r.raw_open)}</td>
+        <td class="num">${faNum(r.raw_low)}</td>
+        <td class="num">${faNum(r.raw_high)}</td>
+        <td class="num">${faNum(r.raw_close)}</td>
+        <td class="num strong">${faNum(r.raw_final)}</td>
         <td class="num">${faNum(r.close)}</td>
-        <td class="num strong">${faNum(r._fin)}</td>
+        <td class="num">${faNum(r._fin)}</td>
         <td class="num ${cls}">${chgTxt}</td>
         <td class="num">${faCompact(r.volume)}</td>
         <td class="num">${faCompact(r.turnover)}</td>
@@ -426,11 +491,15 @@
   }
 
   function exportCsv(ticker, rows) {
-    // Same column order as the table on screen. change_pct is final-based.
-    const head = ["j_date", "open", "low", "high", "close", "final", "change_pct", "volume", "value"];
+    // Same column order as the table on screen. change_pct is adj_final-based,
+    // like every other return in the platform. The adj_* headers are spelled out
+    // so a downloaded file is not ambiguous about which series is which.
+    const head = ["j_date", "open", "low", "high", "close", "final",
+                  "adj_close", "adj_final", "change_pct", "volume", "value"];
     const lines = [head.join(",")];
     rows.forEach((r) => {
-      lines.push([r.jdate, r.open, r.low, r.high, r.close, r._fin,
+      lines.push([r.jdate, r.raw_open, r.raw_low, r.raw_high, r.raw_close, r.raw_final,
+        r.close, r._fin,
         r._chg == null ? "" : r._chg.toFixed(2), r.volume, r.turnover].join(","));
     });
     const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
@@ -442,8 +511,128 @@
   }
 
   function applyRange(chart, state, n) {
+    state.rangeN = n;
     const d = n && n < state.all.length ? state.all.slice(-n) : state.all;
     chart.applyNewData(d);
+    fitToCanvas(chart);
+  }
+
+  /** Redraw on a different price basis, keeping the selected range. */
+  function setBasis(chart, state, basis) {
+    if (basis === state.basis) return;
+    state.basis = basis;
+    state.all = project(state.rows, basis);
+    applyRange(chart, state, state.rangeN);
+  }
+
+  /** «تعدیل‌شده» / «بدون تعدیل».
+   *
+   * A .cbtn opening a .bnc-menu, NOT a native <select>. The option list of a
+   * select is drawn by the operating system: it ignores the page's font and its
+   * palette, so the open list came up in the OS UI font beside a toolbar set in
+   * Vazirmatn. `font-family` on the select cannot reach it — only replacing the
+   * popup can. This is the same pattern «اندیکاتورها ▾» beside it already uses,
+   * so the two dropdowns now look and behave alike.
+   */
+  function buildBasisSelect(root, chart, state) {
+    const host = root.querySelector('[data-role="adjust"]');
+    if (!host) return;
+    host.classList.add("bnc-dd");
+    host.innerHTML = `
+      <button type="button" class="cbtn" data-role="basis-btn" aria-haspopup="true"
+              aria-expanded="false"></button>
+      <div class="bnc-menu bnc-menu-sm" data-role="basis-menu" role="menu" hidden></div>`;
+    const btn = host.querySelector('[data-role="basis-btn"]');
+    const menu = host.querySelector('[data-role="basis-menu"]');
+
+    menu.innerHTML = BASES.map((b) => `
+      <button type="button" class="bnc-mi" role="menuitem" data-basis="${b.key}"
+              title="${b.title}">
+        <span class="bnc-mi-check">✓</span>
+        <span class="bnc-mi-label">${b.label}</span>
+      </button>`).join("");
+
+    const sync = () => {
+      const b = BASES.find((x) => x.key === state.basis) || BASES[0];
+      btn.textContent = b.label + " ▾";
+      btn.title = b.title;
+      menu.querySelectorAll(".bnc-mi").forEach((mi) => {
+        mi.classList.toggle("on", mi.dataset.basis === state.basis);
+      });
+    };
+    sync();
+
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      menu.hidden = !menu.hidden;
+      btn.setAttribute("aria-expanded", String(!menu.hidden));
+    };
+    menu.querySelectorAll(".bnc-mi").forEach((mi) => {
+      mi.onclick = (e) => {
+        e.stopPropagation();
+        setBasis(chart, state, mi.dataset.basis);
+        sync();
+        menu.hidden = true;
+        btn.setAttribute("aria-expanded", "false");
+      };
+    });
+    document.addEventListener("click", (e) => {
+      if (!host.contains(e.target)) {
+        menu.hidden = true;
+        btn.setAttribute("aria-expanded", "false");
+      }
+    });
+  }
+
+  /** Zoom so the whole loaded series fills the canvas, newest bar at the edge.
+   *
+   * applyNewData() does NOT change the zoom level, so selecting «کل» without
+   * this would load every bar and still show only the most recent screenful —
+   * the range button would look broken. Fitting is also what makes the first
+   * trading day actually visible rather than merely reachable by scrolling.
+   *
+   * Two cases it deliberately does not fight:
+   *   • The technical tab starts hidden (.tab-pane{display:none}), so at mount
+   *     the canvas is 0px wide and there is nothing to fit to. It bails, and the
+   *     ResizeObserver refits the moment the tab is opened and the canvas gains
+   *     a size.
+   *   • A very long history cannot fit: at the library's 1px floor a ~1300px
+   *     canvas holds ~1300 bars, about five years. Beyond that the chart sits at
+   *     maximum zoom-out with the latest bar in view, and the earlier years are
+   *     a scroll away. The DATA still starts at the first trading day either way.
+   */
+  function fitToCanvas(chart) {
+    try {
+      const n = (chart.getDataList() || []).length;
+      const el = chart.getDom ? chart.getDom() : null;   // the chart container
+      const w = el ? el.clientWidth : 0;
+      if (!n || !w) return;
+
+      let space = clampBarSpace(w / n);
+      chart.setBarSpace(space);
+      chart.scrollToRealTime();
+
+      // The container width includes the price axis and the pane padding, so
+      // w / n overshoots and the oldest bars fall off the left edge. Rather than
+      // hard-code the width of that chrome — it moves with the theme and with
+      // the price-label length — ask the chart what it actually ended up showing
+      // and shrink by the shortfall. Converges in one or two passes; bounded so
+      // a build with a different visible-range shape cannot spin here.
+      for (let pass = 0; pass < 3; pass++) {
+        const vr = chart.getVisibleRange();
+        const shown = vr ? vr.to - vr.from : n;
+        if (!shown || shown >= n || space <= MIN_BAR_SPACE) break;
+        const next = clampBarSpace(space * (shown / n));
+        if (next >= space) break;
+        space = next;
+        chart.setBarSpace(space);
+        chart.scrollToRealTime();
+      }
+    } catch (e) { /* chart disposed, or an API this build does not expose */ }
+  }
+
+  function clampBarSpace(v) {
+    return Math.min(MAX_BAR_SPACE, Math.max(MIN_BAR_SPACE, v));
   }
 
   function buildTypeButtons(root, chart) {
@@ -469,7 +658,7 @@
     const wrap = root.querySelector('[data-role="ranges"]');
     RANGES.forEach((r) => {
       const b = button(r.label, "بازهٔ زمانی");
-      if (r.n === 250) b.classList.add("on");
+      if (r.n === DEFAULT_RANGE_N) b.classList.add("on");
       b.onclick = () => {
         wrap.querySelectorAll(".cbtn").forEach((x) => x.classList.remove("on"));
         b.classList.add("on");

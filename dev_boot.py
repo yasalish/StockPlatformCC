@@ -211,7 +211,15 @@ def ensure_worker(role=FETCH, timeout=None):
         "close_fds": True,
     }
     if os.name == "nt":
-        kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        # Same flags, and for the same reason, as redis_boot._launch(): a
+        # DETACHED_PROCESS parent owns no console, so any console program it
+        # starts in turn is given a new one *with a visible window*. Celery is
+        # a process that starts other processes. CREATE_NO_WINDOW gives the
+        # worker a windowless console for its children to inherit, and
+        # CREATE_NEW_PROCESS_GROUP keeps Ctrl+C on the app from reaching it.
+        kwargs["creationflags"] = (
+            getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
     else:
         kwargs["start_new_session"] = True
 

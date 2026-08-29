@@ -12,6 +12,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useWindowVirtualizer } from "@tanstack/vue-virtual";
 import type { ScreenerRow } from "./types";
 import { fa } from "./format";
+import { handledInRow, openDetail } from "./nav";
 
 const props = defineProps<{
   rows: ScreenerRow[];
@@ -186,9 +187,13 @@ async function onStar(event: MouseEvent, row: ScreenerRow) {
   emit("watch-toggled", `${props.kind}:${row.ticker}`, btn.classList.contains("on"));
 }
 
+function rowHref(row: ScreenerRow) {
+  return `${props.detailBase}${row.id}`;
+}
+
 function go(event: MouseEvent, row: ScreenerRow) {
-  if ((event.target as HTMLElement).closest(".watch-star")) return;
-  window.location.href = `${props.detailBase}${row.id}`;
+  if (handledInRow(event)) return;
+  openDetail(rowHref(row));
 }
 
 function barTone(v: number) {
@@ -250,9 +255,23 @@ defineExpose({ visibleCount: computed(() => visibleRows.value.length) });
               title="افزودن/حذف از دیده‌بان"
               aria-label="دیده‌بان"
               @click="onStar($event, visibleRows[vr.index])"
-            >★</button>{{ visibleRows[vr.index].ticker }}
+            >★</button><a
+              class="row-link"
+              :href="rowHref(visibleRows[vr.index])"
+              target="_blank"
+              rel="noopener"
+              @click.stop
+            >{{ visibleRows[vr.index].ticker }}</a>
           </td>
-          <td class="rtl-name">{{ visibleRows[vr.index].name }}</td>
+          <td class="rtl-name">
+            <a
+              class="row-link"
+              :href="rowHref(visibleRows[vr.index])"
+              target="_blank"
+              rel="noopener"
+              @click.stop
+            >{{ visibleRows[vr.index].name }}</a>
+          </td>
           <td class="small">
             <span
               v-if="kind === 'etf'"

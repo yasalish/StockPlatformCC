@@ -212,6 +212,7 @@ const shownCount = computed(() => {
       :watched="watched"
       :filter-text="text"
       :detail-base="detailBase"
+      :as-of="payload.as_of"
       @watch-toggled="onWatchToggled"
     />
   </section>

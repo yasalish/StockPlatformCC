@@ -76,7 +76,7 @@
     <div class="mini-list">
       <h3>برترین‌های دوره</h3>
       {% for r in breadth.best %}
-      <a href="{{ detail_base }}{{ r.id }}">
+      <a href="{{ detail_base }}{{ r.id }}" target="_blank" rel="noopener">
         <span class="sym">{{ r.ticker }}</span>{{ pill(r.chg) }}
       </a>
       {% endfor %}
@@ -84,7 +84,7 @@
     <div class="mini-list">
       <h3>ضعیف‌ترین‌های دوره</h3>
       {% for r in breadth.worst %}
-      <a href="{{ detail_base }}{{ r.id }}">
+      <a href="{{ detail_base }}{{ r.id }}" target="_blank" rel="noopener">
         <span class="sym">{{ r.ticker }}</span>{{ pill(r.chg) }}
       </a>
       {% endfor %}
@@ -114,8 +114,8 @@
       <thead><tr><th>نماد</th><th>بازار</th><th>۱ ماه</th></tr></thead>
       <tbody>
         {% for s in top_gainers %}
-        <tr class="clickable" onclick="location.href='{{ url_for('stock_detail', stock_id=s.id) }}'">
-          <td class="sym">{% set kind = 'stock' %}{% set ticker = s.ticker %}{% set eid = s.id %}{% include "_star.html" %}{{ s.ticker }}</td>
+        <tr class="clickable" data-href="{{ url_for('stock_detail', stock_id=s.id) }}">
+          <td class="sym">{% set kind = 'stock' %}{% set ticker = s.ticker %}{% set eid = s.id %}{% include "_star.html" %}<a class="row-link" href="{{ url_for('stock_detail', stock_id=s.id) }}" target="_blank" rel="noopener">{{ s.ticker }}</a></td>
           <td class="rtl-name muted">{{ s.market }}</td>
           <td class="num">{{ pill(s.p20) }}</td>
         </tr>
@@ -135,8 +135,8 @@
       <thead><tr><th>نماد</th><th>بازار</th><th>۱ ماه</th></tr></thead>
       <tbody>
         {% for s in top_losers %}
-        <tr class="clickable" onclick="location.href='{{ url_for('stock_detail', stock_id=s.id) }}'">
-          <td class="sym">{% set kind = 'stock' %}{% set ticker = s.ticker %}{% set eid = s.id %}{% include "_star.html" %}{{ s.ticker }}</td>
+        <tr class="clickable" data-href="{{ url_for('stock_detail', stock_id=s.id) }}">
+          <td class="sym">{% set kind = 'stock' %}{% set ticker = s.ticker %}{% set eid = s.id %}{% include "_star.html" %}<a class="row-link" href="{{ url_for('stock_detail', stock_id=s.id) }}" target="_blank" rel="noopener">{{ s.ticker }}</a></td>
           <td class="rtl-name muted">{{ s.market }}</td>
           <td class="num">{{ pill(s.p20) }}</td>
         </tr>
@@ -157,8 +157,8 @@
     <thead><tr><th>نماد</th><th>نوع</th><th>قیمت پایانی</th><th>۱ ماه</th><th></th></tr></thead>
     <tbody>
       {% for s in etf_top %}
-      <tr class="clickable" onclick="location.href='{{ url_for('etf_detail', etf_id=s.id) }}'">
-        <td class="sym">{% set kind = 'etf' %}{% set ticker = s.ticker %}{% set eid = s.id %}{% include "_star.html" %}{{ s.ticker }}</td>
+      <tr class="clickable" data-href="{{ url_for('etf_detail', etf_id=s.id) }}">
+        <td class="sym">{% set kind = 'etf' %}{% set ticker = s.ticker %}{% set eid = s.id %}{% include "_star.html" %}<a class="row-link" href="{{ url_for('etf_detail', etf_id=s.id) }}" target="_blank" rel="noopener">{{ s.ticker }}</a></td>
         <td><span class="tag" style="background:{{ ETF_TYPE_COLORS.get(s.type, '#868fa3') }}">{{ s.type }}</span></td>
         <td class="num">{{ fa(s.latest) }}</td>
         <td class="num">{{ pill(s.p20) }}</td>

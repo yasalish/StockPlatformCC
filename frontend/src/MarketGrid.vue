@@ -20,7 +20,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useWindowVirtualizer } from "@tanstack/vue-virtual";
 import type { ColumnSpec, Row } from "./types";
-import { fa, pill } from "./format";
+import { fa, fy, pill } from "./format";
+import { handledInRow, openDetail } from "./nav";
 
 const props = defineProps<{
   rows: Row[];
@@ -33,6 +34,8 @@ const props = defineProps<{
   /** Tickers pinned to the top (the compared symbols on the calculator table). */
   pinned?: string[];
   detailBase: string;
+  /** The table's base date, so a symbol that has not traded since can say so. */
+  asOf?: string | null;
 }>();
 
 const emit = defineEmits<{ (e: "watch-toggled", key: string, on: boolean): void }>();
@@ -57,6 +60,27 @@ function toggleSort(col: ColumnSpec) {
 function sortClass(col: ColumnSpec) {
   if (sortCol.value !== col.id) return "";
   return sortDir.value === 1 ? "sorted-asc" : "sorted-desc";
+}
+
+/* ------------------------------------------------------------------ staleness
+ * A halted (متوقف) symbol's periods are all ۰٪ — correctly, because the window
+ * is the MARKET's last n sessions and it did not trade in them. But ۰٪ looks the
+ * same as a symbol that traded flat, so the row says which it is. `ldate` is the
+ * symbol's own last session; when it is behind the table's base date the symbol
+ * has not traded since. */
+function staleSince(row: Row): string | null {
+  const d = row.ldate;
+  if (!d || !props.asOf || d === props.asOf) return null;
+  return d;
+}
+
+/** Tooltip for a halted symbol; null (so no `title` at all) for a live one. */
+function staleTip(row: Row): string | undefined {
+  const d = staleSince(row);
+  return d === null
+    ? undefined
+    : `آخرین معاملهٔ این نماد ${fy(d)} بوده. بازدهی هر دوره روی روزهای معاملاتی `
+      + `بازار حساب می‌شود، پس دوره‌هایی که تمامشان در بازهٔ توقف بوده‌اند ۰٪ هستند.`;
 }
 
 /** The value BN.initTable would have read out of the cell's data-v / text. */
@@ -245,8 +269,10 @@ function rowHref(row: Row) {
 }
 
 function go(event: MouseEvent, row: Row) {
-  if ((event.target as HTMLElement).closest(".watch-star")) return;
-  window.location.href = rowHref(row);
+  // The star and the two symbol links handle their own clicks; everything else
+  // in the row is fair game and opens the same detail page in a new tab.
+  if (handledInRow(event)) return;
+  openDetail(rowHref(row));
 }
 
 function tagColor(t: string | null) {
@@ -291,7 +317,12 @@ defineExpose({ visibleCount: computed(() => visibleRows.value.length) });
           @click="go($event, visibleRows[vr.index])"
         >
           <template v-for="col in columns" :key="col.id">
-            <td v-if="col.cell.type === 'symbol'" class="sym">
+            <td
+              v-if="col.cell.type === 'symbol'"
+              class="sym"
+              :class="{ stale: staleSince(visibleRows[vr.index]) }"
+              :title="staleTip(visibleRows[vr.index])"
+            >
               <button
                 type="button"
                 class="watch-star"
@@ -302,11 +333,23 @@ defineExpose({ visibleCount: computed(() => visibleRows.value.length) });
                 title="افزودن/حذف از دیده‌بان"
                 aria-label="دیده‌بان"
                 @click="onStar($event, visibleRows[vr.index])"
-              >★</button>{{ visibleRows[vr.index].ticker }}
+              >★</button><a
+                class="row-link"
+                :href="rowHref(visibleRows[vr.index])"
+                target="_blank"
+                rel="noopener"
+                @click.stop
+              >{{ visibleRows[vr.index].ticker }}</a>
             </td>
 
             <td v-else-if="col.cell.type === 'name'" class="rtl-name">
-              {{ visibleRows[vr.index].name }}
+              <a
+                class="row-link"
+                :href="rowHref(visibleRows[vr.index])"
+                target="_blank"
+                rel="noopener"
+                @click.stop
+              >{{ visibleRows[vr.index].name }}</a>
             </td>
 
             <td v-else-if="col.cell.type === 'tag'" class="small">

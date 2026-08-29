@@ -42,6 +42,37 @@ const BN = (function () {
     });
   }
 
+  /* ---- a table row opens its security in a NEW TAB ----
+
+     The Jinja-rendered tables (watchlist, the dashboard's top lists) used to
+     carry onclick="location.href=…", which replaced the list the user was
+     reading. The Vue grids open a new tab now; these do the same, through one
+     delegated handler rather than an inline attribute per row, so the rule
+     lives in exactly one place.
+
+     `data-href` on the <tr> is what marks a row as navigable. Clicks that
+     something inside the row already owns — the watchlist star, and the ticker
+     and name anchors, which are real links to the same place — are left alone,
+     or the click would open the page twice. */
+  function openInNewTab(href) {
+    if (!href) return;
+    // Not `window.open(href, "_blank", "noopener")`: that returns null even on
+    // success, so a blocked popup could not be told from an opened tab and the
+    // fallback below would fire on every click, navigating this tab as well.
+    const win = window.open(href, "_blank");
+    if (win) win.opener = null;
+    else location.href = href;
+  }
+
+  function initRowLinks() {
+    document.addEventListener("click", (e) => {
+      if (e.defaultPrevented || e.button !== 0) return;
+      const tr = e.target.closest && e.target.closest("tr.clickable[data-href]");
+      if (!tr || e.target.closest("a, button, .watch-star")) return;
+      openInNewTab(tr.dataset.href);
+    });
+  }
+
   /* ---- sortable + text-filterable table ---- */
   function initTable(tableId, filterInputId) {
     const table = document.getElementById(tableId);
@@ -245,19 +276,57 @@ const BN = (function () {
   function initNavLoader() {
     const overlay = document.getElementById("nav-loader");
     if (!overlay) return;
+
+    /*  DON'T SHOW IT STRAIGHT AWAY.
+
+        The overlay is a full-screen blurred backdrop with a box in the middle
+        of the screen. It used to go up the instant a link was clicked or a form
+        was submitted — but a page on this app answers in 50–200 ms, so on
+        almost every click it appeared and vanished again inside a tenth of a
+        second. A box that flashes on and off on every click does not read as
+        "working…", it reads as the app glitching, and it was doing it on every
+        navigation in the whole platform («all time in app i see a window come
+        in screen and closed fast»).
+
+        So the overlay now waits. A navigation that finishes before the delay
+        shows nothing at all; only one still going after it — the reason this
+        exists, a big group over a long date range — puts the box up, and by
+        then it is answering a question the user has started to ask.
+
+        Nothing else changes: hide() cancels a pending show, and it is already
+        wired to `pagehide`/`pageshow`. pagehide fires when the new document is
+        ready to replace this one, i.e. exactly when the waiting is over, so a
+        navigation that beats the timer never flashes at the very end either. */
+    const SHOW_AFTER_MS = 400;
     let shown = false;
+    let pending = null;
     const show = () => {
-      if (shown) return;
-      shown = true;
-      overlay.classList.add("on");
+      if (shown || pending) return;
+      pending = setTimeout(() => {
+        pending = null;
+        shown = true;
+        overlay.classList.add("on");
+      }, SHOW_AFTER_MS);
     };
     const hide = () => {
+      if (pending) { clearTimeout(pending); pending = null; }
       shown = false;
       overlay.classList.remove("on");
     };
 
     // form submits (filter bars, compare, calculate…)
+    //
+    // The overlay is hidden by `pageshow`, so it may only be shown for a submit
+    // that really NAVIGATES. A Vue island's form calls preventDefault() and
+    // fetches instead — «مقایسه» on /performance, and the filter bars on the
+    // market, calculator, scan and screener islands — so no navigation ever
+    // followed, no pageshow ever fired, and «در حال محاسبه… لطفاً صبر کنید» sat
+    // there until the user reloaded the page by hand. The island's handler runs
+    // on the form and this one on the document, so by the time it is reached
+    // defaultPrevented already says which kind of submit this is. Same guard the
+    // link handler below has always had.
     document.addEventListener("submit", (e) => {
+      if (e.defaultPrevented) return;
       const f = e.target;
       if (f instanceof HTMLFormElement && !f.hasAttribute("data-no-loader")) show();
     });
@@ -291,5 +360,7 @@ const BN = (function () {
   document.addEventListener("DOMContentLoaded", initSearch);
   document.addEventListener("DOMContentLoaded", initTabs);
   document.addEventListener("DOMContentLoaded", initNavLoader);
-  return { initSearch, initTable, initTabs, priceChart, fmt, toggleWatch };
+  initRowLinks();          // delegated: no DOM to wait for
+  return { initSearch, initTable, initTabs, priceChart, fmt, toggleWatch,
+           openInNewTab };
 })();
