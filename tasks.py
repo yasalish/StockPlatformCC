@@ -292,6 +292,8 @@ def evaluate_alerts():
     writes user-visible notifications is a task that can report the same move
     twice after a worker is killed."""
     import db
+    import filter_engine
+
     out = db.evaluate_alerts()
     if out["fired"]:
         log.info("alerts: %s of %s rules fired", out["fired"], out["checked"])
@@ -299,7 +301,22 @@ def evaluate_alerts():
             log.info("alert fired: %s", e["message"])
     else:
         log.info("alerts: none of %s rules fired", out["checked"])
-    return out
+
+    # «بلاک هشدار» on a saved «طراحی فیلتر» graph. Separate from the price rules
+    # above because it is a different shape of work — a market-wide scan per
+    # filter, not one number per symbol — but it belongs on the same schedule:
+    # both want to run the moment new prices exist, and both write into the same
+    # notification feed. A failure here must not lose the price alerts that
+    # already fired, so it is caught rather than allowed to fail the task.
+    try:
+        designed = filter_engine.evaluate_filter_alerts()
+    except Exception:
+        log.exception("designed filter alerts failed")
+        designed = {"checked": 0, "fired": 0, "events": []}
+    if designed["fired"]:
+        log.info("filter alerts: %s symbols from %s saved filters",
+                 designed["fired"], designed["checked"])
+    return {**out, "filters": designed}
 
 
 @app.task(name="tasks.nightly_update")

@@ -1,0 +1,462 @@
+/* ===========================================================================
+   designer.css — «طراحی فیلتر»
+   ---------------------------------------------------------------------------
+   Loaded only by templates/designer.html. Everything is namespaced under .dz so
+   it cannot reach the rest of the site, and every colour is one of the tokens
+   style.css already defines (--panel, --line, --ink, --accent, …) so the canvas
+   follows the theme switcher and the five palettes with it.
+
+   The ONE exception is the chip fills. Those come from the server as literal
+   hex (filter_engine.CATEGORIES), because the category colour is part of the
+   filter's meaning — a yellow box is an indicator on every theme, exactly as it
+   is in the reference product — and a token that inverted in dark mode would
+   make the same graph unrecognisable between two users' screens. What DOES
+   change with the theme is the ink on those chips: see .dz-chip below.
+   =========================================================================== */
+
+/* The canvas wants the monitor, not the reading column. */
+body.designer-page .container { max-width: min(1900px, 98vw); }
+
+.dz { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+/* ─────────────────────────────────────────────────────────────── toolbar */
+.dz-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.dz-bar-g { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.dz-bar-end { margin-inline-start: auto; }
+.dz-kbd { white-space: nowrap; }
+
+.dz-sel { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); }
+.dz-sel > span { color: var(--ink-2); white-space: nowrap; }
+.dz-sel select,
+.dz-fields select,
+.dz-fields input {
+  background: var(--input-bg); color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  padding: 4px 8px; font: inherit; font-size: var(--fs-12);
+  max-width: 220px;
+}
+.dz-sel select:focus, .dz-fields select:focus, .dz-fields input:focus,
+.dz-search input:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* `btn` and `btn-sm` come from ui.css; these are the two variants it lacks. */
+.dz .btn-danger { color: var(--down); border-color: color-mix(in srgb, var(--down) 35%, var(--line)); }
+.dz .btn-danger:hover { background: var(--down-bg); }
+.dz .btn-ghost { background: none; border-color: transparent; color: var(--ink-2); }
+.dz .btn-ghost:hover { background: var(--surface-2); color: var(--ink); }
+.dz-file { cursor: pointer; }
+
+.dz-name { padding-inline: var(--sp-1); }
+.dz-msg { margin: 0; }
+.dz .flash.warn { background: var(--mid-bg); color: var(--mid); }
+.dz .flash.info { background: var(--accent-soft); color: var(--accent); }
+
+/* ───────────────────────────────────────────────────────────────── stage */
+.dz-stage {
+  display: grid;
+  /* palette · board · inspector. The board is the only elastic column: the two
+     panels hold forms, and a form that grows with the window just moves its own
+     labels further from its fields. */
+  grid-template-columns: 232px minmax(0, 1fr) 300px;
+  gap: var(--sp-3);
+  /* An explicit HEIGHT, not min-height.
+     The palette lists 37 parts and the inspector a per-bar value strip, and both
+     scroll internally — which `overflow-y: auto` cannot do unless something
+     bounds the row. On min-height the grid row grew to the palette's natural
+     1,600 px, the board stretched with it, and the canvas then auto-framed the
+     graph inside a viewport twice the height of the screen: the filter opened
+     with its first chip below the fold and «اندازهٔ مناسب» appeared to do
+     nothing, because it was fitting a board nobody could see all of. */
+  height: clamp(560px, 76vh, 980px);
+}
+/* Grid and flex children default to min-height:auto, which is "never smaller
+   than my content" — the other half of the same trap. */
+.dz-palette, .dz-inspector, .dz-board { min-height: 0; }
+
+@media (max-width: 1200px) {
+  /* The inspector drops to its own row, so the board's height has to be stated
+     for the row rather than for the whole stage. */
+  .dz-stage {
+    grid-template-columns: 200px minmax(0, 1fr);
+    grid-template-rows: clamp(460px, 62vh, 820px) auto;
+    height: auto;
+  }
+  .dz-inspector { grid-column: 1 / -1; max-height: 60vh; }
+}
+@media (max-width: 760px) {
+  .dz-stage {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto clamp(380px, 54vh, 640px) auto;
+    height: auto;
+  }
+  .dz-palette { max-height: 240px; }
+}
+
+/* ─────────────────────────────────────────────────────────────── palette */
+.dz-palette {
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+}
+.dz-search { padding: var(--sp-2); border-bottom: 1px solid var(--line-soft); }
+.dz-search input {
+  width: 100%; box-sizing: border-box;
+  background: var(--input-bg); color: var(--ink);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  padding: 6px 9px; font: inherit; font-size: var(--fs-12);
+}
+.dz-shelves { flex: 1; overflow-y: auto; padding: var(--sp-1); min-height: 0; }
+.dz-shelf { margin-bottom: 2px; }
+.dz-shelf-head {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  background: none; border: 0; cursor: pointer; color: var(--ink);
+  padding: 6px 8px; border-radius: var(--radius-sm);
+  font: inherit; font-size: var(--fs-12); font-weight: 700;
+}
+.dz-shelf-head:hover { background: var(--surface-2); }
+.dz-shelf-head em { margin-inline-start: auto; color: var(--ink-3); font-style: normal; font-weight: 500; }
+.dz-caret { color: var(--ink-3); transition: transform var(--dur-1) var(--ease); }
+.dz-caret.is-closed { transform: rotate(-90deg); }
+.dz-swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto;
+             border: 1px solid rgba(0,0,0,.18); }
+.dz-shelf-body { padding: 2px 0 6px; }
+.dz-part {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  background: none; border: 0; cursor: grab; color: var(--ink-2);
+  padding: 5px 8px 5px 22px; border-radius: var(--radius-sm);
+  font: inherit; font-size: var(--fs-12); text-align: start;
+}
+.dz-part:hover { background: var(--surface-2); color: var(--ink); }
+.dz-part:active { cursor: grabbing; }
+.dz-part-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dz-hint { padding: var(--sp-2); border-top: 1px solid var(--line-soft); line-height: 1.7; }
+
+/* ─────────────────────────────────────────────────────────────── the board */
+.dz-board {
+  /* Height comes from the grid row (.dz-stage) — stating one here as well is
+     what let the two disagree in the first place. */
+  position: relative; overflow: hidden;
+  background: var(--surface-1);
+  /* A dot grid, not a line grid: lines read as content at low zoom and compete
+     with the wires. Two layers so the 100 px majors stay visible when the 20 px
+     minors blur together. */
+  background-image:
+    radial-gradient(circle, color-mix(in srgb, var(--ink-3) 34%, transparent) 1px, transparent 1px),
+    radial-gradient(circle, color-mix(in srgb, var(--ink-3) 16%, transparent) 1px, transparent 1px);
+  background-size: 100px 100px, 20px 20px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); touch-action: none; cursor: grab;
+}
+.dz-board:active { cursor: grabbing; }
+.dz-layer { position: absolute; inset: 0; transform-origin: 0 0; }
+/* Sized and viewBox-ed by GraphCanvas to the graph's own bounds — a 1x1 box
+   with overflow:visible paints the wires but cannot be clicked. `none` here
+   keeps the empty space between wires draggable as board; .dz-wire-hit turns
+   the pointer back on for the strokes themselves. */
+.dz-wires { position: absolute; overflow: visible; pointer-events: none; }
+
+.dz-wire {
+  fill: none; stroke: var(--line-strong); stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.dz-wire.is-live { stroke: var(--accent); stroke-dasharray: 5 4; }
+.dz-wire.is-on   { stroke: var(--up); stroke-width: 2.5; }
+.dz-wire.is-off  { stroke: color-mix(in srgb, var(--down) 55%, transparent); }
+.dz-wire.is-hot  { stroke: var(--down); stroke-width: 3; }
+.dz-wire-hit {
+  fill: none; stroke: transparent; stroke-width: 14;
+  pointer-events: stroke; cursor: crosshair;
+}
+.dz-marquee {
+  fill: color-mix(in srgb, var(--accent) 10%, transparent);
+  stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3;
+}
+
+.dz-zoom {
+  position: absolute; inset-block-end: 12px; inset-inline-end: 12px;
+  display: flex; align-items: center; gap: 4px; padding: 3px 6px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 999px; box-shadow: var(--shadow-md);
+}
+.dz-zoom-pct { font-size: var(--fs-11); color: var(--ink-3); min-width: 3.2em; text-align: center; }
+.dz-blank {
+  position: absolute; inset-block-start: 40%; inset-inline: 0;
+  text-align: center; color: var(--ink-3); font-size: var(--fs-13);
+  padding-inline: var(--sp-8); pointer-events: none;
+}
+
+/* ───────────────────────────────────────────────────────────────── chips */
+.dz-node { position: absolute; cursor: move; user-select: none; }
+.dz-chip {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 100%; box-sizing: border-box;
+  padding: 0 10px; border-radius: 999px;
+  /* Near-black ink on every fill. The palette is light by design (it has to
+     read as a highlighter pen), so a themed --ink would vanish on it in dark
+     mode; this one value is deliberately theme-independent. */
+  color: #10202b; font-size: var(--fs-12); font-weight: 700;
+  border: 1px solid rgba(0, 0, 0, .16);
+  box-shadow: 0 1px 2px rgba(10, 18, 26, .18);
+  transition: box-shadow var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
+}
+.dz-chip-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: ltr; }
+/* «توضیحات» — a note, not a block.
+   Distinguished by SHAPE, never by colour: square, matte, dashed and
+   start-aligned, with no category caption under it. Colour is the one visual
+   rule this canvas has — a chip is painted its shelf's colour, in both themes —
+   and a sticky-note yellow that came from nowhere in the palette broke it. The
+   «عمومی» shelf carries a paper tone of its own instead, so the note still
+   reads as a note and still comes from somewhere. */
+.dz-chip.is-note {
+  border-radius: var(--r-2, 6px);
+  border: 1px dashed rgba(0, 0, 0, .3);
+  box-shadow: none;
+  font-weight: 500;
+  direction: rtl;
+  justify-content: flex-start;
+  text-align: start;
+}
+.dz-node.is-note:hover .dz-chip { box-shadow: 0 2px 8px rgba(10, 18, 26, .18); }
+.dz-node:hover .dz-chip { box-shadow: 0 2px 8px rgba(10, 18, 26, .28); }
+.dz-node.is-sel .dz-chip {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+  box-shadow: 0 3px 12px rgba(10, 18, 26, .3);
+}
+.dz-cat {
+  position: absolute; inset-block-start: calc(100% + 3px); inset-inline: 0;
+  text-align: center; font-size: var(--fs-11); color: var(--ink-2);
+  white-space: nowrap; pointer-events: none;
+}
+.dz-verdict {
+  position: absolute; inset-block-end: calc(100% + 3px); inset-inline-start: 0;
+  font-size: var(--fs-11); font-weight: 700; padding: 0 5px;
+  border-radius: 999px; white-space: nowrap; pointer-events: none;
+}
+.dz-verdict.is-on  { background: var(--up-bg);   color: var(--up); }
+.dz-verdict.is-off { background: var(--down-bg); color: var(--down); }
+.dz-verdict.is-na  { background: var(--surface-2); color: var(--ink-3); }
+.dz-verdict.is-num { background: var(--surface-2); color: var(--ink-2); direction: ltr; }
+
+/* ─────────────────────────────────────────────────────────────── ports */
+.dz-port {
+  position: absolute; width: 18px; height: 18px; margin-block-start: -9px;
+  display: grid; place-items: center; cursor: crosshair; z-index: 2;
+}
+.dz-in  { inset-inline-start: -9px; }
+.dz-out { inset-inline-end: -9px; }
+.dz-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--panel); border: 2px solid var(--ink-3);
+  transition: transform var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.dz-in.is-multi .dz-dot { border-radius: 3px; }   /* «And» takes many wires */
+.dz-port:hover .dz-dot { transform: scale(1.45); border-color: var(--accent); }
+/* While a wire is being pulled every input dot enlarges, so the target is
+   obvious before the cursor is on top of it. */
+.dz-node.is-wiring .dz-in .dz-dot { border-color: var(--accent); transform: scale(1.2); }
+.dz-plabel {
+  position: absolute; font-size: var(--fs-11); color: var(--ink-2);
+  font-weight: 600; pointer-events: none; direction: ltr;
+}
+.dz-in  .dz-plabel { inset-inline-end: 20px; }
+.dz-out .dz-plabel { inset-inline-start: 20px; }
+
+/* ─────────────────────────────────────────────────────────── inspector */
+.dz-inspector {
+  display: flex; flex-direction: column; gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  overflow-y: auto;
+}
+.dz-insp-head { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.dz-insp-title { font-weight: 800; font-size: var(--fs-14); }
+.dz-insp-expr {
+  display: inline-block; margin-block-start: 3px; direction: ltr;
+  background: var(--code-bg); border-radius: var(--radius-sm);
+  padding: 1px 6px; font-size: var(--fs-12); color: var(--ink-2);
+}
+.dzr-rail-bell { font-size: var(--fs-11); font-weight: 400; opacity: .85; }
+.dz-insp-acts { margin-inline-start: auto; display: flex; gap: 4px; flex: 0 0 auto; }
+.dz-insp-help { line-height: 1.8; margin: 0; }
+.dz-fields { display: flex; flex-direction: column; gap: var(--sp-2); }
+.dz-field { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-12); }
+.dz-field > span { color: var(--ink-2); }
+.dz-field select, .dz-field input, .dz-field textarea {
+  max-width: none; width: 100%; box-sizing: border-box;
+}
+/* The formula and the note both hold text that wraps. LTR with a monospace
+   face for the formula is not a style choice: `(high-low)/final*100` typed into
+   an RTL field puts the closing paren on the wrong side of the expression. */
+.dz-area {
+  font: 500 var(--fs-12) / 1.7 var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  direction: ltr; text-align: start; resize: vertical; min-height: 62px;
+  padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-2, 6px);
+  background: var(--surface-2, var(--surface)); color: var(--ink);
+}
+.dz-area:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.dz-insp-empty { display: flex; flex-direction: column; gap: var(--sp-3); }
+.dz-keys { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.dz-keys kbd {
+  background: var(--code-bg); border: 1px solid var(--line);
+  border-radius: 4px; padding: 0 4px; font-size: var(--fs-11);
+}
+
+.dz-tails { border-top: 1px solid var(--line-soft); padding-block-start: var(--sp-2); }
+.dz-tails-head { font-size: var(--fs-12); font-weight: 700; margin-block-end: var(--sp-2); }
+.dz-tail { margin-block-end: var(--sp-2); }
+.dz-tail-l { font-size: var(--fs-11); color: var(--ink-3); }
+.dz-tail-v { display: block; direction: ltr; font-size: var(--fs-12); }
+/* The last twelve bars, oldest→newest left→right — so it reads the same way
+   the candles do on the chart, inside an otherwise right-to-left panel. */
+.dz-tail-row { display: flex; gap: 2px; direction: ltr; overflow-x: auto; padding-block: 2px; }
+.dz-tail-row b {
+  flex: 0 0 auto; min-width: 34px; text-align: center;
+  background: var(--surface-2); border-radius: 3px;
+  padding: 1px 3px; font-size: var(--fs-11); font-weight: 600; color: var(--ink-2);
+}
+.dz-tail-row b.is-on  { background: var(--up-bg);   color: var(--up); }
+.dz-tail-row b.is-off { background: var(--down-bg); color: var(--down); }
+
+/* ───────────────────────────────────────────────────────────── results */
+.dz-results { margin: 0; }
+.dz-pad { padding: var(--sp-3); margin: 0; }
+.dz-count { color: var(--ink-3); font-weight: 500; font-size: var(--fs-12); margin-inline-start: 6px; }
+.dz-results table.grid tbody tr { cursor: pointer; }
+.dz-results table.grid tbody tr.is-open { background: var(--accent-soft); }
+.dz-why-h { width: 1%; }
+.dz-why-c { text-align: center; }
+
+@media print { .dz-bar, .dz-palette, .dz-inspector, .dz-zoom { display: none; } }
+
+/* The bar the filter actually fired on, inside the value strip. Marked rather
+   than coloured: the cell already carries an up/down tint for a boolean, and a
+   second colour on top of that would be unreadable. */
+.dz-tail-row b.is-at {
+  outline: 2px solid var(--accent); outline-offset: -2px; font-weight: 800;
+}
+
+/* ===========================================================================
+   /filter-designer/result — the page «اجرا» lands on
+   ---------------------------------------------------------------------------
+   The table is the page here, so the diagram that produced it is a collapsible
+   panel above it rather than a column beside it. Everything shares the .dz
+   toolbar and chip rules above; only the layout differs.
+   =========================================================================== */
+.dzr-bar { position: sticky; top: calc(var(--topbar-h) + 8px); z-index: 5; }
+.dzr-graph { margin: 0; }
+
+/* A fixed, modest height. The read-only diagram is a reference, not a
+   workspace: given the stage's 76vh it would push the table — the thing the
+   user came for — entirely below the fold. */
+.dzr-board {
+  height: clamp(300px, 42vh, 520px);
+  padding: var(--sp-2);
+  border-block-start: 1px solid var(--line-soft);
+}
+.dzr-board .dz-board { height: 100%; }
+
+/* The same explanation as the chips carry, for a reader who wants the numbers
+   in one column instead of scattered across a diagram. */
+.dzr-explain { max-height: 300px; overflow-y: auto; border-block-start: 1px solid var(--line-soft); }
+.dzr-expr { direction: ltr; text-align: start; color: var(--ink-2); }
+
+/* ── read-only canvas ─────────────────────────────────────────────────────
+   Chips keep every visual cue (fill, caption, ports, badges) and lose every
+   interactive one. A diagram that looks draggable and is not reads as broken. */
+.dz-board.is-readonly { cursor: grab; }
+.dz-board.is-readonly:active { cursor: grabbing; }
+.dz-node.is-ro { cursor: inherit; }
+.dz-node.is-ro .dz-port { cursor: inherit; }
+.dz-node.is-ro:hover .dz-chip { box-shadow: 0 1px 2px rgba(10, 18, 26, .18); }
+.dz-node.is-ro .dz-port:hover .dz-dot { transform: none; border-color: var(--ink-3); }
+
+@media (max-width: 760px) {
+  .dzr-bar { position: static; }
+  .dzr-board { height: clamp(260px, 46vh, 420px); }
+}
+
+/* The two virtualizer spacer rows must not inherit the pinned-first-column
+   rules — their single cell spans the whole width, and sticking it to the
+   inline start paints an empty band over the columns while the table scrolls
+   sideways. style.css does the same for .perf-grid. */
+.dzr-table tbody tr.vpad td { position: static; background: none; box-shadow: none; }
+
+/* ── «فیلترهای دیگر»: the rail on the results page ───────────────────────
+   Running a screener is never one question. The rail turns "what does that
+   other filter say" from three page loads into one click. First grid column,
+   so in this RTL page it sits on the right, exactly where the palette sits on
+   the editor — one place for "things you can pick". */
+.dzr-body {
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+}
+.dzr-main { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+
+.dzr-rail {
+  position: sticky; top: calc(var(--topbar-h) + 78px);
+  display: flex; flex-direction: column;
+  max-height: calc(100vh - var(--topbar-h) - 96px); overflow-y: auto;
+  padding: var(--sp-2);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.dzr-rail-head {
+  font-weight: 800; font-size: var(--fs-13);
+  padding: 2px 6px var(--sp-2); border-bottom: 1px solid var(--line-soft);
+}
+.dzr-rail-sub {
+  font-size: var(--fs-11); color: var(--ink-3); font-weight: 700;
+  padding: var(--sp-3) 6px 4px;
+}
+.dzr-rail-item {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: 0; cursor: pointer; color: var(--ink-2);
+  padding: 6px 8px; border-radius: var(--radius-sm);
+  font: inherit; font-size: var(--fs-12); text-align: start;
+}
+.dzr-rail-item:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
+.dzr-rail-item:disabled { opacity: .5; cursor: default; }
+/* The one currently on screen. A rail that does not say which row produced the
+   table below it is a list of links, not a switcher. */
+.dzr-rail-item.is-on {
+  background: var(--accent-soft); color: var(--accent); font-weight: 700;
+}
+.dzr-rail-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dzr-rail-kind { margin-inline-start: auto; color: var(--ink-3); font-size: var(--fs-11); }
+.dzr-rail-hint {
+  padding: var(--sp-2) 6px 0; margin: var(--sp-2) 0 0; line-height: 1.8;
+  border-top: 1px solid var(--line-soft);
+}
+
+@media (max-width: 1000px) {
+  /* Stacked, and no longer sticky: a rail pinned above the table on a short
+     screen would cover the thing it is there to change. */
+  .dzr-body { grid-template-columns: minmax(0, 1fr); }
+  .dzr-rail { position: static; max-height: 220px; }
+}
+
+/* ── the palette's second level ──────────────────────────────────────────
+   Seventy blocks need two levels; these are the sub-shelves inside a category.
+   Deliberately quieter than the category header — indented, no swatch, lighter
+   weight — so the eye still reads the coloured category rows as the structure
+   and these as its contents. */
+.dz-subhead {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: 0; cursor: pointer; color: var(--ink-2);
+  padding: 4px 8px 4px 16px; margin-block-start: 2px;
+  border-radius: var(--radius-sm);
+  font: inherit; font-size: var(--fs-11); font-weight: 700;
+}
+.dz-subhead:hover { background: var(--surface-2); color: var(--ink); }
+.dz-subhead em { margin-inline-start: auto; color: var(--ink-3); font-style: normal; font-weight: 500; }
+.dz-subhead .dz-caret { font-size: var(--fs-11); }
+/* Parts under a sub-shelf indent one more step; parts in a category that has no
+   sub-shelves keep the original indent, which .dz-part already sets. */
+.dz-subbody .dz-part { padding-inline-start: 30px; }

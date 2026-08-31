@@ -22,13 +22,21 @@ export default defineConfig({
     target: "es2019",
     sourcemap: true,
     rollupOptions: {
-      // One entry per island: market.html (order 08), performance.html, and one
-      // shared by the two scan pages (filters.html / strategies.html).
+      // One entry per island: market.html (order 08), performance.html, one
+      // shared by the two scan pages (filters.html / strategies.html), the
+      // screener, and the filter designer.
       input: {
         market: resolve(__dirname, "src/market.ts"),
         perf: resolve(__dirname, "src/perf.ts"),
         scan: resolve(__dirname, "src/scan.ts"),
         screener: resolve(__dirname, "src/screener.ts"),
+        // «طراحی فیلتر» — the node-graph filter designer (filter_engine.py),
+        // and the results page «اجرا» navigates to. Two entries rather than one
+        // because they share only the graph model and the canvas: the editor
+        // carries the palette, the inspector and undo, none of which the results
+        // page has any use for.
+        designer: resolve(__dirname, "src/designer.ts"),
+        designer_result: resolve(__dirname, "src/designer_result.ts"),
       },
       output: {
         // Entry names stay FIXED because the templates stamp them with

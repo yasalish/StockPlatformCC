@@ -169,6 +169,18 @@ def _worker_argv(role=FETCH):
         # accepts tasks and then fails them. It costs concurrency — one symbol
         # at a time — which is why a full market rebuild belongs on the Compose
         # stack, where the worker runs prefork with concurrency 4.
+        #
+        # It costs one more thing, and this one is silent: celery_app.py sets
+        # task_time_limit / task_soft_time_limit, and BOTH ARE INERT UNDER SOLO.
+        # Time limits are implemented by the prefork pool killing the child that
+        # runs the task; solo runs it inline in the consumer thread and has no
+        # child to kill. A task that blocks therefore blocks the whole worker for
+        # ever, and because the consumer is the same thread, the queue stops
+        # being drained at the same instant — which is what a stalled TSETMC
+        # socket did once for 73 minutes while /update reported «بازیابی خودکار
+        # در جریان است» at a worker that could no longer receive anything.
+        # tse_fetch._install_http_timeout() is the protection that actually
+        # applies here; ensure_worker() logs the gap below.
         pool = "solo" if os.name == "nt" else "prefork"
     # -n gives the two workers distinct node names. Without it both are
     # celery@HOSTNAME, and Celery treats a duplicate node name as the same
@@ -251,6 +263,13 @@ def ensure_worker(role=FETCH, timeout=None):
             fh.write(str(proc.pid))
     except OSError:
         pass                 # the ping is still there as a second opinion
+    if "--pool=solo" in _worker_argv(role):
+        log.warning(
+            "celery worker uses the solo pool — task_time_limit does NOT apply; "
+            "a blocking call would wedge this worker until it is restarted. The "
+            "fetch path is protected by TSE_HTTP_TIMEOUT (tse_fetch.py) instead.",
+            extra={"role": role, "tse_http_timeout":
+                   os.environ.get("TSE_HTTP_TIMEOUT", "10,45")})
     log.info("celery worker starting",
              extra={"role": role, "queues": _queues(role),
                     "worker_pid": proc.pid,

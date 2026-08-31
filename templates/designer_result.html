@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · نتیجهٔ فیلتر{% endblock %}
+{% block body_class %}designer-page{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">نتیجهٔ فیلتر</h1>
+    <p class="page-sub">
+      فیلتری که در «طراحی فیلتر» ساخته‌اید روی همهٔ نمادهای بازار اجرا شد. برای دیدن
+      اینکه هر شرط روی یک نماد چه مقداری داشته، روی «چرا؟» همان ردیف کلیک کنید.
+    </p>
+  </div>
+</div>
+
+{# ── the island. The graph itself is NOT rendered here: it comes from the
+   database when the URL names a saved filter, and otherwise from the draft the
+   canvas left in this browser's localStorage (frontend/src/designer/draft.ts).
+   That is why this shell carries an id and nothing else. #}
+<div id="designer-result" hidden
+     data-filter-id="{{ filter_id or '' }}"
+     data-kind="{{ kind }}"
+     data-detail-base-stock="{{ url_for('stock_detail', stock_id=0)[:-1] }}"
+     data-detail-base-etf="{{ url_for('etf_detail', etf_id=0)[:-1] }}"></div>
+
+<p class="muted note bn-island-noscript">در حال اجرای فیلتر…</p>
+
+<section class="panel bn-island-fallback" hidden>
+  <div class="panel-head"><h2>نتیجهٔ فیلتر</h2></div>
+  <p class="muted note">
+    نتیجه بارگذاری نشد. صفحه را دوباره بارگذاری کنید، یا به
+    <a href="{{ url_for('filter_designer_page') }}">طراحی فیلتر</a> برگردید و دوباره
+    «اجرا» بزنید.
+  </p>
+</section>
+
+<p class="muted small note disclaimer">
+  ⚠ نتیجهٔ فیلتر فقط از دادهٔ قیمت گذشته محاسبه می‌شود و توصیهٔ خرید یا فروش نیست.
+</p>
+{% endblock %}
+
+{% block scripts %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/designer.css') }}?v={{ asset_version('css/designer.css') }}">
+<script type="module"
+        src="{{ url_for('static', filename='dist/designer_result.js') }}?v={{ asset_version('dist/designer_result.js') }}"></script>
+{% endblock %}

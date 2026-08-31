@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · طراحی فیلتر{% endblock %}
+{% block body_class %}designer-page{% endblock %}
+
+{% block content %}
+{#  The canvas wants the full width of the monitor, not the 1400 px reading
+    column the tables use — a graph is wide by nature. `data-wide` is the
+    attribute the settings page already uses for exactly this, so the two do not
+    fight over the container width. #}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">طراحی فیلتر — فیلتر خودتان را بسازید</h1>
+    <p class="page-sub">
+      شرط‌های تحلیل تکنیکال را مثل یک نمودار جعبه‌ای بچینید: دادهٔ قیمت و اندیکاتورها
+      را از پالت سمت راست روی بوم بیندازید، خروجی هر جعبه را به ورودی جعبهٔ بعد وصل
+      کنید و در پایان همه را به «خروجی فیلتر» برسانید. دکمهٔ «اجرا» فیلتر را روی همهٔ
+      نمادهای بازار اجرا می‌کند و صفحهٔ <b>نتیجهٔ فیلتر</b> را با فهرست کامل باز می‌کند.
+    </p>
+  </div>
+</div>
+
+{# ── the island: palette, canvas and inspector. The catalogue comes from
+   /api/designer/catalog. The RESULTS are not here — «اجرا» navigates to
+   /filter-designer/result, handing the graph over through the same localStorage
+   draft that already survives a reload (frontend/src/designer/draft.ts). #}
+<div id="designer-app" hidden
+     data-kind="{{ kind }}"
+     data-detail-base-stock="{{ url_for('stock_detail', stock_id=0)[:-1] }}"
+     data-detail-base-etf="{{ url_for('etf_detail', etf_id=0)[:-1] }}"></div>
+
+<p class="muted note bn-island-noscript">در حال بارگذاری طراح فیلتر…</p>
+
+<section class="panel bn-island-fallback" hidden>
+  <div class="panel-head"><h2>طراحی فیلتر</h2></div>
+  <p class="muted note">
+    طراح فیلتر بارگذاری نشد. صفحه را دوباره بارگذاری کنید. اگر مرورگرتان
+    جاوااسکریپت را مسدود کرده است، این صفحه کار نمی‌کند — فیلترهای آمادهٔ
+    <a href="{{ url_for('filters_page') }}">صفحهٔ فیلترها</a> بدون جاوااسکریپت هم
+    فهرست می‌شوند.
+  </p>
+</section>
+
+<p class="muted small note disclaimer">
+  ⚠ نتیجهٔ فیلتر فقط از دادهٔ قیمت گذشته محاسبه می‌شود و توصیهٔ خرید یا فروش نیست.
+  اندیکاتورها روی «قیمت پایانی تعدیل‌شده» و الگوهای کندلی روی «باز/سقف/کف/بستهٔ
+  تعدیل‌شده» محاسبه می‌شوند.
+</p>
+{% endblock %}
+
+{% block scripts %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/designer.css') }}?v={{ asset_version('css/designer.css') }}">
+<script type="module"
+        src="{{ url_for('static', filename='dist/designer.js') }}?v={{ asset_version('dist/designer.js') }}"></script>
+{% endblock %}

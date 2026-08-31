@@ -187,6 +187,20 @@ services:
       REDIS_PROTOCOL: "3"
       ANALYTICS_CACHE_TTL: ${ANALYTICS_CACHE_TTL:-21600}
 
+      # --- «طراحی فیلتر» (filter_engine.py) ---------------------------------
+      # How many market-wide filter runs ONE web worker will do at a time, and
+      # how long a queued one waits for its turn. This is a CPU budget, not a
+      # connection limit: a run is ~800 symbols x ~400 bars of Python in the
+      # process and never releases the GIL, so raising it past the box's cores
+      # makes every run slower rather than more of them possible.
+      #
+      # DESIGNER_RUN_WAIT must stay BELOW nginx's proxy_read_timeout
+      # (deploy/nginx/snippets/proxy-web.conf, 60s) with the run itself left
+      # over — otherwise a queued user gets nginx's 504 instead of the
+      # «چند لحظه بعد دوباره تلاش کنید» this is here to give them.
+      DESIGNER_RUN_SLOTS: ${DESIGNER_RUN_SLOTS:-2}
+      DESIGNER_RUN_WAIT: ${DESIGNER_RUN_WAIT:-25}
+
       # --- Celery (order 06) -------------------------------------------------
       # The web process only ENQUEUES; the worker service does the fetching. It
       # still needs the broker settings to put a message on the queue, and they
@@ -386,6 +400,13 @@ services:
       CELERY_BROKER_DB: "1"
       CELERY_RESULT_DB: "2"
       CELERY_BATCH_SIZE: ${CELERY_BATCH_SIZE:-25}
+      # "connect,read" seconds for every TSETMC request. finpy_tse passes no
+      # timeout of its own, and a requests call without one waits for ever — see
+      # tse_fetch._install_http_timeout(). Prefork here means task_time_limit is
+      # a real backstop, unlike the solo pool a Windows dev box has to use, but
+      # this is still what turns a stalled socket into a retryable failure
+      # instead of a lost 30 minutes.
+      TSE_HTTP_TIMEOUT: ${TSE_HTTP_TIMEOUT:-10,45}
       APP_STATE_DIR: /var/lib/boursenegar
       # --- observability (order 07) ----------------------------------------
       LOG_FORMAT: ${LOG_FORMAT:-json}

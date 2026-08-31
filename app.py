@@ -33,6 +33,7 @@ import cache
 import prefs
 import reports
 import market
+import filter_engine
 
 # Structured JSON logging before anything else logs. Every module below uses
 # logging.getLogger(); this is what turns those records into one-line JSON with
@@ -136,6 +137,14 @@ try:
     jobs.ensure_tables()
 except Exception as _e:
     log.error("could not ensure update_job tables", exc_info=True)
+
+# «طراحی فیلتر» — the custom_filters table, for the same reason and on the same
+# terms as the two above: a developer laptop that has never seen Alembic must
+# still be able to save a designed filter.
+try:
+    filter_engine.ensure_tables()
+except Exception as _e:
+    log.error("could not ensure custom_filters table", exc_info=True)
 
 # The analytics cache is in Redis (cache.py) so all Gunicorn workers share one
 # copy and one invalidation. Probe it once at startup purely so the operator sees
@@ -884,6 +893,175 @@ def screener_page():
     if kind not in ("stock", "etf"):
         kind = "stock"
     return render_template("screener.html", kind=kind)
+
+
+# ---------------------------------------------------------------------------
+# «طراحی فیلتر» — the visual filter designer (filter_engine.py)
+#
+# The page is a shell; everything happens in the island. Three of the four
+# endpoints take POST with the graph in the body rather than in the query
+# string: a real graph is several kilobytes of JSON and would not survive a URL,
+# and it is not a bookmarkable view anyway — the bookmark is the SAVED filter.
+# ---------------------------------------------------------------------------
+#: One market-wide run is ~800 symbols × 400 bars of Python. Two of them at once
+#: on a 2-worker box is a page that stops responding, so runs queue instead of
+#: piling up. The wait is bounded: a caller that cannot get in within
+#: DESIGNER_RUN_WAIT seconds is told to try again rather than held forever.
+_designer_run_lock = threading.Semaphore(int(os.environ.get("DESIGNER_RUN_SLOTS", "2")))
+DESIGNER_RUN_WAIT = float(os.environ.get("DESIGNER_RUN_WAIT", "25"))
+
+
+@app.route("/filter-designer")
+def filter_designer_page():
+    """«طراحی فیلتر» — build a screening rule as a graph and run it on the market.
+
+    The nineteen filters on /filters and the sixteen strategies on /strategies
+    are ours; this is where a user writes their own, without us shipping code."""
+    kind = request.args.get("kind", "stock")
+    if kind not in ("stock", "etf"):
+        kind = "stock"
+    return render_template("designer.html", kind=kind)
+
+
+@app.route("/filter-designer/result")
+def filter_designer_result_page():
+    """The page «اجرا» lands on — the matches, in a table of their own.
+
+    The results used to live in a panel under the canvas, where the table that
+    is the entire point of running a filter got the bottom third of the screen.
+
+    The shell knows nothing about the graph. When the URL names a saved filter
+    the island reads it from the database (which is what makes that URL a
+    bookmark worth keeping); otherwise it reads the draft the canvas left in
+    localStorage. Neither belongs in this request: a graph is kilobytes of JSON,
+    too big for a query string and too big for a signed session cookie, and a
+    server-side handoff token would buy an expiry and an "this result expired"
+    screen for a user who left the tab open over lunch."""
+    kind = request.args.get("kind", "stock")
+    if kind not in ("stock", "etf"):
+        kind = "stock"
+    try:
+        filter_id = int(request.args.get("filter", "") or 0) or None
+    except ValueError:
+        filter_id = None
+    return render_template("designer_result.html", kind=kind, filter_id=filter_id)
+
+
+@app.route("/api/designer/catalog")
+def api_designer_catalog():
+    """The node palette, the ready-made examples, and the group lists for the
+    scope bar. One request; the island caches it for the life of the page."""
+    args = request.args.to_dict(flat=True)
+    scope = _scan_scope(args)
+    cat = filter_engine.catalog()
+    return jsonify({
+        **cat,
+        "examples": [{"key": e["key"], "name": e["name"], "desc": e["desc"],
+                      "graph": e["graph"]} for e in filter_engine.EXAMPLES],
+        **scope,
+        "authenticated": current_user.is_authenticated,
+        "as_of": db.latest_date(scope["kind"]),
+    })
+
+
+def _designer_body():
+    """The POSTed JSON, or a 400 the island can display. Kept separate because
+    all three POST endpoints need the identical five lines of validation."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return None, (jsonify({"error": "بدنهٔ درخواست JSON نیست."}), 400)
+    kind = body.get("kind")
+    if kind not in ("stock", "etf"):
+        kind = "stock"
+    return {"graph": body.get("graph"), "kind": kind,
+            "group": body.get("group") or None,
+            "subgroup": body.get("subgroup") or None,
+            "ticker": (body.get("ticker") or "").strip(),
+            "name": body.get("name") or "", "id": body.get("id"),
+            "description": body.get("description") or ""}, None
+
+
+@app.route("/api/designer/run", methods=["POST"])
+def api_designer_run():
+    """Evaluate a graph across the whole market and return the matches."""
+    body, err = _designer_body()
+    if err:
+        return err
+    if not _designer_run_lock.acquire(timeout=DESIGNER_RUN_WAIT):
+        return jsonify({"error": "سامانه در حال اجرای فیلترهای دیگری است؛ "
+                                 "چند لحظه بعد دوباره تلاش کنید."}), 429
+    t0 = time.perf_counter()
+    try:
+        out = filter_engine.run(body["graph"], kind=body["kind"],
+                                group=body["group"], sub_group=body["subgroup"])
+    except filter_engine.GraphError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception:
+        log.exception("designer run failed")
+        return jsonify({"error": "اجرای فیلتر با خطا روبه‌رو شد."}), 500
+    finally:
+        _designer_run_lock.release()
+
+    # No `watched` / `etf_type_colors` here, unlike /api/screener: the result
+    # table has no star and no type badge, and a query per run whose answer is
+    # discarded is worse than a missing feature. The rows link through to the
+    # security page, where starring already works.
+    return jsonify({**out, "kind": body["kind"], "group": body["group"],
+                    "subgroup": body["subgroup"],
+                    "server_ms": round((time.perf_counter() - t0) * 1000.0, 1)})
+
+
+@app.route("/api/designer/explain", methods=["POST"])
+def api_designer_explain():
+    """Every node's last few values for ONE symbol — «چرا این نماد آمد؟».
+
+    Cheap (one symbol, not eight hundred) so it is deliberately outside the run
+    semaphore: inspecting a result must stay possible while a scan is queued."""
+    body, err = _designer_body()
+    if err:
+        return err
+    if not body["ticker"]:
+        return jsonify({"error": "نماد مشخص نشده است."}), 400
+    try:
+        return jsonify(filter_engine.explain(body["graph"], body["kind"], body["ticker"]))
+    except filter_engine.GraphError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception:
+        log.exception("designer explain failed")
+        return jsonify({"error": "محاسبهٔ جزئیات با خطا روبه‌رو شد."}), 500
+
+
+@app.route("/api/designer/filters", methods=["GET", "POST"])
+@login_required
+def api_designer_filters():
+    """The signed-in user's saved graphs. GET lists them (without the graphs —
+    the picker shows names), POST inserts or updates one."""
+    if request.method == "GET":
+        return jsonify({"filters": filter_engine.list_filters(current_user.id)})
+    body, err = _designer_body()
+    if err:
+        return err
+    try:
+        fid = filter_engine.save_filter(
+            current_user.id, body["name"], body["kind"], body["graph"],
+            description=body["description"], filter_id=body["id"])
+    except filter_engine.GraphError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"id": fid, "filters": filter_engine.list_filters(current_user.id)})
+
+
+@app.route("/api/designer/filters/<int:filter_id>", methods=["GET", "DELETE"])
+@login_required
+def api_designer_filter(filter_id):
+    if request.method == "DELETE":
+        n = filter_engine.delete_filter(current_user.id, filter_id)
+        if not n:
+            abort(404)
+        return jsonify({"ok": True, "filters": filter_engine.list_filters(current_user.id)})
+    row = filter_engine.get_filter(current_user.id, filter_id)
+    if not row:
+        abort(404)
+    return jsonify(row)
 
 
 @app.route("/stock/<int:stock_id>")

@@ -128,6 +128,89 @@ def _bypass_proxy_for_tsetmc():
             os.environ[name] = ",".join(filter(None, [current, *missing]))
 
 
+# ---------------------------------------------------------------------------
+# A DEFAULT HTTP TIMEOUT
+#
+# finpy_tse calls `requests.get(url, headers=headers)` for every symbol and never
+# passes `timeout`, and requests without a timeout waits FOREVER. That is not a
+# theoretical risk here: a TCP connection to TSETMC that stalls without a reset —
+# routine on this network, where a filtering middlebox blackholes the connection
+# instead of refusing it — parks the call in a socket read that no amount of
+# waiting ends.
+#
+# What that cost, once, in full: a worker claimed «طلوع», disappeared into
+# requests, and was still there 73 minutes later. Because the Windows worker runs
+# `--pool=solo`, the task executes inline in the consumer thread, so the worker
+# stopped taking messages at the same moment — 212 batches queued up in Redis
+# behind it and the /update page sat at 197/293 reporting «بازیابی خودکار در
+# جریان است» while the automatic recovery re-queued tickers that nothing was
+# left to consume.
+#
+# Celery's `task_time_limit` (celery_app.py, 1800 s) does NOT cover this. Time
+# limits are implemented by the PREFORK pool, which kills the child running the
+# task; the solo pool has no child to kill, so on Windows that ceiling is
+# configured and inert. The timeout has to live at the HTTP layer, which is the
+# one place that works on every pool and every platform.
+#
+# `(connect, read)` — the read half is "no bytes for N seconds", not a deadline
+# for the whole download, so a slow but progressing response is not cut off. A
+# timeout raises inside fetch()'s `except Exception`, becomes a
+# TransientFetchError, and is retried and recorded like any other flaky symbol.
+# ---------------------------------------------------------------------------
+def _http_timeout():
+    raw = os.environ.get("TSE_HTTP_TIMEOUT", "10,45")
+    try:
+        connect, read = (float(x) for x in raw.split(","))
+        return (connect, read)
+    except (ValueError, TypeError):
+        return (10.0, 45.0)
+
+
+_TIMEOUT_INSTALLED = False
+
+
+def _install_http_timeout():
+    """Give every timeout-less `requests` call in this process a default one.
+
+    Patched at `Session.request`, which is the single funnel every entry point
+    goes through — `requests.get`, `Session.get`, all of them. It only fills in a
+    timeout that was not supplied, so a caller that passes its own still wins,
+    and it is installed once and never removed: restoring it around each fetch
+    would open a window where a concurrent call is unprotected, for no gain.
+
+    Monkey-patching a third-party library is not the first choice. The
+    alternative — asking finpy_tse to accept a timeout — is a change to a package
+    this project does not own, and `socket.setdefaulttimeout()`, the other way to
+    do it without touching finpy, is process-global: it would also apply to
+    psycopg2's connections and to the blocking Redis read Celery's broker sits
+    in, and break both.
+    """
+    global _TIMEOUT_INSTALLED
+    if _TIMEOUT_INSTALLED:
+        return
+    try:
+        import requests
+    except ImportError:                            # finpy is absent too; fetch() reports it
+        return
+    original = requests.Session.request
+    if getattr(original, "_bn_default_timeout", False):
+        _TIMEOUT_INSTALLED = True
+        return
+    timeout = _http_timeout()
+
+    def request(self, method, url, *args, **kwargs):
+        # `timeout` is the 7th positional parameter after `url`
+        # (params, data, headers, cookies, files, auth, timeout), so anything
+        # shorter than that cannot have supplied one positionally.
+        if "timeout" not in kwargs and len(args) < 7:
+            kwargs["timeout"] = timeout
+        return original(self, method, url, *args, **kwargs)
+
+    request._bn_default_timeout = True
+    requests.Session.request = request
+    _TIMEOUT_INSTALLED = True
+
+
 def fetch(kind, ticker, start, end, full=False):
     """Pull one symbol's history from TSETMC. Returns a DataFrame.
 
@@ -137,6 +220,9 @@ def fetch(kind, ticker, start, end, full=False):
     # Before finpy builds its session: requests reads the proxy environment at
     # request time, but a session created earlier can cache the resolution.
     _bypass_proxy_for_tsetmc()
+    # …and before it makes a request, so no call can wait for ever. See the
+    # comment on _install_http_timeout above for what that cost when it could.
+    _install_http_timeout()
     try:
         import finpy_tse as fpy
         import pandas as pd

@@ -20,6 +20,12 @@ the previous collection of separate Streamlit scripts. Same PostgreSQL database
   خانه، با اندازهٔ متناسب با ارزش معاملات و رنگ متناسب با بازدهٔ دورهٔ انتخابی.
 - **تنظیمات** (`/settings`) — پوسته (شش تا)، ارقام فارسی/لاتین، چگالی و راه‌راه‌بودن
   جدول، ضخامت نوار پیمایش، اندازهٔ قلم، کوررنگی، به‌روزرسانی خودکار و…
+- **طراحی فیلتر** (`/filter-designer`) — فیلتر شخصی، به‌صورت گرافیکی: جعبه‌های
+  دادهٔ قیمت، اندیکاتور، محاسبه، مقایسه، تقاطع و منطق را روی بوم به هم وصل می‌کنید.
+- **نتیجهٔ فیلتر** (`/filter-designer/result`) — صفحه‌ای که «اجرا» به آن می‌رود:
+  جدول تمام‌عرض نمادهای منطبق، با خروجی CSV، فهرست «فیلترهای دیگر» در سمت راست
+  برای اجرای یک‌کلیکی بقیهٔ فیلترها، و دکمهٔ «چرا؟» که مقدار همهٔ جعبه‌ها را برای یک
+  نماد روی نمودار همان فیلتر نشان می‌دهد.
 - **راهنما** (`/help`) و **درباره** (`/about`).
 - **جستجو** — جستجوی زندهٔ نماد/نام (سهام + صندوق) در نوار بالا.
 
@@ -662,6 +668,8 @@ reason — they were shipping between 1 MB and 2.2 MB of markup per navigation:
 | /performance | `perf.ts` → `PerfPanel` / `PerfGrid` | `/api/performance/<kind>` | window-virtualized, two-row سقف/کف header |
 | /filters, /strategies | `scan.ts` → `ScanPanel` / `ScanSection` | `/api/scan/<what>/<kind>` | sections mount when scrolled to |
 | /screener | `screener.ts` → `ScreenerPanel` / `ScreenerGrid` | `/api/screener/<kind>` | window-virtualized ranked table |
+| /filter-designer | `designer.ts` → `DesignerApp` / `GraphCanvas` | `/api/designer/*` | node-graph editor; not a table at all |
+| /filter-designer/result | `designer_result.ts` → `ResultApp` | `/api/designer/run`, `/explain` | the matches, plus the same canvas read-only |
 
 `watchlist.html` and the remaining templates still use `BN.initTable`, which is
 the right tool for a table of a few dozen rows.
@@ -748,6 +756,364 @@ python verify_order08.py --no-browser   # skip the render comparison
 
 It renders /stocks twice in Chrome — once with the pre-conversion template kept
 at `.tools/market.html.pre08`, once with the converted one — and compares them.
+
+## طراحی فیلتر / The visual filter designer
+
+`/filters` ships nineteen technical filters and `/strategies` sixteen strategies,
+and both are Python we wrote. A user who wants «کندل پوشای صعودی، ولی فقط وقتی
+حجم بالای میانگین ۲۰ روزه است» has to ask for a code change. `/filter-designer`
+is where they draw it instead.
+
+### Shape
+
+```
+templates/designer.html         the editor's shell
+templates/designer_result.html  the results page's shell
+frontend/src/designer.ts        entry — the editor
+frontend/src/designer_result.ts entry — the results page
+frontend/src/designer/
+    DesignerApp.vue          state, toolbar, undo, save, examples
+    GraphCanvas.vue          the pan/zoom board: SVG wires + absolute chips
+                             (`readonly` for the results page's copy)
+    NodeChip.vue             one box — caption, category, ports, verdict badge
+    PalettePanel.vue         the parts, grouped and coloured by category
+    InspectorPanel.vue       the selected chip's parameters, and its values
+    ResultApp.vue            the results page: scope bar, diagram, table
+    ResultPanel.vue          the matches, in the platform's own table chrome
+    graph.ts                 pure model: geometry, wire routing, layout, lint
+    draft.ts                 the localStorage handoff between the two pages
+static/css/designer.css      everything under .dz / .dzr
+filter_engine.py            the catalogue, the interpreter, and the scan
+verify_designer.py          200+ checks: every block run against the live
+                            market at every dropdown value, the frames
+                            cross-checked against a hand-built weekly series,
+                            and a browser that drives both pages
+```
+
+### Two pages, not one
+
+«اجرا» **navigates**. The results first lived in a panel under the canvas, where
+the list that is the entire point of running a filter got the bottom third of
+the screen while the editor kept the rest. `/filter-designer/result` gives it the
+whole page: full-width sortable table, «کپی نمادها», CSV, and a scope bar that
+re-runs against another گروه without going back.
+
+The graph reaches that page through the **draft** the editor already writes to
+`localStorage` on every edit (`draft.ts`) — not through the URL, which cannot
+carry kilobytes of JSON, and not through a server-side handoff token, which
+would buy an expiry and a "this result has expired" screen for someone who left
+the tab open over lunch. A **saved** filter needs none of that:
+`/filter-designer/result?filter=<id>` reads the graph from the database, which is
+what makes that URL a bookmark worth keeping, and `«بازگشت به طراحی»` carries the
+same id back so the editor reopens *that* filter rather than whatever the draft
+holds.
+
+The table is **virtualized**, like `/screener` and `/performance` — a designed
+filter is not a handful of matches («قیمت پایانی حداکثر ۵٪ زیر سقف یک‌ساله»
+returns 407 today, and `MAX_ROWS` is 3,000), and rendering all of them is the
+mistake this platform already fixed once. `<colgroup>` widths are COMPUTED
+rather than written down, because «ستون خروجی» means the columns are only known
+at run time.
+
+On the right of the results page is **«فیلترهای دیگر»** — every saved filter and
+every ready-made example, one click each, re-running in place. Running a screener
+is not one question but "what does THIS one say, and that one", and routing that
+back through the canvas turned a ten-second comparison into three page loads. The
+rail updates the draft as it goes, so «بازگشت به طراحی» opens the filter you were
+last looking at rather than the one you arrived with.
+
+The results page carries the graph too, read-only and collapsed. That is not
+decoration: it says which filter produced these rows, and it is where «چرا؟»
+draws its answer. `GraphCanvas` takes a `readonly` prop for it — chips keep every
+visual cue and lose every interactive one, and the whole surface becomes the pan
+handle, because with the chips inert a dense graph leaves almost no background
+to grab.
+
+### The catalogue
+
+Seventy blocks in ten categories, each with a palette sub-group (`sub`), because
+a flat «اندیکاتور» shelf of forty-one names is a wall and what a user is looking
+for — "a moving average", "something for volume" — is a shelf, not a search term:
+
+| category | sub-groups | blocks |
+|---|---|---|
+| داده قیمت | تابلوی قیمت · کندل · سطوح | price fields (incl. درصد تغییر، دامنه، بدنه، سایه‌ها), constant, candle parts, Heikin-Ashi, pivots (classic/fib) |
+| اندیکاتور | میانگین‌ها · نوسان‌نما · روند · کانال و نوسان · حجم | 41 — SMA/EMA/WMA/HMA/DEMA/TEMA/SMMA/VWMA · RSI/Stoch/StochRSI/CCI/%R/MFI/AO/ROC/Momentum/TRIX/UO/CMO · MACD/ADX/Ichimoku/PSAR/Supertrend/Aroon/Vortex/LinReg · Bollinger/%B/Keltner/Donchian/ATR/StdDev/Squeeze · OBV/RelVol/VWAP/CMF/A-D/Force |
+| الگوی کندلی | الگوها | 24 patterns, evaluated at EVERY bar (not just the last) so «در N کندل اخیر» works |
+| محاسبات | محاسبات | arithmetic, unary functions, if/else |
+| آماری | پنجرهٔ غلتان · دنباله | rolling max/min/sum/avg/median/stdev/range, change, position-in-range, streak, bars-since |
+| مقایسه · تقاطع · منطق | — | comparisons, between, cross up/down, rising/falling, And/Or/Not/at-least-N |
+| اطلاعات نماد | اطلاعات نماد | ticker/name/sector/sub-sector/panel/market, text match, ticker list, bar count |
+| خروجی | خروجی | the output node, and result columns that carry their own sort direction |
+
+Nothing reads حقیقی/حقوقی flow, order-book depth, free float or market cap:
+`stockpricehistory` is OHLC + final + volume + value + trade count and that is
+the whole surface. A «قدرت خریدار حقیقی» block would be a chip that always
+evaluates to nothing, which is worse than its absence.
+
+`verify_designer.py` wires **every** block into a real graph and runs it against
+the live market, because a node type is four things — a catalogue entry, an
+`_eval_node` branch, a line in `bars_needed()` and a line in `fields_needed()` —
+and two of the three ways to get it wrong fail *silently*: a missing
+`fields_needed()` entry is a KeyError on an unloaded column, which `run()`
+swallows per symbol, so the filter just matches nothing.
+
+### Silence is the enemy
+
+`run()` catches a per-symbol exception so one bad symbol cannot kill a
+market-wide scan — and for a long time it only *logged* that. Which means a
+broken block does not raise; it quietly matches nothing, and "this filter is
+strict" and "this filter is broken" look identical from the outside.
+
+Two bugs lived in exactly that gap. «تابلو» was offered by the symbol node while
+`_meta()` never selected the column, so it returned an empty string for every
+stock. And `٪B` — or any indicator — pointed at the `pct` source raised
+`TypeError` on every symbol in the market, because «درصد تغییر» had no previous
+bar to measure the first candle against and handed back a `None` into
+`db._sma_series`, which assumes clean floats.
+
+So `run()` now returns `errors`, the results panel prints it («⚠ N نماد بررسی
+نشد») instead of showing a short list, and `verify_designer.py` wires every block
+into a real graph with **every dropdown value** — 435 combinations across both
+سهام and صندوق‌ها — and asserts the count is zero. That sweep is what found both.
+
+### A price of zero is not a price
+
+347 rows in this database carry `adj_open = adj_high = adj_low = 0` beside a
+valid `adj_close` and `adj_final` — the exchange settled the symbol but recorded
+no intraday range; «ثاژن» alone has thirty. The panel's WHERE clause only
+requires close and final to be positive, so those bars arrive, and the loader
+used to substitute `0.0`.
+
+Which is how «شکست کانال دانچیان» reported ثاژن as a breakout: its twenty-bar
+highest high came out as **zero**, and 6,300 > 0 is true. A false positive
+manufactured by the loader, not by the data — the data honestly said "no high
+recorded" and the code answered "the high was zero rials".
+
+`_load_columns()` now repairs such a bar to a FLAT one at its settlement price
+(open = high = low = final), which is what it actually was. That keeps every
+series a clean list of floats — no `None` for fifteen indicator functions to
+guard — and makes the bar's range zero, which is the truth.
+
+### The engine (`filter_engine.py`)
+
+A graph is **data, never code**: it arrives as JSON, is validated against
+`NODE_TYPES`, and is walked by a fixed interpreter. There is no `eval`, no
+import, and nothing a saved filter can reach except the price panel it is handed.
+
+Everything inside is a **series aligned to the symbol's bars**, oldest→newest,
+with `None` for "not computable yet". A comparison turns two number series into
+a boolean series; the output node asks whether it was true within the last
+`within` bars. Scalars are carried unexpanded and broadcast only when they meet
+a series. That single rule is what keeps the interpreter under 200 lines and
+makes every node composable with every other one.
+
+Three things keep a market-wide run (≈800 symbols × ≈400 bars) under a second
+once warm:
+
+- **`bars_needed()`** walks the graph before the query and asks for only the
+  history the deepest lookback needs, bucketed to 150/300/500/800/1300 so similar
+  graphs share a panel. `close > open` reads 150 bars, not 800. A time frame
+  *multiplies* — a 20-period weekly average is 20 weeks, so ~100 sessions — and
+  when a graph wants more than the deepest bucket holds, `run()` says so
+  (`clipped`) instead of returning an empty table full of still-warming values.
+- **`fields_needed()`** narrows the `SELECT` to the columns the graph actually
+  reads, and the panel is cached **column by column** in-process — so adding a
+  `high` node to a running graph costs one column's query, not four.
+- **Signatures (`_sign`)** give identical sub-graphs one identity, so the six
+  `Ichi ۹,۲۶,۵۲` chips a readable Ichimoku layout needs are computed once per
+  symbol rather than six times. The reference product's own examples draw that
+  way, and without this they were the slowest thing in the catalogue.
+
+Parameters are **clamped, not rejected** — a period that arrives as 10⁹ runs at
+the documented ceiling, because an error the user cannot act on is worse. What
+*is* rejected is structural: an unknown node type, a cycle, no output node, two
+output nodes, or a graph past `MAX_NODES` — each with a Persian message the
+canvas shows verbatim.
+
+### «تایم فریم» — weekly and monthly, from the daily table
+
+Every market-data, indicator, candle and rolling-statistic block carries a time
+frame. There is no second table: a frame is a **re-indexing** of the daily bars,
+and the whole feature is three functions and one rule —
+
+```
+_frame_index   daily bar → frame bar number      (from a bucket column)
+_to_frame      a daily-aligned series  → one value per frame bar (its last)
+_from_frame    a frame-aligned series  → back onto the daily bars (held)
+```
+
+`_eval_in_frame()` wraps `_eval_node()` in those three, so **no indicator was
+touched to gain a time frame**: its inputs are re-indexed on the way in and its
+outputs on the way out, and it never learns that anything happened. The same
+wrapper applies «برگشت به عقب», which is why that could be added to forty blocks
+at once as well.
+
+Two choices that are not arbitrary:
+
+- **The week starts on Saturday.** The bucket is
+  `(date - DATE '2000-01-01') / 7`, and 2000-01-01 was a Saturday. An ISO
+  (Monday) week would put Saturday's session in with the *previous*
+  Sunday-to-Wednesday and split every real trading week across two buckets.
+- **The month is the Jalali month**, off `j_date` — «شهریور» is a month a user
+  can reason about, «August» straddles two of them.
+
+Frames are numbered by **arrival**, not by bucket value, so a symbol halted for
+three weeks produces no empty frame bars for a moving average to average holes
+over. Resampling is **per column and lazy** (`_FrameBars`): a monthly RSI on
+«پایانی» resamples one column, not the six the panel happens to hold — which is
+the difference between 0.2 s and 10 s on a market-wide run.
+
+The last frame bar is deliberately **partial** (the week so far). A filter that
+must see only completed frames says so with «برگشت به عقب ۱».
+
+### The blocks the reference guide asks for
+
+Beyond the indicator set, the catalogue carries the guide's own vocabulary:
+
+| Block | What it answers |
+| --- | --- |
+| «سقف و کف مجاز» | the day's price band from the previous settlement, the distance to each, and **صف خرید / صف فروش**. «خودکار» reads the band off the symbol's own market (بورس/فرابورس ۵٪, زرد ۳٪, نارنجی ۲٪, قرمز ۱٪, ETF ۱۰٪) |
+| «حمایت و مقاومت» | nearest confirmed swing high/low and the distance to each — confirmed *k* bars late, because a peak is not a peak until *k* more bars have printed |
+| «فرمول‌نویسی» | one arithmetic expression instead of six boxes |
+| «فهرست نمادها» | market / board / sector / ticker list in one box |
+| «برچسب سیگنال» | fills a «سیگنال» column with خرید / فروش, so one filter can emit both |
+| «هشدار» | turns a saved filter into a watcher (below) |
+| «توضیحات» | a note on the canvas that computes nothing |
+
+**«فرمول‌نویسی» is a parser, not an `eval`.** A recursive-descent parser over a
+fixed grammar builds five node shapes and nothing else; the evaluator can only
+call what is in `_FN`, and the variables it can name are the four wired inputs
+plus the same price fields «داده قیمت» offers. Comparisons yield 1/0 so
+`if(close>final,1,0)` works, and chained comparisons are a syntax error rather
+than a silent `(a<b)<c`. ASTs are cached by source text, and the whole thing is
+evaluated **series-wise** with the same combinators every other block uses, so a
+formula costs what the equivalent boxes cost. `verify_designer.py` walks the
+engine's syntax tree to assert no `eval`/`exec`/`getattr` call exists to fall
+back on.
+
+### «بلاک هشدار» — a saved filter that watches for itself
+
+Dropping an «هشدار» block on the canvas and **saving** arms the filter; nothing
+else switches it on. `evaluate_filter_alerts()` runs on the same schedule as the
+price alerts (`tasks.evaluate_alerts`, i.e. right after an update and on the Beat
+tick) and writes one `alert_events` row per **newly** matched symbol.
+
+Which filters are armed is a jsonb containment query
+(`graph @> '{"nodes":[{"type":"alert"}]}'`), so arming is something the user does
+by dragging a box — there is no second switch elsewhere to forget. The
+de-duplication state is the events themselves, keyed `filter:<id>`: with «فقط
+یک‌بار» a ticker is reported once, otherwise once per session. A user-supplied
+message template is substituted by **replacement, never `str.format`** —
+`{0.__class__}` in a format string is a way to walk the object graph. One pass is
+capped at `FILTER_ALERT_MAX` (40) filters, because each one is a market-wide
+scan.
+
+### What the guide asks for that this data cannot answer
+
+Deliberately **not** built, rather than half-built:
+
+| Guide block | Why not |
+| --- | --- |
+| «بلاک عرضه و تقاضا» | the order book is not collected — `stockpricehistory` holds daily OHLCV only |
+| «بلاک حقیقی و حقوقی» | retail/institutional splits are not collected |
+| حجم مبنا / EPS / تعداد سهام of «بلاک داده عمومی» | not collected. The *price-band* half of that block **is** built, because it is derivable |
+| «بلاک سفارش» / «اطلاعات حساب» / «پرتفو» | no broker integration exists |
+| «بلاک تلگرام» | no bot is configured; «هشدار» delivers to the in-app feed instead |
+| «بلاک نمودار» / «خط روند اصلی» (drawing lines on a chart) | a charting feature, not a screening one. The *screening* half — "is price arriving at a level it was rejected from before" — is «حمایت و مقاومت» |
+| «بلاک ویژگی اضافی نماد» | user-defined per-symbol metadata needs a place to enter and store it; nothing here has one |
+
+Each of the first three is one ingestion job away (a table, a fetcher, a
+back-fill) — they are a data order, not a designer change.
+
+Two places where this catalogue deliberately differs from the guide rather than
+lacking something:
+
+- **«انتخاب خروجی»**. The guide gives MACD, Bollinger, Stochastic and Aroon a
+  dropdown to pick *which* component the block emits. Here every component is
+  its own output port, so one MACD chip feeds the line, the signal and the
+  histogram at once instead of needing three chips set to three values of a
+  dropdown.
+- **«برگشت به عقب» vs «برگشت به عقب قیمت»**. The guide lists both — move the
+  indicator's line back, or move the price back and then compute. For every
+  indicator here those are the same list: each is a translation-invariant
+  function of the price series, so `SMA(shift(px, k), n) == shift(SMA(px, n), k)`.
+  Two dials that do one thing is worse than one, so there is one.
+
+### «چرا این نماد آمد؟»
+
+A screener that only says yes or no cannot be debugged: the user raises a
+threshold, the list empties, and nothing says which of eleven conditions went
+false. `/api/designer/explain` returns every node's last bars for one symbol; the
+results page opens its diagram, paints ✓/✕ on each chip, tints the satisfied
+wires green, and lists the same numbers as a table underneath for anyone who
+would rather read them in one column.
+
+The values are read **at the bar the filter fired on**, not at the last bar —
+`evaluate()` returns that offset. For any filter with «در N کندل اخیر» above 1
+the last candle is usually the one where the condition has gone false again, so
+reading the last bar would paint every chip ✕ next to a symbol the filter had
+just returned.
+
+### Concurrency
+
+One run is real CPU in the web worker and does not release the GIL, so runs take
+a slot (`DESIGNER_RUN_SLOTS`, default 2 per worker) and wait
+(`DESIGNER_RUN_WAIT`, default 25 s) rather than piling up; a caller that cannot
+get in is told to try again in Persian instead of being held until nginx times
+out.
+
+### Storage
+
+`custom_filters` (migrations 0006 and 0007, and `filter_engine.ensure_tables()`
+at boot for the laptop path). The graph is one JSONB column **including the node
+coordinates**: nothing ever queries inside a graph, the catalogue grows a node
+type whenever someone asks for an indicator, and a filter that reopens as a pile
+of chips in the corner is a black box rather than a design. Saved filters are
+private to their account; «برون‌بری» hands the same JSON to a file so one can be
+sent to someone else.
+
+## چرا یک به‌روزرسانی گیر می‌کند / Why an update stalls, and what stops it
+
+A symptom worth recognising, because everything on the /update page says the
+system is coping: «در حال اجرا…», a symbol count that stops moving, a growing
+«N ثانیه از آخرین پیشرفت گذشته», the watchdog reporting «بازیابی خودکار در
+جریان است» and «۹۶ نماد دوباره در صف قرار گرفت» — and nothing happens.
+
+That is a **wedged consumer**, and the give-away is in the database: some ticker
+is `pending` with `started_at` set and `finished_at` null, nothing is `running`,
+and the Redis `updates` list is deep. The watchdog is working perfectly; there is
+simply no worker left to hand the messages to.
+
+How it happened once, end to end:
+
+1. `finpy_tse` fetches every symbol with `requests.get(url, headers=headers)` and
+   never passes `timeout`. **A `requests` call with no timeout waits for ever.**
+2. A TCP connection to TSETMC stalled without a reset — ordinary on a network
+   where a filtering middlebox blackholes a connection rather than refusing it.
+3. The Windows worker runs `--pool=solo`, which executes the task inline in the
+   **consumer thread**, so the worker stopped accepting messages at the same
+   instant. 212 batches queued behind one blocked read.
+4. `task_time_limit` (1800 s, celery_app.py) did not fire, and could not: Celery
+   implements time limits by having the **prefork** pool kill the child running
+   the task. Solo has no child. The ceiling was configured and inert — which is
+   why nothing in the logs said anything was wrong.
+
+The fix is `tse_fetch._install_http_timeout()`: `requests.Session.request` is
+patched once per process to fill in `TSE_HTTP_TIMEOUT` (default `10,45` —
+connect, read) whenever the caller supplied none. A stall now raises inside
+`fetch()`, becomes a `TransientFetchError`, and is retried and recorded like any
+other flaky symbol. `socket.setdefaulttimeout()` would have been the other way to
+do it without touching finpy, and is wrong here: it is process-global and would
+also apply to psycopg2's connections and to the blocking Redis read Celery's
+broker sits in. `tests/test_fetch_http_timeout.py` locks the behaviour down, and
+`dev_boot` now logs a warning at worker start naming the solo-pool gap rather
+than leaving it to be rediscovered.
+
+**If you meet a stalled job anyway:** restart the fetch worker. Nothing is lost —
+`jobs.claim_ticker()` refuses a symbol that already finished and `tse_fetch.store()`
+replaces rather than appends, which is what "resumes without losing or
+duplicating tickers" reduces to. The queued batches drain as no-ops.
 
 ## اسکریپت‌های اصلی / Original scripts
 اسکریپت‌های قبلی (`stock_updater.py`، `etf_updater.py`، `stock_gainer.py`،

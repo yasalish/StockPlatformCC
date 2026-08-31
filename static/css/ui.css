@@ -1073,3 +1073,14 @@ table.grid tr.alert-off td{ color:var(--ink-3) }
 table.grid tr.alert-off .sym{ color:var(--ink-2) }
 .alert-actions{ display:flex; gap:5px; white-space:nowrap }
 .alert-actions .btn.small svg{ width:13px; height:13px }
+
+/* «طراحی فیلتر» in help.html — a numbered how-to, spaced like the <dl>
+   sections around it rather than like a browser-default list. */
+.doc-steps{ margin:var(--sp-2) 0; padding-inline-start:1.4em; display:flex;
+            flex-direction:column; gap:6px; color:var(--ink-2);
+            font-size:var(--fs-13); line-height:1.9 }
+.doc-steps b{ color:var(--ink) }
+
+/* «طراحی فیلتر» in help.html — a sub-heading inside a doc section. Without
+   this the browser default makes <h3> larger than the .doc-sec <h2> above it. */
+.doc-sec h3{ font-size:var(--fs-14); font-weight:800; margin:var(--sp-4) 0 4px }
