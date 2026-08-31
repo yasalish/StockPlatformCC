@@ -37,6 +37,12 @@ export default defineConfig({
         // page has any use for.
         designer: resolve(__dirname, "src/designer.ts"),
         designer_result: resolve(__dirname, "src/designer_result.ts"),
+        // …and the backtest page, which replays the same graph over history.
+        // A third entry rather than a tab on the results page: it shares only
+        // the graph model and the read-only canvas, and loading its chart and
+        // report tables into the page people hit on every «اجرا» would make the
+        // common path pay for the occasional one.
+        designer_backtest: resolve(__dirname, "src/designer_backtest.ts"),
       },
       output: {
         // Entry names stay FIXED because the templates stamp them with

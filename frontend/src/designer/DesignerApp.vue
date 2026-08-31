@@ -23,7 +23,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import GraphCanvas from "./GraphCanvas.vue";
 import PalettePanel from "./PalettePanel.vue";
 import InspectorPanel from "./InspectorPanel.vue";
-import { loadDraft, resultUrl, saveDraft } from "./draft";
+import { backtestUrl, loadDraft, resultUrl, saveDraft } from "./draft";
 import {
   autoLayout,
   lint,
@@ -253,6 +253,33 @@ function run() {
   });
 }
 
+/** «بک‌تست» — the same handoff as «اجرا», to the history page instead.
+ *
+ * It runs the same lint first. A graph with an unconnected input produces no
+ * signals at all, and "۰ سیگنال" after a forty-second backtest is a far worse
+ * way to learn that than the message the canvas can show instantly. */
+function openBacktest() {
+  error.value = "";
+  notice.value = "";
+  if (!graph.value.nodes.length) {
+    error.value = "بومْ خالی است — اول فیلتر را بسازید.";
+    return;
+  }
+  const blocking = problems.value;
+  if (blocking.length) {
+    error.value = blocking.join(" · ");
+    return;
+  }
+  busy.value = true;
+  persist();
+  window.location.href = backtestUrl({
+    id: currentId.value,
+    kind: kind.value,
+    group: group.value,
+    subgroup: subgroup.value,
+  });
+}
+
 /* ------------------------------------------------------------------ saved */
 async function refreshSaved() {
   if (!props.catalog.authenticated) return;
@@ -445,6 +472,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
           <span v-if="busy">در حال باز کردن نتیجه…</span><span v-else>▶ اجرا</span>
         </button>
         <span class="dz-kbd muted small">Ctrl+Enter</span>
+        <button type="button" class="btn" :disabled="busy || !graph.nodes.length"
+                title="همین فیلتر را روی تاریخچه اجرا کن" @click="openBacktest">
+          ⏱ بک‌تست
+        </button>
       </div>
 
       <div class="dz-bar-g">

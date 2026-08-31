@@ -34,6 +34,7 @@ import prefs
 import reports
 import market
 import filter_engine
+import backtest as backtest_engine
 
 # Structured JSON logging before anything else logs. Every module below uses
 # logging.getLogger(); this is what turns those records into one-line JSON with
@@ -1031,6 +1032,76 @@ def api_designer_explain():
         return jsonify({"error": "محاسبهٔ جزئیات با خطا روبه‌رو شد."}), 500
 
 
+#: A backtest reads years of history where a scan reads months, so it gets a
+#: lane of its own rather than sharing the run semaphore: one in flight at a
+#: time, and a scan must never end up queued behind one. The wait is short
+#: because the honest answer to "two people pressed بک‌تست at once" is "try
+#: again in a moment", not a request that sits open for a minute and then times
+#: out in the proxy.
+_backtest_lock = threading.Semaphore(int(os.environ.get("BACKTEST_SLOTS", "1")))
+BACKTEST_WAIT = float(os.environ.get("BACKTEST_WAIT", "8"))
+
+
+@app.route("/filter-backtest")
+def filter_backtest_page():
+    """«بک‌تست فیلتر» — the same graph, replayed over history.
+
+    A shell like the other two designer pages: the island reads the graph from
+    the saved filter named in the URL, or from the draft the canvas left in
+    localStorage, for the reasons written out in filter_designer_result_page."""
+    kind = request.args.get("kind", "stock")
+    if kind not in ("stock", "etf"):
+        kind = "stock"
+    try:
+        filter_id = int(request.args.get("filter", "") or 0) or None
+    except ValueError:
+        filter_id = None
+    return render_template("designer_backtest.html", kind=kind, filter_id=filter_id)
+
+
+@app.route("/api/designer/backtest", methods=["POST"])
+def api_designer_backtest():
+    """Replay a graph over history and return its report card."""
+    body, err = _designer_body()
+    if err:
+        return err
+    raw = request.get_json(silent=True) or {}
+
+    def _num(key, default, lo, hi):
+        try:
+            v = float(raw.get(key, default))
+        except (TypeError, ValueError):
+            return default
+        return min(hi, max(lo, v))
+
+    # 1500, not the engine's own 3000-bar ceiling. The deepest window the page
+    # offers is 1000 sessions (~17 s); a hand-made request for the engine's
+    # maximum measured 67 s, which fits inside the 120 s worker timeout but
+    # leaves a single caller holding the backtest lane for over a minute. The
+    # engine will still go deeper for a script that imports it directly.
+    sessions = int(_num("sessions", backtest_engine.DEFAULT_SESSIONS, 20, 1500))
+    cost = _num("cost", backtest_engine.DEFAULT_COST, 0.0, 10.0)
+    hold = int(_num("hold", 0, 0, 250)) or None
+    if not _backtest_lock.acquire(timeout=BACKTEST_WAIT):
+        return jsonify({"error": "یک بک‌تست دیگر در حال اجراست؛ چند لحظه بعد "
+                                 "دوباره تلاش کنید."}), 429
+    t0 = time.perf_counter()
+    try:
+        out = backtest_engine.backtest(
+            body["graph"], kind=body["kind"], sessions=sessions, hold=hold,
+            group=body["group"], sub_group=body["subgroup"], cost=cost,
+            require_fill=bool(raw.get("fill", True)),
+            repeat=bool(raw.get("repeat", False)))
+    except (backtest_engine.BacktestError, filter_engine.GraphError) as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception:
+        log.exception("designer backtest failed")
+        return jsonify({"error": "اجرای بک‌تست با خطا روبه‌رو شد."}), 500
+    finally:
+        _backtest_lock.release()
+    return jsonify({**out, "server_ms": int((time.perf_counter() - t0) * 1000)})
+
+
 @app.route("/api/designer/filters", methods=["GET", "POST"])
 @login_required
 def api_designer_filters():
@@ -1180,8 +1251,12 @@ def settings_page():
 @app.route("/help")
 def help_page():
     """«راهنما» — what each screen answers and how to read its columns."""
+    # Counted rather than written down: this paragraph said «ده فیلتر آماده»
+    # for as long as there were thirteen, because a number in prose does not
+    # move when the list it describes does.
     return render_template("help.html", periods=db.PERIODS,
-                           perf_periods=db.PERF_PERIODS)
+                           perf_periods=db.PERF_PERIODS,
+                           example_count=len(filter_engine.EXAMPLES))
 
 
 @app.route("/about")

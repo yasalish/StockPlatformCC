@@ -1034,6 +1034,41 @@ def _frame_index(keys):
     return idx, count
 
 
+def _causal_index(idx):
+    """`idx`, but every daily bar reads the last frame that was FINISHED on it.
+
+    WHY THIS EXISTS
+
+    `_from_frame` maps a weekly value back onto the daily bars by holding it
+    across the frame — so Saturday reads the value of a week that does not end
+    until Wednesday. For the live screener that is right and cannot be anything
+    else: the newest bar is always the last bar of its own frame, so the value
+    it reads is this week SO FAR, which is exactly what «RSI هفتگی» means today.
+
+    Walk back into history and the same mapping is a time machine. Measured on
+    فولاد, a «سقف هفتگی» block reported ۲٬۴۸۳ on a bar whose own high was ۲٬۲۸۳
+    — a price that did not print for another four sessions. A backtest reading
+    that is not optimistic, it is clairvoyant, and it is the single reason a
+    screener backtest can show a 60 % win rate that evaporates in production.
+
+    So: at the last daily bar of a frame the frame is complete and reads itself;
+    anywhere inside one it reads the frame BEFORE it. `-1` for the bars before
+    the first frame ever closed, which _from_frame turns into None — a warm-up
+    hole, the same shape every indicator already produces.
+
+    The last bar of the series is the last bar of its frame by construction, so
+    run() and explain() are bit-identical whether this is applied or not. It is
+    switched on for the backtester (ctx["causal"]) and off everywhere else,
+    because "this week so far" is the honest answer to a question asked today
+    and the dishonest one to a question asked about a Tuesday in 1403.
+    """
+    n = len(idx)
+    out = [0] * n
+    for i in range(n):
+        out[i] = idx[i] if (i == n - 1 or idx[i] != idx[i + 1]) else idx[i] - 1
+    return out
+
+
 def _resample_col(series, idx, count, how):
     """One daily column collapsed onto `count` frame bars."""
     acc = [None] * count
@@ -1105,11 +1140,15 @@ def _to_frame(val, idx, count):
 
 
 def _from_frame(val, idx):
-    """A frame-aligned value back on the daily bars — held across the frame."""
+    """A frame-aligned value back on the daily bars — held across the frame.
+
+    `idx` is the plain frame index for a live run and the causal one for a
+    backtest (see _causal_index), where a negative entry means "no frame had
+    closed yet" and reads as a warm-up None."""
     kind, payload = val
     if kind in ("const", "text"):
         return val
-    return (kind, [payload[g] for g in idx])
+    return (kind, [payload[g] if g >= 0 else None for g in idx])
 
 
 def _shift_val(val, k):
@@ -2438,6 +2477,11 @@ def _own_lookback(t, p):
     return 0
 
 
+#: Sinks that READ a value and therefore need their branch warmed up, unlike
+#: «توضیحات», which computes nothing at all.
+_VALUE_SINKS = frozenset({"column", "signal", "alert"})
+
+
 def _raw_bars_needed(nodes, out_node):
     """How many DAILY bars this graph has to read, unbucketed and uncapped.
 
@@ -2459,7 +2503,22 @@ def _raw_bars_needed(nodes, out_node):
         parents = [depth.get(src, 0)
                    for bucket in n["ins"].values() for src, _ in bucket]
         depth[nid] = own + (max(parents) if parents else 0)
-    return depth.get(out_node["id"], 0) + out_node["params"]["within"] + 5
+
+    # EVERY sink, not just «خروجی فیلتر». A «ستون خروجی» reading a 200-bar
+    # MAX sits on a branch of its own, and taking the output node's depth alone
+    # loaded 150 bars for a graph whose column needed 205 — so the column came
+    # back empty for every symbol while the filter itself worked perfectly. An
+    # em dash in a column nobody can explain is the worst kind of wrong answer:
+    # it looks like missing data rather than a missing window.
+    #
+    # Only sinks that are actually WIRED count. A stray chip dropped on the
+    # canvas and connected to nothing must not push the whole run into a deeper
+    # bucket for a value no one reads.
+    deepest = depth.get(out_node["id"], 0)
+    for nid, n in nodes.items():
+        if n["type"] in _VALUE_SINKS and any(n["ins"].values()):
+            deepest = max(deepest, depth.get(nid, 0))
+    return deepest + out_node["params"]["within"] + 5
 
 
 def bars_needed(nodes, out_node):
@@ -2609,7 +2668,12 @@ _COL_SQL = {
 _PRICE_COLS = ("o", "h", "l", "c", "f")
 
 
-def _load_columns(kind, as_of, bars, cols):
+#: The key `_load_columns(dates=True)` files the calendar under. Not a real bar
+#: column — it never reaches an indicator — so it is spelled unlike one.
+DATE_COL = "__jd"
+
+
+def _load_columns(kind, as_of, bars, cols, tickers=None, dates=False):
     """{col: {ticker: [float] oldest→newest}} for `cols`, straight from the
     price table.
 
@@ -2638,27 +2702,45 @@ def _load_columns(kind, as_of, bars, cols):
     repair = [c for c in ("o", "h", "l") if c in cols]
     if repair and "f" not in need:
         need.append("f")
-    select = ", ".join(f'{_COL_SQL[c]}::float8 AS "{c}"' for c in need)
-    names = ", ".join(f'"{c}"' for c in need)
-    rows = db._rows(
+    select = ", ".join(f"{_COL_SQL[c]}::float8" for c in need)
+    # The backtester asks for the calendar too. The live screener never does —
+    # it reads the last bar, and "the last bar" needs no date to be found — but a
+    # backtest has to say WHEN a signal fired and line eight hundred symbols up
+    # on one axis, and the only honest source for that is the row itself.
+    tail = ", j_date" if dates else ""
+    # One chunk of the market, not all of it. A 1300-bar panel of every symbol is
+    # 1.1 GB of Python floats; the backtester walks the market in slices so its
+    # peak stays flat however deep the history goes.
+    where = " AND ticker = ANY(%s)" if tickers else ""
+    args = [*db._window(kind, as_of, max(2, bars // 200 + 2))]
+    if tickers:
+        args.append(list(tickers))
+    args.append(bars)
+    rows = db._tuples(
         f"""
         WITH ranked AS (
-            SELECT ticker, {select},
+            SELECT ticker, {select}{tail},
                    ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) rn
             FROM {price_tbl}
-            WHERE adj_close > 0 AND adj_final > 0 AND date <= %s AND date >= %s
+            WHERE adj_close > 0 AND adj_final > 0 AND date <= %s AND date >= %s{where}
         )
-        SELECT ticker, {names} FROM ranked WHERE rn <= %s
-        ORDER BY ticker, rn DESC
+        SELECT * FROM ranked WHERE rn <= %s ORDER BY ticker, rn DESC
         """,
-        (*db._window(kind, as_of, max(2, bars // 200 + 2)), bars))
+        tuple(args))
 
+    # Tuple offsets, once, rather than a dict lookup per cell: `ranked` selects
+    # ticker, then `need` in order, then j_date, then rn.
+    at = {c: i + 1 for i, c in enumerate(need)}
+    d_at = len(need) + 1
+    f_at = at.get("f")
     out = {c: {} for c in cols}
+    if dates:
+        out[DATE_COL] = {}
     for r in rows:
-        t = r["ticker"]
-        settle = r.get("f")
+        t = r[0]
+        settle = r[f_at] if f_at is not None else None
         for c in cols:
-            v = r[c]
+            v = r[at[c]]
             if c in _PRICE_COLS:
                 if v is None or v <= 0:
                     # `settle` is guaranteed positive by the WHERE clause; the
@@ -2669,6 +2751,8 @@ def _load_columns(kind, as_of, bars, cols):
             elif v is None:
                 v = 0.0                          # volume / value / count
             out[c].setdefault(t, []).append(v)
+        if dates:
+            out[DATE_COL].setdefault(t, []).append(r[d_at])
     return out
 
 
@@ -2868,11 +2952,15 @@ def _band_pct(mode, ctx):
 
 
 def _frame_ctx(ctx, tf):
-    """(frame ctx, daily→frame index) for this symbol, built at most once.
+    """(frame ctx, daily→frame index, frame→daily index) for this symbol.
 
     Cached ON the ctx, so a graph with nine weekly blocks resamples the panel
     once rather than nine times — which matters, because resampling is the one
-    operation here that touches every column of every bar."""
+    operation here that touches every column of every bar.
+
+    The two indexes differ only under ctx["causal"]: values go INTO a frame by
+    the bar they belong to, and come back out by the last frame that had closed
+    (see _causal_index)."""
     frames = ctx.setdefault("frames", {})
     hit = frames.get(tf)
     if hit is None:
@@ -2881,12 +2969,15 @@ def _frame_ctx(ctx, tf):
             # fields_needed() always loads the bucket column for a frame that is
             # actually used, so this is unreachable from run(); it is the safety
             # net for a hand-built ctx in a test, and daily is the honest answer.
-            hit = (ctx, list(range(ctx["n"])))
+            plain = list(range(ctx["n"]))
+            hit = (ctx, plain, plain)
         else:
             idx, count = _frame_index(keys)
+            back = _causal_index(idx) if ctx.get("causal") else idx
             hit = ({"bars": _FrameBars(ctx["bars"], idx, count), "n": count,
-                    "meta": ctx["meta"], "kind": ctx.get("kind"), "frames": {}},
-                   idx)
+                    "meta": ctx["meta"], "kind": ctx.get("kind"),
+                    "causal": ctx.get("causal"), "frames": {}},
+                   idx, back)
         frames[tf] = hit
     return hit
 
@@ -2904,7 +2995,7 @@ def _eval_in_frame(node, ctx, get):
     shift = int(p.get("shift", 0) or 0)
 
     if tf in _TF_KEY:
-        sub_ctx, idx = _frame_ctx(ctx, tf)
+        sub_ctx, idx, back = _frame_ctx(ctx, tf)
         count = sub_ctx["n"]
 
         def framed(port, all_of=False):
@@ -2914,7 +3005,7 @@ def _eval_in_frame(node, ctx, get):
             return None if got is None else _to_frame(got, idx, count)
 
         out = _eval_node(node, sub_ctx, framed)
-        out = {k: _from_frame(v, idx) for k, v in out.items()}
+        out = {k: _from_frame(v, back) for k, v in out.items()}
     else:
         out = _eval_node(node, ctx, get)
 
@@ -3648,7 +3739,7 @@ def _fallback_key(series, mode):
     return series["f"][-1]
 
 
-def explain(graph, kind, ticker, as_of=None, tail=12):        # noqa: D417
+def explain(graph, kind, ticker, as_of=None, tail=12, causal=False):  # noqa: D417
     """Every node's value over the last `tail` bars for ONE symbol.
 
     This is «چرا این نماد آمد؟». A screener that only says yes or no is
@@ -3671,7 +3762,8 @@ def explain(graph, kind, ticker, as_of=None, tail=12):        # noqa: D417
         raise GraphError(f"نماد «{ticker}» در این بازه داده ندارد.")
 
     n = len(series["c"])
-    ctx = {"bars": series, "n": n, "meta": meta, "kind": kind, "frames": {}}
+    ctx = {"bars": series, "n": n, "meta": meta, "kind": kind, "frames": {},
+           "causal": causal}
     memo = _memoise(nodes, order, ctx)
 
     out = {}
@@ -4322,6 +4414,470 @@ def _breaking_resistance():
     return {"nodes": nodes, "edges": edges}
 
 
+# ---------------------------------------------------------------------------
+# «فایل‌های آمادهٔ آسان بورس» — the reference product's own published graphs,
+# transcribed chip for chip from its canvas.
+#
+# FOUR THINGS DO NOT TRANSLATE ONE-TO-ONE, AND ALL FOUR ARE DELIBERATE:
+#
+#  1. Asan draws ONE CHIP PER OUTPUT. A stochastic cross is two «Stochastic»
+#     chips there — one standing for %K, one for %D — and the same is true of
+#     ADX (+DI / −DI), MACD (macd / signal) and Ichimoku (tenkan / kijun /
+#     spanA / spanB). Here a chip carries every output on its own port, so one
+#     replaces two and the wire says which line it took. Fewer chips, same
+#     graph; the alternative would be two identical chips computing the same
+#     series twice for the reader's benefit alone.
+#
+#  2. «سفارش» PLACES A TRADE. There is no such block here and a screener wants
+#     none: a long branch becomes «خروجی فیلتر» (the rows the filter returns),
+#     and a sell branch — which several of these graphs carry as the exit rule
+#     for the same strategy — becomes a «برچسب سیگنال» so the exit stays on the
+#     canvas next to the entry it belongs to.
+#
+#  3. ICHIMOKU HAS NO چیکو PORT HERE, and does not need one: chikou IS the
+#     close, drawn 26 bars back. «چیکو > close-۲۶» is therefore written as
+#     `close > close-26`, which is the identical series and one chip cheaper.
+#
+#  4. «نمودار» (the chart preview) computes nothing and is dropped.
+#
+# Where the screenshot left a chip unwired — the body-size test and the volume
+# test on «کندل پوشای صعودی» both dangle — it is connected. A graph with a
+# dangling input fails lint() and returns nothing, and those chips are plainly
+# part of the rule the author was writing.
+# ---------------------------------------------------------------------------
+def _asan_engulfing():
+    """کندل پوشای صعودی — Asan's own engulfing graph, all six candle tests plus
+    the body-size and volume chips its screenshot leaves hanging.
+
+    The body test reads `(close−open) > 2 × (open-1 − close-1)`: both sides are
+    ordered to come out POSITIVE, which is why yesterday's is open-minus-close
+    and today's is close-minus-open. Getting that backwards makes the test
+    compare a positive body against a negative one, which is true for every
+    symbol on the board."""
+    nodes = [
+        _node("p1", "price", 40, 40, field="close", shift=1),
+        _node("p2", "price", 40, 130, field="open", shift=1),
+        _node("c1", "compare", 260, 80, op="<"),          # close-1 < open-1
+        _node("p3", "price", 40, 220, field="close", shift=0),
+        _node("p4", "price", 40, 310, field="open", shift=0),
+        _node("c2", "compare", 260, 260, op=">"),         # close > open
+        _node("p5", "price", 40, 400, field="close", shift=0),
+        _node("p6", "price", 40, 490, field="open", shift=1),
+        _node("c3", "compare", 260, 440, op=">"),         # close > open-1
+        _node("p7", "price", 40, 580, field="open", shift=0),
+        _node("p8", "price", 40, 670, field="close", shift=1),
+        _node("c4", "compare", 260, 620, op="<"),         # open  < close-1
+        _node("p9", "price", 40, 760, field="low", shift=0),
+        _node("p10", "price", 40, 850, field="low", shift=1),
+        _node("c5", "compare", 260, 800, op="<"),         # low   < low-1
+        _node("p11", "price", 40, 940, field="high", shift=0),
+        _node("p12", "price", 40, 1030, field="high", shift=1),
+        _node("c6", "compare", 260, 980, op=">"),         # high  > high-1
+        # …و بدنهٔ امروز بیش از دو برابر بدنهٔ دیروز
+        _node("p13", "price", 40, 1120, field="open", shift=1),
+        _node("p14", "price", 40, 1210, field="close", shift=1),
+        _node("m1", "math", 260, 1160, op="-"),           # open-1 − close-1
+        _node("p15", "price", 40, 1300, field="close", shift=0),
+        _node("p16", "price", 40, 1390, field="open", shift=0),
+        _node("m2", "math", 260, 1340, op="-"),           # close − open
+        _node("k2", "const", 260, 1250, value=2.0),
+        _node("m3", "math", 440, 1200, op="*"),           # 2 × بدنهٔ دیروز
+        _node("c7", "compare", 620, 1270, op=">"),
+        _node("v1", "price", 40, 1480, field="volume", shift=0),
+        _node("z0", "const", 40, 1570, value=0.0),
+        _node("c8", "compare", 260, 1520, op="!="),       # vol ≠ 0
+        _node("and1", "and", 840, 700),
+        _node("out", "output", 1040, 700, within=1, sort="value"),
+        # «فاصله تا سقف ۲۰۰ کندل» — a NUMBER, so it is a column rather than the
+        # filter's condition. Asan's «خروجی فیلتر» accepts one; this engine
+        # separates the two, and «ستون خروجی» is the half that prints it.
+        _node("p17", "price", 840, 60, field="close", shift=0),
+        _node("p18", "price", 840, 150, field="close", shift=0),
+        _node("mx", "agg", 1020, 150, op="MAX", n=200),
+        _node("pc", "math", 1200, 100, op="C%"),
+        _node("col", "column", 1380, 100, label="فاصله تا سقف ۲۰۰", digits=2, sort="desc"),
+    ]
+    edges = [
+        _edge("p1", "c1", "a"), _edge("p2", "c1", "b"),
+        _edge("p3", "c2", "a"), _edge("p4", "c2", "b"),
+        _edge("p5", "c3", "a"), _edge("p6", "c3", "b"),
+        _edge("p7", "c4", "a"), _edge("p8", "c4", "b"),
+        _edge("p9", "c5", "a"), _edge("p10", "c5", "b"),
+        _edge("p11", "c6", "a"), _edge("p12", "c6", "b"),
+        _edge("p13", "m1", "a"), _edge("p14", "m1", "b"),
+        _edge("p15", "m2", "a"), _edge("p16", "m2", "b"),
+        _edge("m1", "m3", "a"), _edge("k2", "m3", "b"),
+        _edge("m2", "c7", "a"), _edge("m3", "c7", "b"),
+        _edge("v1", "c8", "a"), _edge("z0", "c8", "b"),
+        _edge("c1", "and1"), _edge("c2", "and1"), _edge("c3", "and1"),
+        _edge("c4", "and1"), _edge("c5", "and1"), _edge("c6", "and1"),
+        _edge("c7", "and1"), _edge("c8", "and1"),
+        _edge("and1", "out"),
+        _edge("p18", "mx", "a"),
+        _edge("p17", "pc", "a"), _edge("mx", "pc", "b"), _edge("pc", "col", "a"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _asan_harami():
+    """هارامی صعودی — the inside-bar reversal, Asan's wiring.
+
+    The mirror image of the engulfing above and the reason both are worth
+    shipping: same six chips, four of the six comparisons flipped, and the body
+    test inverted — `(open-1 − close-1) > 2 × (close − open)`, because a harami's
+    candle is SMALLER than the one it sits inside."""
+    nodes = [
+        _node("p1", "price", 40, 40, field="close", shift=1),
+        _node("p2", "price", 40, 130, field="open", shift=1),
+        _node("c1", "compare", 260, 80, op="<"),          # close-1 < open-1
+        _node("p3", "price", 40, 220, field="close", shift=0),
+        _node("p4", "price", 40, 310, field="open", shift=0),
+        _node("c2", "compare", 260, 260, op=">"),         # close > open
+        _node("p5", "price", 40, 400, field="close", shift=0),
+        _node("p6", "price", 40, 490, field="open", shift=1),
+        _node("c3", "compare", 260, 440, op="<"),         # close < open-1
+        _node("p7", "price", 40, 580, field="open", shift=0),
+        _node("p8", "price", 40, 670, field="close", shift=1),
+        _node("c4", "compare", 260, 620, op=">"),         # open  > close-1
+        _node("p9", "price", 40, 760, field="low", shift=0),
+        _node("p10", "price", 40, 850, field="low", shift=1),
+        _node("c5", "compare", 260, 800, op=">"),         # low   > low-1
+        _node("p11", "price", 40, 940, field="high", shift=0),
+        _node("p12", "price", 40, 1030, field="high", shift=1),
+        _node("c6", "compare", 260, 980, op="<"),         # high  < high-1
+        _node("p13", "price", 40, 1120, field="open", shift=1),
+        _node("p14", "price", 40, 1210, field="close", shift=1),
+        _node("m1", "math", 260, 1160, op="-"),           # open-1 − close-1
+        _node("p15", "price", 40, 1300, field="close", shift=0),
+        _node("p16", "price", 40, 1390, field="open", shift=0),
+        _node("m2", "math", 260, 1340, op="-"),           # close − open
+        _node("k2", "const", 260, 1430, value=2.0),
+        _node("m3", "math", 440, 1380, op="*"),           # 2 × بدنهٔ امروز
+        _node("c7", "compare", 620, 1270, op=">"),
+        _node("and1", "and", 840, 620),
+        _node("out", "output", 1040, 620, within=1, sort="value"),
+    ]
+    edges = [
+        _edge("p1", "c1", "a"), _edge("p2", "c1", "b"),
+        _edge("p3", "c2", "a"), _edge("p4", "c2", "b"),
+        _edge("p5", "c3", "a"), _edge("p6", "c3", "b"),
+        _edge("p7", "c4", "a"), _edge("p8", "c4", "b"),
+        _edge("p9", "c5", "a"), _edge("p10", "c5", "b"),
+        _edge("p11", "c6", "a"), _edge("p12", "c6", "b"),
+        _edge("p13", "m1", "a"), _edge("p14", "m1", "b"),
+        _edge("p15", "m2", "a"), _edge("p16", "m2", "b"),
+        _edge("m2", "m3", "a"), _edge("k2", "m3", "b"),
+        _edge("m1", "c7", "a"), _edge("m3", "c7", "b"),
+        _edge("c1", "and1"), _edge("c2", "and1"), _edge("c3", "and1"),
+        _edge("c4", "and1"), _edge("c5", "and1"), _edge("c6", "and1"),
+        _edge("c7", "and1"),
+        _edge("and1", "out"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _asan_bollinger():
+    """Bolinger — قیمت از باند بالای بولینگر رد می‌شود."""
+    nodes = [
+        _node("p1", "price", 40, 60, field="close", shift=0),
+        _node("bb", "boll", 40, 160, n=20, k=2.0, kd=2.0, method="sma", src="close"),
+        _node("x1", "cross", 300, 110, op="CrossUp"),
+        _node("sig", "signal", 500, 200, signal="buy"),
+        _node("out", "output", 500, 110, within=3, sort="value"),
+    ]
+    edges = [
+        _edge("p1", "x1", "a"), _edge("bb", "x1", "b", from_port="upper"),
+        _edge("x1", "out"), _edge("x1", "sig"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _asan_sar_adx_exit():
+    """خروج با SAR و ضعف روند — قیمت زیر SAR و ‎+DI زیر ‎−DI."""
+    nodes = [
+        _node("p1", "price", 40, 60, field="close", shift=0),
+        _node("sar", "psar", 40, 150, step=0.02, cap=0.2),
+        _node("x1", "cross", 300, 100, op="CrossDn"),
+        _node("adx", "adx", 40, 260, n=14),
+        _node("c1", "compare", 300, 260, op="<="),        # +DI <= −DI
+        _node("and1", "and", 520, 170),
+        _node("sig", "signal", 720, 260, signal="sell"),
+        _node("out", "output", 720, 170, within=3, sort="value"),
+    ]
+    edges = [
+        _edge("p1", "x1", "a"), _edge("sar", "x1", "b"),
+        _edge("adx", "c1", "a", from_port="pdi"),
+        _edge("adx", "c1", "b", from_port="ndi"),
+        _edge("x1", "and1"), _edge("c1", "and1"),
+        _edge("and1", "out"), _edge("and1", "sig"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _asan_cci_rsi_stoch():
+    """CCI زیر ‎−۵۰، RSI زیر ۵۰ و تقاطع صعودی استوکاستیک."""
+    nodes = [
+        _node("cci", "cci", 40, 60, n=20),
+        _node("k1", "const", 40, 150, value=-50.0),
+        _node("c1", "compare", 300, 100, op="<="),
+        _node("rsi", "rsi", 40, 250, n=14, src="close"),
+        _node("k2", "const", 40, 340, value=50.0),
+        _node("c2", "compare", 300, 290, op="<="),
+        _node("st", "stoch", 40, 440, n=14, ks=3, ds=3, method="sma"),
+        _node("x1", "cross", 300, 440, op="CrossUp"),     # %K از %D رد شود
+        _node("and1", "and", 520, 270),
+        _node("sig", "signal", 720, 360, signal="buy"),
+        _node("out", "output", 720, 270, within=3, sort="value"),
+    ]
+    edges = [
+        _edge("cci", "c1", "a"), _edge("k1", "c1", "b"),
+        _edge("rsi", "c2", "a"), _edge("k2", "c2", "b"),
+        _edge("st", "x1", "a", from_port="k"), _edge("st", "x1", "b", from_port="d"),
+        _edge("c1", "and1"), _edge("c2", "and1"), _edge("x1", "and1"),
+        _edge("and1", "out"), _edge("and1", "sig"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _asan_stoch_sar_exit():
+    """خروج با استوکاستیک نزولی و شکست SAR."""
+    nodes = [
+        _node("st", "stoch", 40, 60, n=14, ks=3, ds=3, method="sma"),
+        _node("c1", "compare", 300, 60, op="<"),          # %K < %D
+        _node("p1", "price", 40, 200, field="close", shift=0),
+        _node("sar", "psar", 40, 290, step=0.02, cap=0.2),
+        _node("x1", "cross", 300, 240, op="CrossDn"),
+        _node("and1", "and", 520, 150),
+        _node("sig", "signal", 720, 240, signal="sell"),
+        _node("out", "output", 720, 150, within=3, sort="value"),
+    ]
+    edges = [
+        _edge("st", "c1", "a", from_port="k"), _edge("st", "c1", "b", from_port="d"),
+        _edge("p1", "x1", "a"), _edge("sar", "x1", "b"),
+        _edge("c1", "and1"), _edge("x1", "and1"),
+        _edge("and1", "out"), _edge("and1", "sig"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _asan_tema_dema():
+    """تقاطع TEMA ۹ و DEMA ۱۴ — ورود روی تقاطع صعودی، خروج روی نزولی."""
+    nodes = [
+        _node("t1", "tema", 40, 60, n=9, src="close"),
+        _node("d1", "dema", 40, 150, n=14, src="close"),
+        _node("x1", "cross", 300, 100, op="CrossUp"),
+        _node("v1", "price", 40, 250, field="volume", shift=0),
+        _node("z0", "const", 40, 340, value=0.0),
+        _node("c1", "compare", 300, 290, op="!="),
+        _node("and1", "and", 520, 190),
+        _node("sig", "signal", 720, 280, signal="buy"),
+        _node("out", "output", 720, 190, within=3, sort="value"),
+        # …و قاعدهٔ خروج همان استراتژی، روی همان بوم
+        _node("t2", "tema", 40, 460, n=9, src="close"),
+        _node("d2", "dema", 40, 550, n=14, src="close"),
+        _node("x2", "cross", 300, 500, op="CrossDn"),
+        _node("sig2", "signal", 520, 500, signal="sell"),
+    ]
+    edges = [
+        _edge("t1", "x1", "a"), _edge("d1", "x1", "b"),
+        _edge("v1", "c1", "a"), _edge("z0", "c1", "b"),
+        _edge("x1", "and1"), _edge("c1", "and1"),
+        _edge("and1", "out"), _edge("and1", "sig"),
+        _edge("t2", "x2", "a"), _edge("d2", "x2", "b"), _edge("x2", "sig2"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _asan_ema_stoch_rsi():
+    """EMA+STOCH — تقاطع EMA ۵ و ۱۰، استوکاستیک صعودی و RSI در سه دوره بالای ۵۰.
+
+    The three RSIs are the same indicator at 14, 30 and 70 — a slow-to-fast
+    agreement test, not a typo."""
+    nodes = [
+        _node("e1", "ema", 40, 60, n=5, src="close"),
+        _node("e2", "ema", 40, 150, n=10, src="close"),
+        _node("x1", "cross", 300, 100, op="CrossUp"),
+        _node("st", "stoch", 40, 250, n=14, ks=3, ds=3, method="sma"),
+        _node("c1", "compare", 300, 250, op=">="),        # %K >= %D
+        _node("r1", "rsi", 40, 390, n=14, src="close"),
+        _node("k1", "const", 40, 480, value=50.0),
+        _node("c2", "compare", 300, 430, op=">="),
+        _node("r2", "rsi", 40, 570, n=30, src="close"),
+        _node("k2", "const", 40, 660, value=50.0),
+        _node("c3", "compare", 300, 610, op=">="),
+        _node("r3", "rsi", 40, 750, n=70, src="close"),
+        _node("k3", "const", 40, 840, value=50.0),
+        _node("c4", "compare", 300, 790, op=">="),
+        _node("and1", "and", 540, 420),
+        _node("sig", "signal", 740, 510, signal="buy"),
+        _node("out", "output", 740, 420, within=3, sort="value"),
+    ]
+    edges = [
+        _edge("e1", "x1", "a"), _edge("e2", "x1", "b"),
+        _edge("st", "c1", "a", from_port="k"), _edge("st", "c1", "b", from_port="d"),
+        _edge("r1", "c2", "a"), _edge("k1", "c2", "b"),
+        _edge("r2", "c3", "a"), _edge("k2", "c3", "b"),
+        _edge("r3", "c4", "a"), _edge("k3", "c4", "b"),
+        _edge("x1", "and1"), _edge("c1", "and1"), _edge("c2", "and1"),
+        _edge("c3", "and1"), _edge("c4", "and1"),
+        _edge("and1", "out"), _edge("and1", "sig"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _asan_ichimoku_full():
+    """ایچیموکو کامل — بالای ابر، ابر سبز، تقاطع تنکان/کیجون و تأیید چیکو.
+
+    «چیکو» is the close drawn 26 bars back, so «چیکو > قیمت ۲۶ کندل پیش» is
+    written here as `close > close-26` — the same series, one chip fewer."""
+    nodes = [
+        _node("p1", "price", 40, 60, field="close", shift=0),
+        _node("ic", "ichimoku", 40, 160, tenkan=9, kijun=26, spanb=52),
+        _node("c1", "compare", 320, 90, op=">="),         # close >= spanA
+        _node("c2", "compare", 320, 200, op=">"),         # spanA > spanB
+        _node("x1", "cross", 320, 310, op="CrossUp"),     # تنکان از کیجون
+        _node("p2", "price", 40, 420, field="close", shift=0),
+        _node("p3", "price", 40, 510, field="close", shift=26),
+        _node("c3", "compare", 320, 460, op=">"),         # چیکو
+        _node("and1", "and", 560, 250),
+        _node("sig", "signal", 760, 340, signal="buy"),
+        _node("out", "output", 760, 250, within=3, sort="value"),
+        # قاعدهٔ خروج همان استراتژی
+        _node("mc", "macd", 40, 640, fast=12, slow=26, sig=9, src="close"),
+        _node("x2", "cross", 320, 640, op="CrossDn"),
+        _node("sig2", "signal", 560, 640, signal="sell"),
+    ]
+    edges = [
+        _edge("p1", "c1", "a"), _edge("ic", "c1", "b", from_port="spana"),
+        _edge("ic", "c2", "a", from_port="spana"),
+        _edge("ic", "c2", "b", from_port="spanb"),
+        _edge("ic", "x1", "a", from_port="tenkan"),
+        _edge("ic", "x1", "b", from_port="kijun"),
+        _edge("p2", "c3", "a"), _edge("p3", "c3", "b"),
+        _edge("c1", "and1"), _edge("c2", "and1"), _edge("x1", "and1"),
+        _edge("c3", "and1"),
+        _edge("and1", "out"), _edge("and1", "sig"),
+        _edge("mc", "x2", "a", from_port="macd"),
+        _edge("mc", "x2", "b", from_port="signal"),
+        _edge("x2", "sig2"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _asan_ichimoku_enter():
+    """ورود به ابر ایچیموکو — قیمت از اسپن A رد می‌شود و ابر سبز است."""
+    nodes = [
+        _node("p1", "price", 40, 60, field="close", shift=0),
+        _node("ic", "ichimoku", 40, 160, tenkan=9, kijun=26, spanb=52),
+        _node("x1", "cross", 320, 90, op="CrossUp"),      # close از spanA
+        _node("c1", "compare", 320, 200, op=">"),         # spanA > spanB
+        _node("and1", "and", 540, 150),
+        _node("sig", "signal", 740, 240, signal="buy"),
+        _node("out", "output", 740, 150, within=3, sort="value"),
+    ]
+    edges = [
+        _edge("p1", "x1", "a"), _edge("ic", "x1", "b", from_port="spana"),
+        _edge("ic", "c1", "a", from_port="spana"),
+        _edge("ic", "c1", "b", from_port="spanb"),
+        _edge("x1", "and1"), _edge("c1", "and1"),
+        _edge("and1", "out"), _edge("and1", "sig"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _asan_ichimoku_kijun():
+    """ICHI۵ — بالای ابر، ابر سبز، و عبور قیمت از کیجون.
+
+    Asan's screenshot draws the کیجون chip above the قیمت chip on that «تقاطع»,
+    which would read as "kijun crosses above close" — a falling price, and no
+    entry anyone writes a long branch for. It is transcribed the way the
+    strategy means it: قیمت از کیجون به بالا."""
+    nodes = [
+        _node("p1", "price", 40, 60, field="close", shift=0),
+        _node("ic", "ichimoku", 40, 160, tenkan=9, kijun=26, spanb=52),
+        _node("c1", "compare", 320, 90, op=">="),         # close >= spanA
+        _node("c2", "compare", 320, 200, op=">"),         # spanA > spanB
+        _node("p2", "price", 40, 320, field="close", shift=0),
+        _node("x1", "cross", 320, 310, op="CrossUp"),     # close از کیجون
+        _node("and1", "and", 560, 200),
+        _node("sig", "signal", 760, 290, signal="buy"),
+        _node("out", "output", 760, 200, within=3, sort="value"),
+        _node("mc", "macd", 40, 460, fast=12, slow=26, sig=9, src="close"),
+        _node("x2", "cross", 320, 460, op="CrossDn"),
+        _node("sig2", "signal", 560, 460, signal="sell"),
+    ]
+    edges = [
+        _edge("p1", "c1", "a"), _edge("ic", "c1", "b", from_port="spana"),
+        _edge("ic", "c2", "a", from_port="spana"),
+        _edge("ic", "c2", "b", from_port="spanb"),
+        _edge("p2", "x1", "a"), _edge("ic", "x1", "b", from_port="kijun"),
+        _edge("c1", "and1"), _edge("c2", "and1"), _edge("x1", "and1"),
+        _edge("and1", "out"), _edge("and1", "sig"),
+        _edge("mc", "x2", "a", from_port="macd"),
+        _edge("mc", "x2", "b", from_port="signal"),
+        _edge("x2", "sig2"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _asan_stoch_ema_adx():
+    """استوکاستیک + EMA + ADX — تقاطع استوکاستیک با تأیید روند."""
+    nodes = [
+        _node("st", "stoch", 40, 60, n=14, ks=3, ds=3, method="sma"),
+        _node("x1", "cross", 320, 60, op="CrossUp"),      # %K از %D
+        _node("e1", "ema", 40, 200, n=14, src="close"),
+        _node("e2", "ema", 40, 290, n=42, src="close"),
+        _node("c1", "compare", 320, 240, op=">="),
+        _node("adx", "adx", 40, 400, n=14),
+        _node("c2", "compare", 320, 400, op=">="),        # +DI >= −DI
+        _node("and1", "and", 560, 230),
+        _node("sig", "signal", 760, 320, signal="buy"),
+        _node("out", "output", 760, 230, within=3, sort="value"),
+        _node("p1", "price", 40, 520, field="close", shift=0),
+        _node("sar", "psar", 40, 610, step=0.02, cap=0.2),
+        _node("x2", "cross", 320, 560, op="CrossDn"),
+        _node("sig2", "signal", 560, 560, signal="sell"),
+    ]
+    edges = [
+        _edge("st", "x1", "a", from_port="k"), _edge("st", "x1", "b", from_port="d"),
+        _edge("e1", "c1", "a"), _edge("e2", "c1", "b"),
+        _edge("adx", "c2", "a", from_port="pdi"),
+        _edge("adx", "c2", "b", from_port="ndi"),
+        _edge("x1", "and1"), _edge("c1", "and1"), _edge("c2", "and1"),
+        _edge("and1", "out"), _edge("and1", "sig"),
+        _edge("p1", "x2", "a"), _edge("sar", "x2", "b"), _edge("x2", "sig2"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _asan_macd_ema():
+    """MACD+EMA — تقاطع صعودی MACD وقتی EMA ۱۳ بالای EMA ۲۶ است."""
+    nodes = [
+        _node("e1", "ema", 40, 60, n=13, src="close"),
+        _node("e2", "ema", 40, 150, n=26, src="close"),
+        _node("c1", "compare", 320, 100, op=">="),
+        _node("mc", "macd", 40, 260, fast=12, slow=26, sig=9, src="close"),
+        _node("x1", "cross", 320, 260, op="CrossUp"),
+        _node("and1", "and", 540, 180),
+        _node("sig", "signal", 740, 270, signal="buy"),
+        _node("out", "output", 740, 180, within=3, sort="value"),
+        _node("mc2", "macd", 40, 420, fast=12, slow=26, sig=9, src="close"),
+        _node("x2", "cross", 320, 420, op="CrossDn"),
+        _node("sig2", "signal", 540, 420, signal="sell"),
+    ]
+    edges = [
+        _edge("e1", "c1", "a"), _edge("e2", "c1", "b"),
+        _edge("mc", "x1", "a", from_port="macd"),
+        _edge("mc", "x1", "b", from_port="signal"),
+        _edge("c1", "and1"), _edge("x1", "and1"),
+        _edge("and1", "out"), _edge("and1", "sig"),
+        _edge("mc2", "x2", "a", from_port="macd"),
+        _edge("mc2", "x2", "b", from_port="signal"),
+        _edge("x2", "sig2"),
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
 EXAMPLES = [
     {"key": "engulf", "name": "کندل پوشای صعودی",
      "desc": "کندل سبز امروز، بدنهٔ کندل قرمز دیروز را کامل می‌پوشاند و حجم بالای میانگین ۲۰ روزه است.",
@@ -4370,4 +4926,61 @@ EXAMPLES = [
      "desc": "قیمت کمتر از ۳٪ زیر نزدیک‌ترین سقف نوسانی تأییدشده، با ADX بالای ۲۰. "
              "فاصله با یک جعبهٔ «فرمول‌نویسی» حساب شده است.",
      "graph": _breaking_resistance()},
+
+    # ── فایل‌های آمادهٔ آسان بورس ──────────────────────────────────────────
+    # Transcribed from the reference product's own canvas; see the block
+    # comment above _asan_engulfing() for the four things that do not map
+    # one-to-one and why.
+    {"key": "asan_engulf", "name": "کندل پوشای صعودی (بدنهٔ دوبرابر)",
+     "desc": "هر شش شرط پوشای صعودی آسان بورس: دیروز قرمز، امروز سبز، بدنه بیرون "
+             "بدنهٔ دیروز، سقف بالاتر و کف پایین‌تر — به‌علاوهٔ شرطی که نسخهٔ سادهٔ "
+             "«کندل پوشای صعودی» ندارد: بدنهٔ امروز بیش از دو برابر بدنهٔ دیروز. "
+             "ستون خروجی فاصلهٔ قیمت تا سقف ۲۰۰ کندل را نشان می‌دهد.",
+     "graph": _asan_engulfing()},
+    {"key": "asan_harami", "name": "هارامی صعودی",
+     "desc": "وارونهٔ پوشای صعودی: کندل سبز امروز کاملاً داخل کندل قرمز دیروز جا "
+             "می‌شود — سقف پایین‌تر، کف بالاتر — و بدنهٔ دیروز بیش از دو برابر امروز است.",
+     "graph": _asan_harami()},
+    {"key": "asan_boll", "name": "شکست باند بالای بولینگر",
+     "desc": "قیمت از باند بالای بولینگر (SMA ۲۰، ۲ انحراف معیار) به بالا عبور می‌کند.",
+     "graph": _asan_bollinger()},
+    {"key": "asan_cci", "name": "اشباع فروش سه‌گانه",
+     "desc": "CCI زیر ‎−۵۰، RSI زیر ۵۰ و تقاطع صعودی ‎%K و ‎%D استوکاستیک — سه "
+             "نوسان‌نما که باید هم‌زمان اشباع فروش را تأیید کنند.",
+     "graph": _asan_cci_rsi_stoch()},
+    {"key": "asan_tema", "name": "تقاطع TEMA و DEMA",
+     "desc": "TEMA ۹ از DEMA ۱۴ به بالا عبور می‌کند و نماد معامله شده است؛ قاعدهٔ "
+             "خروج (تقاطع نزولی) هم روی همان بوم به‌عنوان برچسب سیگنال آمده است.",
+     "graph": _asan_tema_dema()},
+    {"key": "asan_ema_stoch", "name": "تقاطع EMA با تأیید استوکاستیک و RSI",
+     "desc": "EMA ۵ از EMA ۱۰ رد می‌شود، ‎%K بالای ‎%D است، و RSI در هر سه دورهٔ "
+             "۱۴، ۳۰ و ۷۰ بالای ۵۰ است — هم‌جهت‌بودن کوتاه‌مدت تا بلندمدت.",
+     "graph": _asan_ema_stoch_rsi()},
+    {"key": "asan_ichi_full", "name": "ایچیموکو کامل",
+     "desc": "قیمت بالای اسپن A، ابر سبز (اسپن A بالای B)، تقاطع صعودی تنکان و "
+             "کیجون، و تأیید چیکو (قیمت بالاتر از ۲۶ کندل پیش). خروج با تقاطع "
+             "نزولی MACD.",
+     "graph": _asan_ichimoku_full()},
+    {"key": "asan_ichi_enter", "name": "ورود به ابر ایچیموکو",
+     "desc": "سبک‌ترین حالت ایچیموکو: قیمت از اسپن A به بالا عبور می‌کند و ابر سبز است.",
+     "graph": _asan_ichimoku_enter()},
+    {"key": "asan_ichi_kijun", "name": "ایچیموکو با عبور از کیجون",
+     "desc": "قیمت بالای ابر سبز است و از خط کیجون به بالا عبور می‌کند. خروج با "
+             "تقاطع نزولی MACD.",
+     "graph": _asan_ichimoku_kijun()},
+    {"key": "asan_stoch_ema", "name": "استوکاستیک + EMA + ADX",
+     "desc": "تقاطع صعودی استوکاستیک، EMA ۱۴ بالای EMA ۴۲ و ‎+DI بالای ‎−DI — "
+             "نوسان‌نما فقط وقتی که روند هم‌جهت باشد. خروج با شکست SAR.",
+     "graph": _asan_stoch_ema_adx()},
+    {"key": "asan_macd_ema", "name": "تقاطع MACD با تأیید EMA",
+     "desc": "MACD از خط سیگنال به بالا عبور می‌کند در حالی که EMA ۱۳ بالای EMA ۲۶ "
+             "است. خروج با تقاطع نزولی MACD.",
+     "graph": _asan_macd_ema()},
+    {"key": "asan_sar_adx", "name": "خروج: شکست SAR با ضعف روند",
+     "desc": "قیمت از Parabolic SAR به پایین می‌شکند و ‎+DI زیر ‎−DI رفته است — "
+             "قاعدهٔ خروج آسان بورس، به‌صورت یک فیلتر مستقل.",
+     "graph": _asan_sar_adx_exit()},
+    {"key": "asan_stoch_sar", "name": "خروج: استوکاستیک نزولی و شکست SAR",
+     "desc": "‎%K زیر ‎%D رفته و قیمت از SAR به پایین شکسته است.",
+     "graph": _asan_stoch_sar_exit()},
 ]

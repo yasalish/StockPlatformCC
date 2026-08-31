@@ -1,0 +1,56 @@
+/**
+ * designer_backtest.ts — entry point for /filter-backtest.
+ *
+ * The third designer page. Boots exactly like designer_result.ts — it needs the
+ * catalogue for the node metadata (the read-only diagram labels its chips from
+ * it) and takes the graph itself from a saved filter or from the canvas draft.
+ */
+import { createApp, h } from "vue";
+import BacktestApp from "./designer/BacktestApp.vue";
+import type { Catalog } from "./designer/graph";
+
+async function boot() {
+  const host = document.getElementById("designer-backtest");
+  if (!host) return;
+
+  const q = new URLSearchParams(window.location.search);
+  const kind = q.get("kind") === "etf" ? "etf" : "stock";
+  const group = q.get("group") ?? "";
+  const rawId = Number(host.dataset.filterId || q.get("filter") || 0);
+  const filterId = Number.isFinite(rawId) && rawId > 0 ? rawId : null;
+
+  let catalog: Catalog;
+  try {
+    const cq = new URLSearchParams({ kind });
+    if (group) cq.set("group", group);
+    const res = await fetch(`/api/designer/catalog?${cq}`, {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    catalog = (await res.json()) as Catalog;
+  } catch (err) {
+    console.error("[bn] filter backtest page failed to load:", err);
+    document.querySelectorAll<HTMLElement>(".bn-island-fallback").forEach((n) => {
+      n.hidden = false;
+    });
+    return;
+  }
+
+  document.querySelectorAll<HTMLElement>(".bn-island-noscript").forEach((n) => n.remove());
+  host.hidden = false;
+  createApp({
+    render: () =>
+      h(BacktestApp, {
+        catalog,
+        filterId,
+        detailBaseStock: host.dataset.detailBaseStock ?? "",
+        detailBaseEtf: host.dataset.detailBaseEtf ?? "",
+      }),
+  }).mount(host);
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", boot);
+} else {
+  void boot();
+}

@@ -26,6 +26,10 @@ the previous collection of separate Streamlit scripts. Same PostgreSQL database
   جدول تمام‌عرض نمادهای منطبق، با خروجی CSV، فهرست «فیلترهای دیگر» در سمت راست
   برای اجرای یک‌کلیکی بقیهٔ فیلترها، و دکمهٔ «چرا؟» که مقدار همهٔ جعبه‌ها را برای یک
   نماد روی نمودار همان فیلتر نشان می‌دهد.
+- **بک‌تست فیلتر** (`/filter-backtest`) — همان فیلتر، بازپخش‌شده روی تاریخچه: هر
+  کندلی که شرط در آن تازه برقرار شده یک سیگنال است، ورود با قیمت باز شدن کندل بعد،
+  و بازده ۱ تا ۲۲ کندل بعد در برابر «خرید کل بازار در همان روزها». ورودهای غیرقابل
+  انجام (صف خرید، نماد متوقف) کنار گذاشته و شمرده می‌شوند.
 - **راهنما** (`/help`) و **درباره** (`/about`).
 - **جستجو** — جستجوی زندهٔ نماد/نام (سهام + صندوق) در نوار بالا.
 
@@ -670,6 +674,7 @@ reason — they were shipping between 1 MB and 2.2 MB of markup per navigation:
 | /screener | `screener.ts` → `ScreenerPanel` / `ScreenerGrid` | `/api/screener/<kind>` | window-virtualized ranked table |
 | /filter-designer | `designer.ts` → `DesignerApp` / `GraphCanvas` | `/api/designer/*` | node-graph editor; not a table at all |
 | /filter-designer/result | `designer_result.ts` → `ResultApp` | `/api/designer/run`, `/explain` | the matches, plus the same canvas read-only |
+| /filter-backtest | `designer_backtest.ts` → `BacktestApp` / `EquityChart` | `/api/designer/backtest` | the report card; hand-written SVG, no chart library |
 
 `watchlist.html` and the remaining templates still use `BN.initTable`, which is
 the right tool for a table of a few dozen rows.

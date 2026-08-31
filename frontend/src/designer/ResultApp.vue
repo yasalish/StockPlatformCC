@@ -29,7 +29,7 @@
 import { computed, nextTick, onMounted, ref } from "vue";
 import GraphCanvas from "./GraphCanvas.vue";
 import ResultPanel from "./ResultPanel.vue";
-import { loadDraft, saveDraft, designerUrl, resultUrl, type Draft } from "./draft";
+import { backtestUrl, loadDraft, saveDraft, designerUrl, resultUrl, type Draft } from "./draft";
 import {
   chipTitle,
   valueAt,
@@ -83,6 +83,14 @@ const detailBase = computed(() =>
   kind.value === "stock" ? props.detailBaseStock : props.detailBaseEtf,
 );
 const backUrl = computed(() => designerUrl(savedId.value));
+const btUrl = computed(() =>
+  backtestUrl({
+    id: savedId.value,
+    kind: kind.value,
+    group: group.value,
+    subgroup: subgroup.value,
+  }),
+);
 
 /* ------------------------------------------------------------------ fetch */
 async function post<T>(url: string, body: unknown): Promise<T> {
@@ -346,6 +354,12 @@ onMounted(async () => {
         <button type="button" class="btn btn-primary" :disabled="busy || missing" @click="run">
           <span v-if="busy">در حال اجرا…</span><span v-else>↻ اجرای دوباره</span>
         </button>
+        <!-- The list this page shows is what the filter says TODAY. The
+             backtest is what it said on the other seven hundred days, and it
+             belongs next to the list rather than behind a menu: a user looking
+             at forty matches is exactly the user who should be asking whether
+             matches like these have been worth anything. -->
+        <a class="btn" :href="btUrl" title="همین فیلتر روی تاریخچه">⏱ بک‌تست</a>
       </div>
 
       <div class="dz-bar-g">

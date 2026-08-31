@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · بک‌تست فیلتر{% endblock %}
+{% block body_class %}designer-page{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">بک‌تست فیلتر</h1>
+    <p class="page-sub">
+      همان فیلتر، این‌بار روی تاریخچه. هر کندلی که شرط در آن برقرار شده یک سیگنال است؛
+      ورود با قیمت باز شدن کندل بعد و خروج پس از چند کندل، و نتیجه در برابر «خرید کل
+      بازار در همان روزها» سنجیده می‌شود.
+    </p>
+  </div>
+</div>
+
+{# ── the island. Like the result page, the graph is NOT rendered here: it comes
+   from the database when the URL names a saved filter, and otherwise from the
+   draft the canvas left in localStorage (frontend/src/designer/draft.ts). #}
+<div id="designer-backtest" hidden
+     data-filter-id="{{ filter_id or '' }}"
+     data-kind="{{ kind }}"
+     data-detail-base-stock="{{ url_for('stock_detail', stock_id=0)[:-1] }}"
+     data-detail-base-etf="{{ url_for('etf_detail', etf_id=0)[:-1] }}"></div>
+
+<p class="muted note bn-island-noscript">در حال بازپخش فیلتر روی تاریخچه…</p>
+
+<section class="panel bn-island-fallback" hidden>
+  <div class="panel-head"><h2>بک‌تست فیلتر</h2></div>
+  <p class="muted note">
+    بک‌تست بارگذاری نشد. صفحه را دوباره بارگذاری کنید، یا به
+    <a href="{{ url_for('filter_designer_page') }}">طراحی فیلتر</a> برگردید.
+  </p>
+</section>
+
+<p class="muted small note disclaimer">
+  ⚠ بازده گذشته تضمینی برای آینده نیست. این محاسبه از دادهٔ قیمت تعدیل‌شده انجام می‌شود،
+  نمادهای حذف‌شده را در بر نمی‌گیرد، و توصیهٔ خرید یا فروش نیست.
+</p>
+{% endblock %}
+
+{% block scripts %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/designer.css') }}?v={{ asset_version('css/designer.css') }}">
+<script type="module"
+        src="{{ url_for('static', filename='dist/designer_backtest.js') }}?v={{ asset_version('dist/designer_backtest.js') }}"></script>
+{% endblock %}

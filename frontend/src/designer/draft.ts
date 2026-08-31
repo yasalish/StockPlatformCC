@@ -86,3 +86,22 @@ export function resultUrl(o: {
 export function designerUrl(id?: number | null): string {
   return "/filter-designer" + (id ? `?filter=${id}` : "");
 }
+
+/** «بک‌تست» — the same graph, replayed over history. Built the same way as
+ *  resultUrl so the three designer pages carry scope between them identically:
+ *  switching to the backtest must not silently widen a filter that was scoped
+ *  to one صنعت. */
+export function backtestUrl(o: {
+  id?: number | null;
+  kind: string;
+  group?: string;
+  subgroup?: string;
+}): string {
+  const q = new URLSearchParams();
+  if (o.id) q.set("filter", String(o.id));
+  if (o.kind && o.kind !== "stock") q.set("kind", o.kind);
+  if (o.group) q.set("group", o.group);
+  if (o.subgroup) q.set("subgroup", o.subgroup);
+  const s = q.toString();
+  return "/filter-backtest" + (s ? `?${s}` : "");
+}

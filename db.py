@@ -328,6 +328,24 @@ def _rows(sql, params=()):
         release(conn)
 
 
+def _tuples(sql, params=()):
+    """_rows() without the dicts — raw tuples, in SELECT order.
+
+    For the two callers that read a million rows at once (the designer's price
+    panel and the backtester's), where the dict is the expensive part rather
+    than the query. Building 911k RealDict rows for a 1300-bar market panel
+    measured 17.5 s of the 25 s that load took; the same fetch into tuples is
+    4.0 s. Everything else in this module keeps _rows(): a dict per row is worth
+    it at a hundred rows and ruinous at a million."""
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+    finally:
+        release(conn)
+
+
 def _one(sql, params=()):
     r = _rows(sql, params)
     return r[0] if r else None

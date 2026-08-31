@@ -460,3 +460,98 @@ body.designer-page .container { max-width: min(1900px, 98vw); }
 /* Parts under a sub-shelf indent one more step; parts in a category that has no
    sub-shelves keep the original indent, which .dz-part already sets. */
 .dz-subbody .dz-part { padding-inline-start: 30px; }
+
+/* ── «بک‌تست فیلتر» ───────────────────────────────────────────────────────
+   The third designer page. It borrows the site's panel chrome and `table.grid`
+   wholesale so a backtest reads like every other report here; only the tiles,
+   the two-colour chart and the report table below are its own.
+
+   The colour rule throughout: --up / --down carry the sign of a RETURN, never
+   the identity of a series. The strategy line is --accent and the market line
+   is a neutral grey, because a market that fell is not "bad" and painting it
+   red would say it was. */
+.dz-bt { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+.dz-bt-ctl-row {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3);
+}
+.dz-bt-ctl-row .dz-field { margin: 0; }
+.dz-bt-check {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-12); color: var(--ink-2); cursor: pointer;
+  padding-block-end: 6px;
+}
+.dz-bt-check input { accent-color: var(--accent); }
+.dz-bt-ctl-row .btn { margin-inline-start: auto; }
+.dz-bt-links { margin: var(--sp-2) 0 0; }
+.dz-linkish {
+  background: none; border: 0; padding: 0; font: inherit; cursor: pointer;
+  color: var(--accent); text-decoration: underline;
+}
+.dz-bt-graph { padding: 0; height: 320px; overflow: hidden; }
+
+/* ── headline tiles ──────────────────────────────────────────────────── */
+.dz-bt-title {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2);
+  margin: 0 0 var(--sp-3); font-size: var(--fs-14);
+}
+.dz-bt-tiles {
+  display: grid; gap: var(--sp-2);
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+}
+.dz-bt-tile {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-2, var(--code-bg));
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+}
+.dz-bt-tile b { font-size: 1.35em; font-weight: 800; line-height: 1.25; }
+.dz-bt-tile span { font-size: var(--fs-11); color: var(--ink-3); }
+.dz-bt-tile.is-up b { color: var(--up); }
+.dz-bt-tile.is-dn b { color: var(--down); }
+
+/* ── the report table ────────────────────────────────────────────────── */
+.dz-bt-table th[scope="row"] {
+  text-align: start; font-weight: 600; color: var(--ink-2); white-space: nowrap;
+}
+.dz-bt-table td { text-align: center; font-variant-numeric: tabular-nums; }
+/* A rule above «بازار» separates what the filter did from what it is being
+   measured against — the two halves of the only comparison that matters. */
+.dz-bt-sep th, .dz-bt-sep td { border-block-start: 1px solid var(--line); }
+.dz-bt-key-row th, .dz-bt-key-row td { background: var(--accent-soft); }
+.dz-bt-key-row td b { font-size: 1.1em; }
+.dz-bt-minmax { display: flex; flex-direction: column; gap: 1px; font-size: var(--fs-11); }
+.is-up { color: var(--up); }
+.is-dn { color: var(--down); }
+
+/* ── the curve ───────────────────────────────────────────────────────── */
+.dz-bt-chart { margin: 0; }
+.dz-bt-chart svg { width: 100%; height: auto; display: block; }
+.dz-bt-grid line { stroke: var(--line-soft); stroke-width: 1; }
+.dz-bt-grid text { fill: var(--ink-3); font-size: 10px; }
+.dz-bt-xlab text { fill: var(--ink-3); font-size: 10px; }
+.dz-bt-strat { stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.dz-bt-bench { stroke: var(--ink-3); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.dz-bt-legend {
+  display: flex; flex-wrap: wrap; gap: var(--sp-3);
+  padding-block-start: var(--sp-2); font-size: var(--fs-12);
+}
+.dz-bt-key { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.dz-bt-key::before {
+  content: ""; width: 14px; height: 0; border-block-start: 3px solid currentColor;
+}
+.dz-bt-key.is-strat { color: var(--accent); }
+.dz-bt-key.is-bench { color: var(--ink-3); }
+
+/* ── caveats ─────────────────────────────────────────────────────────── */
+.dz-bt-cav { margin: 0; padding-inline-start: 1.2em; color: var(--ink-2); line-height: 1.9; }
+.dz-bt-cav li { font-size: var(--fs-12); }
+.dz-bt-cav .is-warn { color: var(--down); font-weight: 600; }
+
+/* The holding period the curve and the tiles use, marked in the trade table so
+   the three cannot be read as describing different things. */
+.dz-bt-trades td.is-hold { font-weight: 700; background: var(--accent-soft); }
+
+@media (max-width: 720px) {
+  .dz-bt-ctl-row .btn { margin-inline-start: 0; width: 100%; }
+}

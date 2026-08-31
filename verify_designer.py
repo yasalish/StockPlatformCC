@@ -390,6 +390,41 @@ shallow, deep = budget(one), budget(fe.EXAMPLES[1]["graph"])
 check(shallow < deep, "bars_needed() asks for less history for a shallower graph",
       f"{shallow} vs {deep} (SMA 200)")
 
+# …and it has to count the branches feeding «ستون خروجی», not just the one
+# feeding «خروجی فیلتر». A column reading a 200-bar MAX sits on a branch of its
+# own; budgeting from the output node alone loaded 150 bars for it and printed
+# an em dash in that column for every symbol, while the filter itself worked —
+# which reads as missing data rather than as a missing window.
+_col_graph = graph(
+    [N("p", "price", 0, 0, tf="D", field="close", shift=0),
+     N("k", "const", 0, 0, value=0),
+     N("c", "compare", 0, 0, op=">", tol=0),
+     N("o", "output", 0, 0, within=1, sort="price"),
+     N("pc", "price", 0, 0, tf="D", field="close", shift=0),
+     N("mx", "agg", 0, 0, tf="D", op="MAX", n=200, shift=0),
+     N("col", "column", 0, 0, label="سقف ۲۰۰", digits=2, sort="desc")],
+    [E("p", "c", "a"), E("k", "c", "b"), E("c", "o", "in"),
+     E("pc", "mx", "a"), E("mx", "col", "a")])
+check(budget(_col_graph) > 200,
+      "…and counts the history a «ستون خروجی» branch needs, not only the output's",
+      f"{budget(_col_graph)} bars for a 200-bar MAX in a column")
+_col_run = fe.run(_col_graph, kind="stock")
+_col_vals = [r["vals"].get("col") for r in _col_run["rows"][:50]]
+check(_col_vals and all(v is not None for v in _col_vals),
+      "…so the column actually prints a number",
+      f"{sum(v is not None for v in _col_vals)}/{len(_col_vals)} rows")
+# A chip wired to nothing must NOT drag the whole run into a deeper bucket.
+_stray = graph(
+    [N("p", "price", 0, 0, tf="D", field="close", shift=0),
+     N("k", "const", 0, 0, value=0),
+     N("c", "compare", 0, 0, op=">", tol=0),
+     N("o", "output", 0, 0, within=1, sort="price"),
+     N("junk", "sma", 0, 0, tf="D", n=400, method="sma", src="final", shift=0)],
+    [E("p", "c", "a"), E("k", "c", "b"), E("c", "o", "in")])
+check(budget(_stray) < 200,
+      "…while an unwired chip on the canvas costs no extra history",
+      f"{budget(_stray)} bars despite an SMA 400 wired to nothing")
+
 # Only the columns the graph reads are loaded.
 check(set(fe.fields_needed(fe.normalise(one)[0])) == {"c", "f", "h", "l"},
       "fields_needed() narrows the SELECT to the columns actually read",
