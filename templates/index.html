@@ -2,82 +2,106 @@
 {% block title %}بورس‌نگار · سامانهٔ یکپارچهٔ تحلیل بازار سرمایه{% endblock %}
 {% block body_class %}home-page{% endblock %}
 
+{#  ── صفحهٔ معرفی / the landing page ─────────────────────────────────────────
+    Renders instantly with NO database work. The live market data lives on the
+    dashboard (/dashboard) and it stays there: the one page a first-time visitor
+    sees should not wait on a market-wide scan.
+
+    This page is the ONLY one that carries `home-page`, and landing.css scopes
+    every one of its rules to that class. That is what lets this surface use a
+    52px headline and 96px section rhythm while /performance keeps the 12px,
+    40px terminal scale that fits 782 rows × 20 columns on a screen. The two
+    are not a compromise of each other — they are two different reading
+    distances, and the class is the boundary between them.
+
+    The hero fills base.html's `hero` block rather than `content`, because that
+    block sits outside <main class="container"> and the hero has to reach both
+    edges of the window.
+    ------------------------------------------------------------------------- #}
+
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}?v={{ asset_version('css/landing.css') }}">
+{% endblock %}
+
+{% block hero %}
+<section class="l-hero">
+  <div class="l-hero-inner">
+    <span class="l-eyebrow">
+      <svg class="ico" aria-hidden="true"><use href="#i-chart"></use></svg>
+      بورس اوراق بهادار تهران · داده‌های روزآمد
+    </span>
+
+    <h1>تحلیل هوشمند بازار سرمایه، <em>یک‌جا</em></h1>
+
+    <p class="l-lead">
+      بازدهٔ دوره‌ای، سقف و کف قیمت، استراتژی‌های معاملاتی و فیلترهای پیشرفته روی
+      داده‌های روزآمد بورس تهران — سریع، دقیق و کاربرپسند.
+    </p>
+
+    <div class="l-cta">
+      <a class="btn primary" href="{{ url_for('dashboard') }}">
+        <svg class="ico" aria-hidden="true"><use href="#i-dashboard"></use></svg>
+        ورود به داشبورد بازار
+      </a>
+      <a class="btn ghost" href="{{ url_for('performance_page') }}">
+        مشاهدهٔ بازدهٔ دوره‌ای
+      </a>
+    </div>
+
+    {#  قاب محصول — the product frame.
+
+        What is inside it right now is an ILLUSTRATION drawn from the theme
+        tokens: bars and pills, no numbers, nothing that could be mistaken for
+        a real quote. It is marked aria-hidden and carries no text for exactly
+        that reason.
+
+        The moment a real capture of /dashboard exists, replace everything
+        inside `.l-shot-body` with a single
+
+            <img src="…/shots/dashboard.webp" alt="نمای داشبورد بازار">
+
+        and nothing else on this page has to change. A real screenshot of the
+        product is worth more here than any illustration — it is the one asset
+        this page is still missing.  #}
+    <div class="l-shot">
+      <div class="l-shot-bar" aria-hidden="true">
+        <span class="l-shot-dot"></span>
+        <span class="l-shot-dot"></span>
+        <span class="l-shot-dot"></span>
+        <span class="l-shot-url">boursenegar / dashboard</span>
+      </div>
+      <div class="l-shot-body">
+        <div class="l-mock" role="img" aria-label="نمای نمونه از داشبورد بازار">
+          <div class="l-mock-top" aria-hidden="true">
+            <div class="l-mock-stat up"><span></span><span></span></div>
+            <div class="l-mock-stat"><span></span><span></span></div>
+            <div class="l-mock-stat down"><span></span><span></span></div>
+            <div class="l-mock-stat up"><span></span><span></span></div>
+          </div>
+          <div class="l-mock-chart" aria-hidden="true">
+            <svg viewBox="0 0 600 130" preserveAspectRatio="none">
+              <path class="l-spark-fill"
+                    d="M0 96 L60 84 L120 92 L180 66 L240 74 L300 48 L360 56 L420 30
+                       L480 40 L540 18 L600 26 L600 130 L0 130 Z"/>
+              <path class="l-spark-line" fill="none"
+                    d="M0 96 L60 84 L120 92 L180 66 L240 74 L300 48 L360 56 L420 30
+                       L480 40 L540 18 L600 26"/>
+            </svg>
+          </div>
+          <div class="l-mock-rows" aria-hidden="true">
+            <div class="l-mock-row"><i></i><i></i><i class="pos"></i><i></i></div>
+            <div class="l-mock-row"><i></i><i></i><i class="pos"></i><i></i></div>
+            <div class="l-mock-row"><i></i><i></i><i class="neg"></i><i></i></div>
+            <div class="l-mock-row"><i></i><i></i><i class="pos"></i><i></i></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
 {% block content %}
-{#  Professional landing page — renders instantly with NO database work. The
-    live market data lives on the dashboard (/dashboard), and it stays there:
-    the one page a first-time visitor sees should not wait on a market-wide
-    scan.
-
-    Rewritten with the redesign to use the shared component classes (.hero,
-    .btn, .feature-card) instead of a parallel set of .landing-* rules, so the
-    landing page inherits the design system rather than restating it. The icons
-    are the _icons.html sprite: 📊 and 🏛️ were pictures chosen by the operating
-    system's emoji font — a different drawing on every platform, unable to
-    inherit the theme colour, and rendered as coloured mush at 34px.  #}
-<section class="hero">
-  <span class="hero-badge">
-    <svg class="ico" aria-hidden="true"><use href="#i-chart"></use></svg>
-    بورس اوراق بهادار تهران
-  </span>
-  <h1>تحلیل هوشمند بازار سرمایه، یک‌جا</h1>
-  <p>
-    بازدهٔ دوره‌ای، سقف و کف قیمت، استراتژی‌های معاملاتی و فیلترهای پیشرفته روی
-    داده‌های روزآمد بورس تهران — سریع، دقیق و کاربرپسند.
-  </p>
-  <div class="hero-actions">
-    <a class="btn primary" href="{{ url_for('dashboard') }}">
-      <svg class="ico" aria-hidden="true"><use href="#i-dashboard"></use></svg>
-      ورود به داشبورد بازار
-    </a>
-    <a class="btn ghost" href="{{ url_for('performance_page') }}">
-      مشاهدهٔ بازدهٔ دوره‌ای
-    </a>
-  </div>
-</section>
-
-<section>
-  <div class="section-head">
-    <h2>امکانات سامانه</h2>
-    <p>هر ابزار برای یک تصمیم بهتر در بازار</p>
-  </div>
-  <div class="feature-grid">
-    <a class="feature-card" href="{{ url_for('dashboard') }}">
-      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-dashboard"></use></svg></div>
-      <h3>داشبورد بازار</h3>
-      <p>نمای کلی بازار، برترین بازده‌ها و بیشترین افت‌ها در یک نگاه.</p>
-    </a>
-    <a class="feature-card" href="{{ url_for('performance_page') }}">
-      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-chart"></use></svg></div>
-      <h3>بازدهٔ دوره‌ای</h3>
-      <p>بازده، سقف و کف هر نماد در بازه‌های ۱ هفته تا ۳ سال و «از ابتدا».</p>
-    </a>
-    <a class="feature-card" href="{{ url_for('stocks_page') }}">
-      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-stock"></use></svg></div>
-      <h3>تحلیل سهام</h3>
-      <p>رتبه‌بندی و مقایسهٔ نمادهای بازار بر پایهٔ بازدهی دوره‌های مختلف.</p>
-    </a>
-    <a class="feature-card" href="{{ url_for('etfs_page') }}">
-      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-fund"></use></svg></div>
-      <h3>صندوق‌های سرمایه‌گذاری</h3>
-      <p>عملکرد صندوق‌های قابل معامله (ETF) به تفکیک نوع و بازدهی.</p>
-    </a>
-    <a class="feature-card" href="{{ url_for('strategies_page') }}">
-      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-target"></use></svg></div>
-      <h3>استراتژی‌ها</h3>
-      <p>پویش بازار بر پایهٔ سیگنال‌ها و شرایط معاملاتی از پیش تعریف‌شده.</p>
-    </a>
-    <a class="feature-card" href="{{ url_for('filters_page') }}">
-      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-filter"></use></svg></div>
-      <h3>فیلترهای پیشرفته</h3>
-      <p>غربال نمادها با ترکیب معیارهای دلخواه برای یافتن فرصت‌ها.</p>
-    </a>
-    <a class="feature-card" href="{{ url_for('filter_designer_page') }}">
-      <div class="feature-icon"><svg aria-hidden="true"><use href="#i-filter"></use></svg></div>
-      <h3>طراحی فیلتر</h3>
-      <p>فیلتر دلخواهتان را جعبه‌به‌جعبه بسازید و همان لحظه روی کل بازار اجرا کنید.</p>
-    </a>
-  </div>
-</section>
 
 {% if current_user.is_authenticated %}
 <section class="panel welcome-panel">
@@ -96,4 +120,109 @@
   </div>
 </section>
 {% endif %}
+
+{#  امکانات — seven cards, unnumbered. They are a set, not a sequence, and
+    numbering a set is decoration. The three steps further down ARE a sequence,
+    so those are numbered.  #}
+<section class="l-section">
+  <div class="l-head l-reveal">
+    <h2>امکانات سامانه</h2>
+    <p>هر ابزار برای یک تصمیم بهتر در بازار</p>
+  </div>
+
+  <div class="l-cards">
+    <a class="l-card l-reveal" data-reveal-step="0" href="{{ url_for('dashboard') }}">
+      <span class="l-card-ico"><svg aria-hidden="true"><use href="#i-dashboard"></use></svg></span>
+      <h3>داشبورد بازار</h3>
+      <p>نمای کلی بازار، برترین بازده‌ها و بیشترین افت‌ها در یک نگاه.</p>
+    </a>
+    <a class="l-card l-reveal" data-reveal-step="1" href="{{ url_for('performance_page') }}">
+      <span class="l-card-ico"><svg aria-hidden="true"><use href="#i-chart"></use></svg></span>
+      <h3>بازدهٔ دوره‌ای</h3>
+      <p>بازده، سقف و کف هر نماد در بازه‌های ۱ هفته تا ۳ سال و «از ابتدا».</p>
+    </a>
+    <a class="l-card l-reveal" data-reveal-step="2" href="{{ url_for('stocks_page') }}">
+      <span class="l-card-ico"><svg aria-hidden="true"><use href="#i-stock"></use></svg></span>
+      <h3>تحلیل سهام</h3>
+      <p>رتبه‌بندی و مقایسهٔ نمادهای بازار بر پایهٔ بازدهی دوره‌های مختلف.</p>
+    </a>
+    <a class="l-card l-reveal" data-reveal-step="3" href="{{ url_for('etfs_page') }}">
+      <span class="l-card-ico"><svg aria-hidden="true"><use href="#i-fund"></use></svg></span>
+      <h3>صندوق‌های سرمایه‌گذاری</h3>
+      <p>عملکرد صندوق‌های قابل معامله (ETF) به تفکیک نوع و بازدهی.</p>
+    </a>
+    <a class="l-card l-reveal" data-reveal-step="4" href="{{ url_for('strategies_page') }}">
+      <span class="l-card-ico"><svg aria-hidden="true"><use href="#i-target"></use></svg></span>
+      <h3>استراتژی‌ها</h3>
+      <p>پویش بازار بر پایهٔ سیگنال‌ها و شرایط معاملاتی از پیش تعریف‌شده.</p>
+    </a>
+    <a class="l-card l-reveal" data-reveal-step="5" href="{{ url_for('filters_page') }}">
+      <span class="l-card-ico"><svg aria-hidden="true"><use href="#i-filter"></use></svg></span>
+      <h3>فیلترهای پیشرفته</h3>
+      <p>غربال نمادها با ترکیب معیارهای دلخواه برای یافتن فرصت‌ها.</p>
+    </a>
+    <a class="l-card l-reveal" data-reveal-step="6" href="{{ url_for('filter_designer_page') }}">
+      <span class="l-card-ico"><svg aria-hidden="true"><use href="#i-expand"></use></svg></span>
+      <h3>طراحی فیلتر</h3>
+      <p>فیلتر دلخواهتان را جعبه‌به‌جعبه بسازید و همان لحظه روی کل بازار اجرا کنید.</p>
+    </a>
+  </div>
+</section>
+
+{#  چطور کار می‌کند — numbered, because the order is real: a filter cannot be
+    back-tested over history that has not been downloaded yet.  #}
+<section class="l-section">
+  <div class="l-head l-reveal">
+    <h2>چطور کار می‌کند</h2>
+    <p>سه گام، از داده تا تصمیم</p>
+  </div>
+
+  <div class="l-steps l-reveal">
+    <div class="l-step">
+      <span class="l-step-n" aria-hidden="true">۱</span>
+      <h3>داده‌ها روزآمد می‌شوند</h3>
+      <p>
+        داده‌های روزانهٔ بورس و فرابورس یک‌بار دانلود و در پایگاه داده نگه داشته
+        می‌شوند؛ هر تحلیل بعدی روی نسخهٔ محلی اجرا می‌شود، نه روی اینترنت.
+      </p>
+    </div>
+    <div class="l-step">
+      <span class="l-step-n" aria-hidden="true">۲</span>
+      <h3>فیلترتان را می‌سازید</h3>
+      <p>
+        شرط‌ها را جعبه‌به‌جعبه روی بوم بچینید و به هم وصل کنید — بدون نوشتن یک
+        خط کد و بدون زبان فیلترنویسی.
+      </p>
+    </div>
+    <div class="l-step">
+      <span class="l-step-n" aria-hidden="true">۳</span>
+      <h3>اجرا و بک‌تست می‌کنید</h3>
+      <p>
+        همان فیلتر را روی کل بازار اجرا کنید، و بعد بازدهی‌اش را روی تاریخ
+        بیازمایید تا بدانید در گذشته چه می‌کرد.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="l-section">
+  <div class="l-close l-reveal">
+    <h2>از همین حالا شروع کنید</h2>
+    <p>
+      داشبورد بازار، آخرین وضعیت بورس تهران را در یک صفحه نشان می‌دهد — بدون
+      تنظیم اولیه و بدون انتظار.
+    </p>
+    <div class="l-cta">
+      <a class="btn primary" href="{{ url_for('dashboard') }}">
+        <svg class="ico" aria-hidden="true"><use href="#i-dashboard"></use></svg>
+        داشبورد بازار
+      </a>
+      <a class="btn ghost" href="{{ url_for('help_page') }}">راهنمای سامانه</a>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+  <script defer src="{{ url_for('static', filename='js/landing.js') }}?v={{ asset_version('js/landing.js') }}"></script>
 {% endblock %}

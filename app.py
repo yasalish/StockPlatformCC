@@ -1897,7 +1897,12 @@ if __name__ == "__main__":
     # remote code execution hole on anything reachable from outside localhost.
     debug = os.environ.get("FLASK_DEBUG", "").strip().lower() in ("1", "true", "yes")
     host = os.environ.get("DEV_HOST", "127.0.0.1")
-    port = int(os.environ.get("DEV_PORT", "5002"))
+    # DEV_PORT stays the project's own knob and still wins. PORT is the fallback
+    # because it is what every host that assigns a port injects — container
+    # platforms, PaaS runners, and the editor's preview launcher — and without
+    # it a second copy of the app (a git worktree, say) collides with whichever
+    # instance already holds 5002.
+    port = int(os.environ.get("DEV_PORT") or os.environ.get("PORT") or "5002")
 
     # Werkzeug prints " * Running on http://… " (and "Press CTRL+C to quit")
     # through the `werkzeug` logger at INFO, but observability.setup_logging()

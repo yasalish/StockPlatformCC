@@ -4,8 +4,11 @@
     {
       "name": "boursenegar",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["app.py"],
-      "port": 5002
+      "runtimeArgs": [
+        "app.py"
+      ],
+      "port": 5002,
+      "autoPort": true
     }
   ]
 }

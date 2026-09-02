@@ -53,6 +53,11 @@
       and the cascade order is what lets the second redesign the first without
       a 1,300-line diff. Removing this one line reverts the whole redesign.  #}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/ui.css') }}?v={{ asset_version('css/ui.css') }}">
+  {#  Per-page stylesheets, third in the cascade so a page can redesign the
+      component layer for its own surface without an !important. Only the
+      landing page uses it so far (landing.css); every other page leaves the
+      block empty and loads nothing extra.  #}
+  {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
   {% include "_icons.html" %}
@@ -211,6 +216,13 @@
     </div>
     {% endif %}
   {% endwith %}
+
+  {#  Full-bleed band, OUTSIDE the container. A hero that must reach both edges
+      of the window cannot live inside `.container`, which is centred with a
+      max-width; the usual workaround (`width:100vw` plus a negative margin)
+      adds a horizontal scrollbar on every page that has a vertical one. An
+      empty block costs nothing on the thirty pages that do not use it.  #}
+  {% block hero %}{% endblock %}
 
   <main class="container">
     {#  «بازدیدهای اخیر» — filled by ui.js from localStorage (a browsing trail,
