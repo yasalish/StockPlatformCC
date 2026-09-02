@@ -1,0 +1,267 @@
+/* ===========================================================================
+   dashboard.css — «داشبورد بازار»، سطح نمودارها / the chart surface
+   ===========================================================================
+   Scoped to `body.dash-page`, which only dashboard.html carries. Same
+   arrangement as landing.css and for the same reason: this screen wants a
+   different set of numbers from the tables in ui.css, and a scope is cheaper
+   than an !important.
+
+   WHAT THIS SCREEN IS FOR
+
+   The dashboard answers "what is the market doing right now", and it was
+   answering it with four counters and three sorted tables. A sorted table
+   cannot show a shape: it says which symbol rose most, never whether the rise
+   was broad or three heavyweights, nor whether money came in all week or left
+   on Thursday. Every panel below exists to show a shape the tables cannot.
+
+   NO CHARTING LIBRARY
+
+   Every chart here is an <svg> whose path data was computed in Python (see
+   app.spark) or a <div> whose width is a percentage. Nothing is drawn by
+   JavaScript, so the whole screen arrives in one response and works with
+   scripts off. It also means the charts inherit --up / --down like the rest of
+   the app, so they follow all fourteen themes AND the «رنگ صعود و نزول»
+   setting — including the new فیروزه‌ای / سرخابی scheme — without a line of
+   per-library theming code.
+   --------------------------------------------------------------------------- */
+
+body.dash-page{
+  --d-gap:var(--sp-3);
+  --d-card-pad:var(--sp-4);
+  --d-radius:var(--radius);
+  /* Chart ink. Deliberately NOT --up/--down directly: a stroke and a fill of
+     the same colour at the same opacity make a solid block, so the fill is the
+     same hue at a fraction of the alpha. */
+  --d-fill-up:color-mix(in srgb,var(--up) 16%, transparent);
+  --d-fill-down:color-mix(in srgb,var(--down) 16%, transparent);
+  --d-grid:var(--line-soft);
+}
+
+/* ---------------------------------------------------------------------------
+   1. نوار شاخص‌ها — the ticker strip
+   ---------------------------------------------------------------------------
+   The first thing on the screen, because it is the first thing anyone asks.
+   `auto-fit` rather than a fixed five columns: on a laptop it is five across,
+   on a tablet three, on a phone one, and none of those needs its own rule.
+   --------------------------------------------------------------------------- */
+.dash-tickers{
+  display:grid; gap:var(--d-gap); margin-bottom:var(--d-gap);
+  grid-template-columns:repeat(auto-fit,minmax(212px,1fr));
+}
+.dtick{
+  display:grid; grid-template-columns:1fr auto; align-items:center;
+  gap:var(--sp-1) var(--sp-3);
+  padding:var(--sp-3) var(--d-card-pad);
+  background:var(--panel); border:1px solid var(--line);
+  border-radius:var(--d-radius);
+}
+.dtick-label{
+  grid-column:1/-1; color:var(--ink-2);
+  font-size:var(--fs-12); font-weight:600;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.dtick-val{
+  font-size:var(--fs-18); font-weight:800; letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums;
+}
+.dtick-spark{ width:110px; height:30px; display:block }
+/* The strip sits beside the number rather than behind it. Behind, it either
+   tints the digits or is too faint to read as a line. */
+.dtick-foot{ grid-column:1/-1; display:flex; align-items:center; gap:var(--sp-2) }
+
+/* ---------------------------------------------------------------------------
+   2. نمودار شاخص — the focus chart
+   --------------------------------------------------------------------------- */
+.dash-focus{
+  padding:var(--d-card-pad); margin-bottom:var(--d-gap);
+  background:var(--panel); border:1px solid var(--line);
+  border-radius:var(--d-radius);
+}
+.dfocus-head{
+  display:flex; flex-wrap:wrap; align-items:baseline;
+  gap:var(--sp-2) var(--sp-4); margin-bottom:var(--sp-3);
+}
+.dfocus-name{ font-size:var(--fs-15); font-weight:700; margin:0 }
+.dfocus-val{
+  font-size:var(--fs-24); font-weight:800; letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;
+}
+.dfocus-periods{ display:flex; flex-wrap:wrap; gap:var(--sp-2); margin-inline-start:auto }
+.dperiod{
+  display:inline-flex; align-items:center; gap:5px;
+  padding:3px 9px; border-radius:var(--radius-sm);
+  background:var(--surface-2); font-size:var(--fs-11);
+}
+.dperiod b{ color:var(--ink-2); font-weight:600 }
+/* 1000x190 viewBox stretched to the card. preserveAspectRatio is set to none
+   in the markup: an index line has no meaningful aspect ratio, and letting it
+   fill the card is what makes the shape readable at any width. */
+.dfocus-chart{ display:block; width:100%; height:190px }
+
+/* ---------------------------------------------------------------------------
+   3. The card grid
+   ---------------------------------------------------------------------------
+   minmax(370px,1fr) lands as three columns at 1400px, two on a small laptop,
+   one on a phone. The reference terminals use a hard three-column grid and
+   scroll sideways below ~1100px; auto-fit is the same layout without that.
+
+   370 rather than 320: at 320 a wide desktop fits FOUR columns, and a
+   nine-row bar chart of Persian industry names in a quarter of 1400px
+   truncates every label. Three is the widest this content reads at.
+   --------------------------------------------------------------------------- */
+.dash-grid{
+  display:grid; gap:var(--d-gap); margin-bottom:var(--d-gap);
+  grid-template-columns:repeat(auto-fit,minmax(370px,1fr));
+}
+.dcard{
+  display:flex; flex-direction:column;
+  padding:var(--d-card-pad);
+  background:var(--panel); border:1px solid var(--line);
+  border-radius:var(--d-radius);
+}
+.dcard-head{ margin-bottom:var(--sp-3) }
+.dcard-head h3{
+  margin:0; font-size:var(--fs-14); font-weight:700; letter-spacing:-.005em;
+}
+.dcard-head p{
+  margin:3px 0 0; color:var(--ink-3); font-size:var(--fs-11); line-height:1.6;
+}
+.dcard-body{ flex:1; display:flex; flex-direction:column; justify-content:center }
+/* A card that spans two columns when there is room — used by the sector-flow
+   bars, which are 9 rows of long Persian industry names and unreadable in a
+   third of the width. */
+.dcard.wide{ grid-column:span 2 }
+@media (max-width:1100px){ .dcard.wide{ grid-column:span 1 } }
+
+/* ---------------------------------------------------------------------------
+   4. حلقه — the donut (advancers / unchanged / decliners)
+   --------------------------------------------------------------------------- */
+.ddonut-wrap{ display:flex; align-items:center; gap:var(--sp-5) }
+.ddonut{ width:120px; height:120px; flex:none; transform:rotate(-90deg) }
+.ddonut circle{ fill:none; stroke-width:16 }
+.ddonut .seg-up{ stroke:var(--up) }
+.ddonut .seg-down{ stroke:var(--down) }
+.ddonut .seg-flat{ stroke:var(--mute-fill) }
+.ddonut-mid{
+  position:absolute; inset:0; display:grid; place-items:center;
+  text-align:center; pointer-events:none;
+}
+.ddonut-holder{ position:relative; width:120px; height:120px; flex:none }
+.ddonut-big{
+  font-size:var(--fs-18); font-weight:800; line-height:1.1;
+  font-variant-numeric:tabular-nums;
+}
+.ddonut-sub{ font-size:var(--fs-11); color:var(--ink-3) }
+.dlegend{ display:grid; gap:7px; flex:1; min-width:0 }
+.dlegend-row{
+  display:grid; grid-template-columns:10px 1fr auto; align-items:center;
+  gap:var(--sp-2); font-size:var(--fs-12);
+}
+.dlegend-dot{ width:10px; height:10px; border-radius:3px }
+.dlegend-row b{ font-variant-numeric:tabular-nums; font-weight:700 }
+.dlegend-row span{ color:var(--ink-2); overflow:hidden; text-overflow:ellipsis;
+                   white-space:nowrap }
+
+/* ---------------------------------------------------------------------------
+   5. میله‌ها — bar rows
+   ---------------------------------------------------------------------------
+   The same shape ui.css already uses for /moneyflow (.flow-bar-*), rebuilt
+   here because these rows carry a signed value and have to grow from the
+   start edge in both directions.
+   --------------------------------------------------------------------------- */
+.dbars{ display:grid; gap:6px }
+.dbar{
+  display:grid; grid-template-columns:minmax(84px,1.1fr) 1fr auto;
+  align-items:center; gap:var(--sp-3); font-size:var(--fs-12);
+}
+.dbar-name{
+  color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.dbar-track{
+  position:relative; height:9px; border-radius:99px;
+  background:var(--surface-2); overflow:hidden;
+}
+.dbar-fill{
+  position:absolute; inset-block:0; inset-inline-start:0;
+  border-radius:99px; background:var(--up);
+}
+.dbar.down .dbar-fill{ background:var(--down) }
+.dbar-val{
+  font-variant-numeric:tabular-nums; font-weight:700; white-space:nowrap;
+  font-size:var(--fs-11);
+}
+.dbar.up .dbar-val{ color:var(--up) }
+.dbar.down .dbar-val{ color:var(--down) }
+
+/* ---------------------------------------------------------------------------
+   6. دو میلهٔ روبه‌رو — the opposed pair (buy queue vs sell queue)
+   --------------------------------------------------------------------------- */
+.dsplit{ display:grid; gap:var(--sp-3) }
+.dsplit-row{ display:grid; gap:5px }
+.dsplit-top{
+  display:flex; align-items:baseline; justify-content:space-between;
+  gap:var(--sp-3); font-size:var(--fs-12);
+}
+.dsplit-top b{ font-variant-numeric:tabular-nums; font-size:var(--fs-14) }
+.dsplit-track{ height:12px; border-radius:99px; background:var(--surface-2); overflow:hidden }
+.dsplit-fill{ height:100%; border-radius:99px }
+.dsplit-row.buy .dsplit-fill{ background:var(--up) }
+.dsplit-row.buy b{ color:var(--up) }
+.dsplit-row.sell .dsplit-fill{ background:var(--down) }
+.dsplit-row.sell b{ color:var(--down) }
+.dsplit-note{ color:var(--ink-3); font-size:var(--fs-11) }
+
+/* ---------------------------------------------------------------------------
+   7. عدد بزرگ — the stat block
+   --------------------------------------------------------------------------- */
+.dstats{ display:grid; grid-template-columns:repeat(2,1fr); gap:var(--sp-3) }
+.dstat{ padding:var(--sp-3); background:var(--surface-0); border-radius:var(--radius-sm) }
+.dstat-num{
+  font-size:var(--fs-18); font-weight:800; letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums;
+}
+.dstat-num.up{ color:var(--up) }
+.dstat-num.down{ color:var(--down) }
+.dstat-label{ margin-top:2px; color:var(--ink-3); font-size:var(--fs-11) }
+.dstat-unit{ font-size:var(--fs-12); font-weight:600; color:var(--ink-2) }
+
+/* ---------------------------------------------------------------------------
+   8. Sparkline ink
+   ---------------------------------------------------------------------------
+   `vector-effect` keeps the stroke at 2px however far the viewBox is stretched
+   — without it a 1000-unit-wide path squeezed into 300px draws a hairline and
+   the same path in a wide card draws a rope.
+   --------------------------------------------------------------------------- */
+.spark-line{ fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round;
+             vector-effect:non-scaling-stroke }
+.spark-area{ stroke:none }
+.spark.up .spark-line{ stroke:var(--up) }
+.spark.up .spark-area{ fill:var(--d-fill-up) }
+.spark.down .spark-line{ stroke:var(--down) }
+.spark.down .spark-area{ fill:var(--d-fill-down) }
+.spark-dot{ r:2.5; stroke:var(--panel); stroke-width:1.5 }
+.spark.up .spark-dot{ fill:var(--up) }
+.spark.down .spark-dot{ fill:var(--down) }
+.spark-base{ stroke:var(--d-grid); stroke-width:1; vector-effect:non-scaling-stroke }
+
+/* ---------------------------------------------------------------------------
+   9. Narrow screens
+   --------------------------------------------------------------------------- */
+@media (max-width:640px){
+  .ddonut-wrap{ flex-direction:column; align-items:stretch; gap:var(--sp-3) }
+  .ddonut-holder{ margin:0 auto }
+  .dstats{ grid-template-columns:1fr }
+  .dbar{ grid-template-columns:minmax(70px,1fr) 1fr auto }
+  .dfocus-periods{ margin-inline-start:0 }
+}
+
+/* Motion: the bars grow on first paint, once. Declared behind both
+   reduced-motion switches this app honours. */
+@media (prefers-reduced-motion:no-preference){
+  :root:not([data-motion="reduce"]) .dbar-fill,
+  :root:not([data-motion="reduce"]) .dsplit-fill{
+    animation:d-grow 620ms var(--ease) both;
+    transform-origin:right center;   /* RTL: bars grow from the start edge */
+  }
+  @keyframes d-grow{ from{ transform:scaleX(0) } to{ transform:scaleX(1) } }
+}

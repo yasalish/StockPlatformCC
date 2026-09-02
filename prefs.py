@@ -93,7 +93,7 @@ ROWS_CHOICES = (25, 50, 100, 200)
 DENSITIES = ("comfortable", "compact")
 FONT_SCALES = ("sm", "md", "lg")
 SCROLLBAR_SIZES = ("md", "lg", "xl")     # 14 / 20 / 28 px — see --sbar-h in style.css
-UPDOWN_SCHEMES = ("classic", "colorblind")
+UPDOWN_SCHEMES = ("classic", "colorblind", "arena")
 AUTO_REFRESH_CHOICES = (0, 60, 300, 900)  # seconds; 0 = off
 
 # The period keys the market tables understand. Declared as a literal because
@@ -203,7 +203,9 @@ OPTION_LABELS = {
     "density": {"comfortable": "راحت", "compact": "فشرده"},
     "font_scale": {"sm": "کوچک", "md": "معمولی", "lg": "بزرگ"},
     "scrollbar_size": {"md": "معمولی", "lg": "ضخیم", "xl": "خیلی ضخیم"},
-    "updown_scheme": {"classic": "سبز / قرمز", "colorblind": "آبی / نارنجی (کوررنگی)"},
+    "updown_scheme": {"classic": "سبز / قرمز",
+                      "colorblind": "آبی / نارنجی (کوررنگی)",
+                      "arena": "فیروزه‌ای / سرخابی"},
     "auto_refresh": {0: "خاموش", 60: "هر ۱ دقیقه", 300: "هر ۵ دقیقه", 900: "هر ۱۵ دقیقه"},
     "default_period": PERIOD_LABELS,
 }

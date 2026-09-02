@@ -292,6 +292,48 @@ def pill(val):
                   f'{escape(db.to_persian(abs(val)))}٪</span>')
 
 
+def spark(values, w=120, h=34, pad=2):
+    """Turn a series of numbers into SVG path data for a sparkline.
+
+    Returns a dict of ready-made `d` attributes — `line` for the stroke and
+    `area` for the fill beneath it — or None when there is not enough data to
+    draw. Callers render it with a plain <svg> and no JavaScript.
+
+    Why this is done in Python rather than in a charting library: the dashboard
+    draws one 250-point index chart and a handful of 60-point strips, all from
+    values the request already has in memory. Every JS charting library that
+    could draw them is 40-130 KB, needs a second paint after the HTML lands, and
+    would have to be taught this app's fourteen themes and its «رنگ صعود و نزول»
+    setting. A path string costs nothing, arrives with the markup, and inherits
+    the theme through `stroke:var(--up)` like every other coloured thing here.
+
+    The viewBox is normalised to w x h and the SVG is stretched by CSS, so the
+    caller picks the aspect ratio and never has to match pixels.
+    """
+    pts = [float(v) for v in values if v is not None]
+    if len(pts) < 2:
+        return None
+    lo, hi = min(pts), max(pts)
+    span = (hi - lo) or 1.0
+    inner = h - 2 * pad
+    n = len(pts)
+    coords = [((w * i) / (n - 1), pad + inner - ((v - lo) / span) * inner)
+              for i, v in enumerate(pts)]
+    line = "M" + " L".join(f"{x:.1f} {y:.1f}" for x, y in coords)
+    return {
+        "line": line,
+        # Closed back along the baseline for the gradient fill.
+        "area": f"{line} L{w:.1f} {h:.1f} L0 {h:.1f} Z",
+        "w": w, "h": h,
+        "dot_x": round(coords[-1][0], 1), "dot_y": round(coords[-1][1], 1),
+        # Direction over the WHOLE window, which is what colours the line. Not
+        # the last bar: a series that rose all period and dipped on the final
+        # session is still a rising series, and coloring it red would say the
+        # opposite of what the shape shows.
+        "up": pts[-1] >= pts[0],
+    }
+
+
 @app.context_processor
 def inject_helpers():
     def asset_version(filename):
@@ -553,11 +595,47 @@ def dashboard_data():
     # own description names is a preference that looks broken.
     breadth_kind = _map_kind(request.args.get("kind"))
     breadth = db.market_breadth(breadth_kind, period=period)
+
+    # ── the graphical half ────────────────────────────────────────────────
+    # Indices, the dollar, the live board and retail money flow, plus the SVG
+    # paths to draw them. All of it comes from market_data, which is imported
+    # lazily and may be looking at a database that predates its tables — so the
+    # whole block degrades to None rather than 500ing. The panels below are
+    # written to disappear when their data is missing, which is what lets this
+    # page keep working on a fresh install with nothing downloaded yet.
+    graphs = None
+    try:
+        md = _md()
+        heads = [r for r in md.index_rows() if r["key"] in md.HEADLINE_INDICES]
+        heads.sort(key=lambda r: md.HEADLINE_INDICES.index(r["key"]))
+        # One 250-bar series for the big chart, 60 bars for each strip. 60 is
+        # about a quarter, which is long enough to show a trend and short enough
+        # that the line is not a solid block at 110px wide.
+        focus = heads[0] if heads else None
+        graphs = {
+            "heads": heads,
+            "focus": focus,
+            "focus_chart": spark([v for _, v in md.index_series(focus["key"], bars=250)],
+                                 w=1000, h=190, pad=6) if focus else None,
+            "strips": {r["key"]: spark([v for _, v in md.index_series(r["key"], bars=60)],
+                                       w=110, h=30) for r in heads},
+            "usd": md.usd_summary(),
+            "usd_strip": spark([v for _, v in md.usd_rows(bars=60)], w=110, h=30),
+            "board": md.board_totals(),
+            "flow": md.flow_totals(kind="stock", days=5),
+            "sectors": md.flow_by_sector(kind="stock", days=5, limit=9),
+        }
+    except Exception:
+        # Logged rather than swallowed silently: a missing table is a data
+        # problem to fix, not a normal state, and the dashboard hides the panels
+        # either way.
+        app.logger.warning("dashboard graphs unavailable", exc_info=True)
+
     return render_template("_dashboard_data.html", summary=summary, as_of=as_of,
                            top_gainers=top_gainers, top_losers=top_losers,
                            etf_top=etf_top, breadth=breadth, period=period,
                            breadth_kind=breadth_kind,
-                           period_label=_period_label(period))
+                           period_label=_period_label(period), g=graphs)
 
 
 @app.route("/stocks")

@@ -881,6 +881,41 @@
   --accent:#57299f; --accent-hover:#411d7c; --accent-soft:#ece3fb;
 }
 
+/* «فیروزه‌ای / سرخابی» — teal for rising, rose for falling.
+   ---------------------------------------------------------------------------
+   The same pair the Tehran-market terminals people compare this app to use
+   (rgb(66,196,159) / rgb(250,80,116)). It is softer than green/red on a screen
+   full of numbers and reads as chart ink rather than as an alarm, which is why
+   a dashboard of bars looks calmer in it.
+
+   Those two literals are used AS PUBLISHED only on the dark themes. On white,
+   #42c49f lands at about 2.1:1 and #fa5074 at 3.4:1 — fine for a bar fill, not
+   for the ±۱۲.۳۴٪ text that shares the token. The light values below are the
+   same two hues darkened to clear 4.5:1, so a pill stays readable and a bar
+   still looks like the palette people recognise.
+
+   Unlike the colour-blind scheme this leaves --accent alone: teal and rose are
+   both far from the accent's blue, so a button cannot be mistaken for a price. */
+[data-updown="arena"]{
+  --up:#0d8f6b; --up-bg:#e2f6f0; --down:#dc2d55; --down-bg:#fdeaef;
+  --down-strong:#b81f43; --mid:#b7791f; --mid-bg:#fdf4e3;
+}
+[data-updown="arena"][data-theme="dark"],
+[data-updown="arena"][data-theme="midnight"],
+[data-updown="arena"][data-theme="graphite"],
+[data-updown="arena"][data-theme="espresso"],
+[data-updown="arena"][data-theme="steel"]{
+  --up:#42c49f; --up-bg:#0e2f27; --down:#fa5074; --down-bg:#3a1420;
+  --down-strong:#ff7d97; --mid:#d9a53c; --mid-bg:#332713;
+}
+/* «کنتراست بالا» keeps its guarantee: the generic light pair above is tuned for
+   ordinary white themes and would slip below this theme's own floor. Same two
+   hues, darker again. */
+[data-updown="arena"][data-theme="contrast"]{
+  --up:#0a6e52; --up-bg:#d9f2ea; --down:#ad1c3c; --down-bg:#fbe2e8;
+  --down-strong:#8a1530; --mid:#8a5a12; --mid-bg:#fbf0d9;
+}
+
 
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}

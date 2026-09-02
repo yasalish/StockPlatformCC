@@ -1,5 +1,13 @@
 {% extends "base.html" %}
 {% block title %}بورس‌نگار · داشبورد{% endblock %}
+{% block body_class %}dash-page{% endblock %}
+
+{#  The chart surface. Scoped to `dash-page`, which only this screen carries,
+    so the ticker strip and card grid cannot reach the tables on /performance.
+    See the header of dashboard.css.  #}
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v={{ asset_version('css/dashboard.css') }}">
+{% endblock %}
 
 {% block content %}
 {# The dashboard shell paints instantly with NO database work. The data-heavy

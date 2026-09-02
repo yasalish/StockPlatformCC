@@ -1,29 +1,344 @@
 {# Data-heavy dashboard blocks, rendered server-side and fetched lazily by
-   index.html so the landing page itself does no DB work and paints instantly. #}
-<div class="stat-row">
-  <div class="stat-card">
-    <div class="stat-num">{{ fa(summary.stocks) }}</div>
-    <div class="stat-label">نماد سهام</div>
+   dashboard.html so the shell paints instantly.
+
+   ORDER OF THE SCREEN, AND WHY
+
+   Charts first, tables last. The four counters that used to open this page
+   (نماد سهام / صندوق / رکورد قیمت / آخرین تاریخ داده) describe the DATABASE,
+   not the market — useful, but not the answer to "what is happening right
+   now", which is the only question anyone opens a dashboard to ask. They have
+   moved below the charts. The tables keep their place at the bottom: they
+   answer "which symbol", which is the second question.
+
+   Every panel between here and «نبض بازار» is guarded on `g`, the graphs
+   payload. It is None when market_data's tables are not in the database yet (a
+   fresh install with nothing downloaded), and each panel then disappears
+   rather than rendering an empty frame. Note the loop variable in the
+   «گروه‌های پرمعامله» block further down is `g_` for that reason — `g` is
+   taken. #}
+
+{% if g and g.focus %}
+{# ── نوار شاخص‌ها ─────────────────────────────────────────────────────────
+   Value, one-session change, and a 60-bar strip per headline index, plus the
+   free-market dollar. The strip is the point: a number tells you where the
+   index is, the line tells you how it got there, and the second one is what a
+   ranked list can never show. #}
+<div class="dash-tickers">
+  {% for r in g.heads %}
+  {% set sp = g.strips.get(r.key) %}
+  <div class="dtick">
+    <span class="dtick-label" title="{{ r.label }}">{{ r.label }}</span>
+    <span class="dtick-val">{{ fa(r.value | round(0)) }}</span>
+    {% if sp %}
+    <svg class="dtick-spark spark {{ 'up' if sp.up else 'down' }}"
+         viewBox="0 0 {{ sp.w }} {{ sp.h }}" preserveAspectRatio="none"
+         aria-hidden="true" focusable="false">
+      <path class="spark-area" d="{{ sp.area }}"/>
+      <path class="spark-line" d="{{ sp.line }}"/>
+    </svg>
+    {% endif %}
+    <span class="dtick-foot">
+      {{ pill(r.d1) }}
+      <span class="muted small">۱ روز</span>
+    </span>
   </div>
-  <div class="stat-card">
-    <div class="stat-num">{{ fa(summary.etfs) }}</div>
-    <div class="stat-label">صندوق</div>
+  {% endfor %}
+
+  {% if g.usd %}
+  <div class="dtick">
+    <span class="dtick-label">دلار آزاد</span>
+    <span class="dtick-val">{{ fa((g.usd.value / 10) | round(0)) }}</span>
+    {% if g.usd_strip %}
+    <svg class="dtick-spark spark {{ 'up' if g.usd_strip.up else 'down' }}"
+         viewBox="0 0 {{ g.usd_strip.w }} {{ g.usd_strip.h }}" preserveAspectRatio="none"
+         aria-hidden="true" focusable="false">
+      <path class="spark-area" d="{{ g.usd_strip.area }}"/>
+      <path class="spark-line" d="{{ g.usd_strip.line }}"/>
+    </svg>
+    {% endif %}
+    <span class="dtick-foot">
+      {{ pill(g.usd.d1) }}
+      <span class="muted small">تومان · ۱ روز</span>
+    </span>
   </div>
-  <div class="stat-card">
-    <div class="stat-num">{{ fa(summary.stock_rows + summary.etf_rows) }}</div>
-    <div class="stat-label">رکورد قیمت</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-num">{{ fy(summary.stock_latest) }}</div>
-    <div class="stat-label">آخرین تاریخ داده</div>
-  </div>
+  {% endif %}
 </div>
 
+{# ── نمودار شاخص کل ──────────────────────────────────────────────────────
+   250 sessions, about a year of trading. The period pills beside it are the
+   same series measured at five distances, so the chart and the numbers can
+   never disagree. #}
+{% set f = g.focus %}
+{% set fc = g.focus_chart %}
+<section class="dash-focus">
+  <div class="dfocus-head">
+    <div>
+      <h2 class="dfocus-name">{{ f.label }}</h2>
+      <div class="dfocus-val">{{ fa(f.value | round(0)) }}</div>
+    </div>
+    <div class="dfocus-periods">
+      {% for key, label in [('d1','۱ روز'), ('d5','۱ هفته'), ('d20','۱ ماه'),
+                            ('d60','۳ ماه'), ('d240','۱ سال')] %}
+      <span class="dperiod"><b>{{ label }}</b>{{ pill(f[key]) }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% if fc %}
+  <svg class="dfocus-chart spark {{ 'up' if fc.up else 'down' }}"
+       viewBox="0 0 {{ fc.w }} {{ fc.h }}" preserveAspectRatio="none"
+       role="img" aria-label="نمودار {{ f.label }} در ۲۵۰ روز معاملاتی گذشته">
+    <path class="spark-area" d="{{ fc.area }}"/>
+    <path class="spark-line" d="{{ fc.line }}"/>
+  </svg>
+  {% endif %}
+  <p class="muted small" style="margin:6px 0 0">
+    ۲۵۰ روز معاملاتی · تا {{ fy(f.j_date) }} ·
+    <a href="{{ url_for('indices_page', focus=f.key) }}">همهٔ شاخص‌ها ›</a>
+  </p>
+</section>
+
+{# ── شبکهٔ کارت‌ها ────────────────────────────────────────────────────────
+   Each card shows one shape the tables below cannot: how wide the move was,
+   which side the queues are on, where retail money went. #}
+<div class="dash-grid">
+
+  {% set bt = g.board %}
+  {% if bt %}
+  {# نمادهای مثبت و منفی — a ring, because the question is "what share of the
+     market", and a share is what a ring reads as. The counts are beside it for
+     anyone who needs the number rather than the proportion. #}
+  {% set tot = (bt.up + bt.down + bt.flat) or 1 %}
+  {% set C = 326.726 %}{# 2πr, r=52 #}
+  {% set up_len = (C * bt.up / tot) | float %}
+  {% set flat_len = (C * bt.flat / tot) | float %}
+  {% set down_len = (C * bt.down / tot) | float %}
+  <section class="dcard">
+    <div class="dcard-head">
+      <h3>نمادهای مثبت و منفی</h3>
+      <p>تابلوی زندهٔ {{ fy(bt.j_date) }} · {{ fa(bt.symbols) }} نماد</p>
+    </div>
+    <div class="dcard-body">
+      <div class="ddonut-wrap">
+        <div class="ddonut-holder">
+          <svg class="ddonut" viewBox="0 0 120 120" aria-hidden="true">
+            <circle class="seg-up"   cx="60" cy="60" r="52"
+                    stroke-dasharray="{{ up_len | round(2) }} {{ C }}" stroke-dashoffset="0"/>
+            <circle class="seg-flat" cx="60" cy="60" r="52"
+                    stroke-dasharray="{{ flat_len | round(2) }} {{ C }}"
+                    stroke-dashoffset="-{{ up_len | round(2) }}"/>
+            <circle class="seg-down" cx="60" cy="60" r="52"
+                    stroke-dasharray="{{ down_len | round(2) }} {{ C }}"
+                    stroke-dashoffset="-{{ (up_len + flat_len) | round(2) }}"/>
+          </svg>
+          <div class="ddonut-mid">
+            <div>
+              <div class="ddonut-big {{ 'up' if bt.up >= bt.down else 'down' }}"
+                   style="color:var({{ '--up' if bt.up >= bt.down else '--down' }})">
+                {{ fa((100 * bt.up / tot) | round(0)) }}٪
+              </div>
+              <div class="ddonut-sub">مثبت</div>
+            </div>
+          </div>
+        </div>
+        <div class="dlegend">
+          <div class="dlegend-row">
+            <span class="dlegend-dot" style="background:var(--up)"></span>
+            <span>صعودی</span><b style="color:var(--up)">{{ fa(bt.up) }}</b>
+          </div>
+          <div class="dlegend-row">
+            <span class="dlegend-dot" style="background:var(--mute-fill)"></span>
+            <span>بدون تغییر</span><b>{{ fa(bt.flat) }}</b>
+          </div>
+          <div class="dlegend-row">
+            <span class="dlegend-dot" style="background:var(--down)"></span>
+            <span>نزولی</span><b style="color:var(--down)">{{ fa(bt.down) }}</b>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {# صف خرید و فروش — the two queue values against each other. The counts
+     matter as much as the money: 163 symbols holding a buy queue against 731
+     holding a sell queue is a different market from an even split at the same
+     rial value. #}
+  {% set qmax = ([bt.bq | float, bt.sq | float] | max) or 1 %}
+  <section class="dcard">
+    <div class="dcard-head">
+      <h3>صف خرید و فروش</h3>
+      <p>ارزش صف‌ها و تعداد نمادهای صف‌دار در آخرین تابلو</p>
+    </div>
+    <div class="dcard-body">
+      <div class="dsplit">
+        <div class="dsplit-row buy">
+          <div class="dsplit-top">
+            <span>صف خرید · {{ fa(bt.bq_n) }} نماد</span>
+            <b>{{ money(bt.bq) }}</b>
+          </div>
+          <div class="dsplit-track">
+            <div class="dsplit-fill" style="width:{{ (100 * (bt.bq | float) / qmax) | round(1) }}%"></div>
+          </div>
+        </div>
+        <div class="dsplit-row sell">
+          <div class="dsplit-top">
+            <span>صف فروش · {{ fa(bt.sq_n) }} نماد</span>
+            <b>{{ money(bt.sq) }}</b>
+          </div>
+          <div class="dsplit-track">
+            <div class="dsplit-fill" style="width:{{ (100 * (bt.sq | float) / qmax) | round(1) }}%"></div>
+          </div>
+        </div>
+        <p class="dsplit-note">
+          <a href="{{ url_for('live_page', queue='buy') }}">تابلوی زنده ›</a>
+        </p>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if g.flow %}
+  {# ورود و خروج پول حقیقی — buy vs sell by retail, over five sessions, and the
+     net between them. The net is the number people quote; the two bars are why
+     it is that number. #}
+  {% set fl = g.flow %}
+  {% set fmax = ([fl.buy_r | float, fl.sell_r | float] | max) or 1 %}
+  <section class="dcard">
+    <div class="dcard-head">
+      <h3>ورود و خروج پول حقیقی</h3>
+      <p>۵ روز معاملاتی · {{ fa(fl.symbols) }} نماد · {{ fy(fl.lo) }} تا {{ fy(fl.hi) }}</p>
+    </div>
+    <div class="dcard-body">
+      <div class="dsplit">
+        <div class="dstat">
+          <div class="dstat-num {{ 'up' if (fl.net | float) >= 0 else 'down' }}">
+            {{ money(fl.net, signed=True) }}
+          </div>
+          <div class="dstat-label">خالص ورود پول حقیقی</div>
+        </div>
+        <div class="dsplit-row buy">
+          <div class="dsplit-top"><span>ارزش خرید حقیقی</span><b>{{ money(fl.buy_r) }}</b></div>
+          <div class="dsplit-track">
+            <div class="dsplit-fill" style="width:{{ (100 * (fl.buy_r | float) / fmax) | round(1) }}%"></div>
+          </div>
+        </div>
+        <div class="dsplit-row sell">
+          <div class="dsplit-top"><span>ارزش فروش حقیقی</span><b>{{ money(fl.sell_r) }}</b></div>
+          <div class="dsplit-track">
+            <div class="dsplit-fill" style="width:{{ (100 * (fl.sell_r | float) / fmax) | round(1) }}%"></div>
+          </div>
+        </div>
+        <p class="dsplit-note">
+          <a href="{{ url_for('moneyflow_page') }}">پول حقیقی و حقوقی ›</a>
+        </p>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if bt %}
+  {# ارزش معاملات و ارزش بازار — the size of the session. Four numbers, no
+     chart: there is no shape in a single scalar, and drawing one anyway is how
+     dashboards end up full of decoration. #}
+  <section class="dcard">
+    <div class="dcard-head">
+      <h3>حجم و ارزش بازار</h3>
+      <p>آخرین تابلوی ثبت‌شده · {{ fy(bt.j_date) }}</p>
+    </div>
+    <div class="dcard-body">
+      <div class="dstats">
+        <div class="dstat">
+          <div class="dstat-num">{{ money(bt.value) }}</div>
+          <div class="dstat-label">ارزش معاملات</div>
+        </div>
+        <div class="dstat">
+          <div class="dstat-num">{{ cnt(bt.volume) }}</div>
+          <div class="dstat-label">حجم معاملات</div>
+        </div>
+        <div class="dstat">
+          <div class="dstat-num">{{ money(bt.cap) }}</div>
+          <div class="dstat-label">ارزش کل بازار</div>
+        </div>
+        <div class="dstat">
+          <div class="dstat-num {{ 'up' if (bt.net_r or 0) >= 0 else 'down' }}">
+            {{ money(bt.net_r, signed=True) }}
+          </div>
+          <div class="dstat-label">خالص پول حقیقی (روز)</div>
+        </div>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {# بازدهی شاخص‌ها — the same nine indices ranked by one-month return, as
+     bars. Ranked because the question is "which part of the market is
+     leading", and bars because a column of pills does not compare. #}
+  {% set idx = g.heads %}
+  {% if idx %}
+  {% set imax = (idx | map(attribute='d20') | select('ne', None) | map('abs') | list | max) or 1 %}
+  <section class="dcard">
+    <div class="dcard-head">
+      <h3>بازدهی ۱ ماههٔ شاخص‌ها</h3>
+      <p>مقایسهٔ شاخص‌های اصلی بازار در یک ماه گذشته</p>
+    </div>
+    <div class="dcard-body">
+      <div class="dbars">
+        {% for r in idx | sort(attribute='d20', reverse=True) %}
+        {% if r.d20 is not none %}
+        <div class="dbar {{ 'up' if r.d20 >= 0 else 'down' }}">
+          <span class="dbar-name" title="{{ r.label }}">{{ r.label }}</span>
+          <span class="dbar-track">
+            <span class="dbar-fill" style="width:{{ (100 * (r.d20 | abs) / imax) | round(1) }}%"></span>
+          </span>
+          <span class="dbar-val">
+            {{ '+' if r.d20 >= 0 else '−' }}{{ fa((r.d20 | abs) | round(1)) }}٪
+          </span>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
+  {% if g.sectors %}
+  {# پول به کدام صنعت رفت — the panel that most repays being a chart. Nine
+     industry names are long in Persian, so this card spans two columns where
+     there is room (see .dcard.wide). #}
+  {% set smax = (g.sectors | map(attribute='net') | map('float') | map('abs') | list | max) or 1 %}
+  <section class="dcard wide">
+    <div class="dcard-head">
+      <h3>پول حقیقی به کدام صنعت رفت؟</h3>
+      <p>خالص ورود پول حقیقی در ۵ روز معاملاتی اخیر، به تفکیک صنعت</p>
+    </div>
+    <div class="dcard-body">
+      <div class="dbars">
+        {% for s in g.sectors %}
+        <div class="dbar {{ 'up' if (s.net | float) >= 0 else 'down' }}">
+          <span class="dbar-name" title="{{ s.sector }}">{{ s.sector }}</span>
+          <span class="dbar-track">
+            <span class="dbar-fill"
+                  style="width:{{ (100 * ((s.net | float) | abs) / smax) | round(1) }}%"></span>
+          </span>
+          <span class="dbar-val">{{ money(s.net, signed=True) }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="dsplit-note" style="margin-top:10px">
+        <a href="{{ url_for('moneyflow_page') }}">همهٔ صنایع و نمادها ›</a>
+      </p>
+    </div>
+  </section>
+  {% endif %}
+
+</div>
+{% endif %}
+
 {# ── نبض بازار ────────────────────────────────────────────────────────────
-   Advancers vs decliners. Every list on this page is sorted by return, and a
-   sorted list cannot answer the first question a trader asks in the morning:
-   was the market green, or were three heavyweight symbols green? The bar is
-   value-weighted for the same reason the tables are not — see db.market_breadth.
+   Advancers vs decliners over the user's default period. Kept as its own panel
+   rather than folded into the ring above: the ring counts today's board, this
+   measures a period return and carries the best/worst lists with it.
+   The bar is value-weighted for the same reason the tables are not — see
+   db.market_breadth.
 #}
 <section class="panel">
   <div class="panel-head">
@@ -94,14 +409,36 @@
   <div class="mini-list" style="margin-top:14px">
     <h3>گروه‌های پرمعامله</h3>
     <div class="chips">
-      {% for g in breadth.groups %}
-      <span class="chip {{ 'up' if (g.avg or 0) >= 0 else 'down' }}" style="cursor:default">
-        {{ g.group }} {{ '+' if (g.avg or 0) >= 0 else '−' }}{{ fa(((g.avg or 0) | abs) | round(2)) }}٪
+      {% for g_ in breadth.groups %}
+      <span class="chip {{ 'up' if (g_.avg or 0) >= 0 else 'down' }}" style="cursor:default">
+        {{ g_.group }} {{ '+' if (g_.avg or 0) >= 0 else '−' }}{{ fa(((g_.avg or 0) | abs) | round(2)) }}٪
       </span>
       {% endfor %}
     </div>
   </div>
 </section>
+
+{# Counters about the DATABASE, not the market — demoted below the charts.
+   «آخرین تاریخ داده» is the one that earns its place: it is how you tell a
+   quiet market from a stale download. #}
+<div class="stat-row">
+  <div class="stat-card">
+    <div class="stat-num">{{ fa(summary.stocks) }}</div>
+    <div class="stat-label">نماد سهام</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ fa(summary.etfs) }}</div>
+    <div class="stat-label">صندوق</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ fa(summary.stock_rows + summary.etf_rows) }}</div>
+    <div class="stat-label">رکورد قیمت</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">{{ fy(summary.stock_latest) }}</div>
+    <div class="stat-label">آخرین تاریخ داده</div>
+  </div>
+</div>
 
 <div class="two-col">
   <section class="panel">
