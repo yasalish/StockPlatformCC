@@ -1646,7 +1646,7 @@ def indices_page():
         series=md.index_series(focus, bars=240),
         usd=md.usd_summary(), usd_series=md.usd_rows(bars=240),
         sector_of_group=md.SECTOR_OF_GROUP,
-        fresh=md.freshness())
+        fresh=md.freshness_cached())
 
 
 @app.route("/api/indices/series/<path:key>")
@@ -1694,7 +1694,7 @@ def moneyflow_page():
         by_sector=md.flow_by_sector(kind=kind, days=days),
         sectors=db.stock_sectors() if kind == "stock" else [],
         markets=db.stock_markets() if kind == "stock" else db.etf_types(),
-        fresh=md.freshness())
+        fresh=md.freshness_cached())
 
 
 @app.route("/live")
@@ -1720,7 +1720,7 @@ def live_page():
         total=data["total"], shown=data["shown"],
         sorts=md.BOARD_SORTS, sectors=md.board_sectors(),
         markets=md.board_markets(), totals=md.board_totals(),
-        queue_floor=md.QUEUE_FLOOR, fresh=md.freshness())
+        queue_floor=md.QUEUE_FLOOR, fresh=md.freshness_cached())
 
 
 @app.route("/api/orderbook/<path:ticker>")

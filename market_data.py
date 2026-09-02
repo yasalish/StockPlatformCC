@@ -45,6 +45,8 @@ that is fast (a session's tick tape is ~2 seconds); across the market it is
 thousands of requests, which is why market.HEAVY_KINDS makes the update form
 insist on a symbol before it will start one.
 """
+import os
+
 import db
 import cache
 
@@ -518,12 +520,46 @@ def latest_jdate(table, where="", params=()):
     return r["d"] if r else None
 
 
+#: How long the market pages may show a stale «تا تاریخ …» footnote.
+#: Sixty seconds against a dataset that changes once a day.
+FRESHNESS_TTL = int(os.environ.get("FRESHNESS_TTL", "60"))
+
+
+def freshness_cached():
+    """freshness(), memoised for FRESHNESS_TTL seconds.
+
+    MEASURED, not guessed: freshness() takes ~1.08 s, and /indices, /moneyflow
+    and /live each called it once per request. On /live that WAS the page —
+    1,200 ms total of which ~1,050 ms was this function and 34 ms was the board
+    data it actually displays.
+
+    The docstring below is right that the number must be exact on /update,
+    where an operator reads it to decide whether to run a download. It is not
+    right for the other three, where the same value is a footnote saying which
+    session the table is from. Those three now call this; /update still calls
+    freshness() directly and still pays the full cost, which is correct.
+
+    Why it is slow, for whoever tunes it next: the thirteen queries include
+    COUNT(*) and COUNT(DISTINCT ticker) over ri_history, intraday_trades and
+    intraday_orderbook. In PostgreSQL an unqualified COUNT(*) is a full heap
+    scan — on 8.1 M rows that is the whole second. If an exact count is ever
+    wanted more cheaply than this, reltuples from pg_class is the usual answer;
+    caching was chosen here because these numbers do not need to be exact at
+    all on the pages that were paying for them.
+    """
+    return cache.get_or_set("freshness", ("__all__",), freshness,
+                            ttl=FRESHNESS_TTL)
+
+
 def freshness():
     """{dataset: {'latest': jdate, 'rows': n}} for the /update page.
 
-    Uncached: it is four MAX()s over indexed columns and it is the one number on
-    that page that must never be a moment out of date — it is what the operator
-    reads to decide whether to run anything at all."""
+    Uncached BY DESIGN, and it is what the operator reads to decide whether to
+    run anything at all — so /update must keep calling this one. It is not four
+    cheap MAX()s as the original comment said: it is thirteen queries and
+    several are COUNT(*) over multi-million-row tables, which measures at about
+    1.08 seconds. Anything that only needs a "data as of" label should call
+    freshness_cached() instead."""
     out = {}
     for key, table in (("ri", "ri_history"), ("index", "index_history"),
                        ("usd", "usd_rial"), ("watch", "market_snapshot"),
@@ -661,6 +697,16 @@ def index_rows(keys=None, sectors=False):
     """One row per index: latest value, and the return over each INDEX_PERIODS
     window, measured on `adj_close`.
 
+    CACHED, because it is a market-wide aggregate over daily data and it was
+    measured at 102 ms for the ten market indices and 493 ms for the forty
+    sector ones — on EVERY request to /indices, which asks for both. Nothing in
+    it is per-user, so it belongs in the same shared cache as the other
+    market-wide scans; the key carries the arguments and the cache version, so
+    a data update invalidates it the same way it invalidates everything else.
+
+    The window arithmetic below is unchanged and still anchored on the index's
+    own calendar — see the note after this one.
+
     Anchored on the INDEX's own calendar, which is the market calendar — every
     index in this table is published on exactly the sessions the exchange was
     open, so "۵ روز" is five sessions back from that index's latest bar and
@@ -668,6 +714,18 @@ def index_rows(keys=None, sectors=False):
     """
     if not _table_exists("index_history"):
         return []
+    # A tuple, not the list `keys` may be, because a cache key has to be
+    # hashable and stable in order — sorted so that ("cwi","ewi") and
+    # ("ewi","cwi") share one entry rather than computing the same rows twice.
+    key_part = tuple(sorted(keys)) if keys else None
+    return cache.get_or_set(
+        "indexrows", (key_part, bool(sectors)),
+        lambda: _index_rows_query(keys, sectors))
+
+
+def _index_rows_query(keys, sectors):
+    """The actual query behind index_rows(). Split out only so the cache wrapper
+    above stays readable; nothing else should call this."""
     # `adj_close IS NOT NULL` on every branch. A session TSETMC published with no
     # settled index value is not a session a return can be measured against, and
     # letting one in as the newest row makes `value` None — which every card and
