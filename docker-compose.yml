@@ -144,7 +144,72 @@ services:
   # =========================================================================
   # web — Gunicorn + Flask
   # =========================================================================
+  # ---------------------------------------------------------------------------
+  # pgbouncer — transaction-pooling proxy in front of PostgreSQL (finding H-3)
+  # ---------------------------------------------------------------------------
+  # Ships in the SAME change as the web replicas, which the review is explicit
+  # about: "Introduce PgBouncer in transaction mode in the same change that adds
+  # the replicas, not after the incident."
+  #
+  # Transaction mode: a server connection returns to the pool at COMMIT, so
+  # hundreds of idle application connections share a few dozen real ones. The
+  # cost is that session-scoped state does not survive between transactions —
+  # no session advisory locks, no SET on the connection, no cross-transaction
+  # prepared statements. The web tier uses none of those; the three services
+  # that DO are pointed straight at `db`.
+  #
+  # NOTE this does not address the other half of H-3 — PostgreSQL is still a
+  # single instance with no replica and no failover. A read replica is Phase 2
+  # and needs a second host to put it on.
+  pgbouncer:
+    image: ${REGISTRY-}edoburu/pgbouncer:latest
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: ${STOCK_DB_USER:-postgres}
+      DB_PASSWORD: ${STOCK_DB_PASSWORD:?set STOCK_DB_PASSWORD in deploy/.env}
+      DB_NAME: ${STOCK_DB_NAME:-Stock}
+      POOL_MODE: transaction
+      # Client side: what the application may open. Generous, because this is
+      # the number that no longer has to stay under max_connections.
+      MAX_CLIENT_CONN: ${PGB_MAX_CLIENT_CONN:-1000}
+      # Server side: real PostgreSQL connections. Leaves room inside
+      # max_connections=100 for the worker's direct pool (8), migrate, pg_dump
+      # and a human with psql.
+      DEFAULT_POOL_SIZE: ${PGB_DEFAULT_POOL_SIZE:-40}
+      RESERVE_POOL_SIZE: ${PGB_RESERVE_POOL_SIZE:-10}
+      AUTH_TYPE: scram-sha-256
+      TZ: ${TZ:-Asia/Tehran}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ${STOCK_DB_USER:-postgres} || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   web:
+    # C-1. There was exactly ONE application container, and Gunicorn's own
+    # sizing (3-4 workers x 4 threads) capped the whole platform at 12-16
+    # concurrent in-flight requests. Nothing in the code prevented more: the
+    # sessions are stateless signed cookies and the analytics cache is shared
+    # in Redis, so replicas need no application change at all.
+    #
+    #   docker compose up -d --scale web=4
+    #
+    # nginx reaches them through Docker's DNS — see the resolver block in
+    # conf.d/boursenegar.conf, which had to change too, because a static
+    # `upstream` block resolves once at startup and would keep sending every
+    # request to whichever replica existed then.
+    #
+    # RAISE THIS AND THE POOLER TOGETHER. See STOCK_DB_HOST below.
+    deploy:
+      replicas: ${WEB_REPLICAS:-1}
     build:
       context: .
       dockerfile: Dockerfile
@@ -172,7 +237,18 @@ services:
       # --- PostgreSQL: the service name, not localhost ---------------------
       STOCK_DB_NAME: ${STOCK_DB_NAME:-Stock}
       STOCK_DB_USER: ${STOCK_DB_USER:-postgres}
-      STOCK_DB_HOST: db
+      # H-3. pgbouncer, not `db` directly. Peak PostgreSQL connections are
+      # replicas x workers x STOCK_DB_POOL_MAX, so scaling C-1 past ~3
+      # replicas would exceed max_connections=100 and PostgreSQL would
+      # start refusing connections before anything else visibly failed
+      # (review §6.4). Transaction pooling is what decouples the two.
+      #
+      # ONLY this service. migrate keeps a direct route (Alembic takes
+      # advisory locks and runs DDL, both session-scoped), backup keeps one
+      # (pg_dump must never go through a transaction pooler), and worker
+      # keeps one (REFRESH MATERIALIZED VIEW CONCURRENTLY and bulk loads
+      # gain nothing from pooling and would pin a server connection anyway).
+      STOCK_DB_HOST: ${WEB_DB_HOST:-pgbouncer}
       STOCK_DB_PORT: "5432"
       # Per-worker pool. workers(4) x 8 = 32 connections, inside max_connections
       # (100) with room for psql, pg_dump and the order 06 Celery workers.
@@ -319,6 +395,16 @@ services:
       # Restore the newest dump into a scratch database and diff the row counts,
       # weekly. A backup nobody has restored is a hypothesis.
       BACKUP_VERIFY_WEEKDAY: ${BACKUP_VERIFY_WEEKDAY:-5}
+      # --- off-box copy (review finding H-4) --------------------------------
+      # Empty by default, which keeps the previous local-only behaviour AND
+      # makes backup.sh log a warning every night naming H-4 — so an
+      # unreplicated deployment is visible rather than silent. Set
+      # BACKUP_REMOTE to an rsync/ssh destination on a second machine you
+      # control (a domestic provider; foreign object storage is unreachable
+      # from Iran, which is why this is rsync and not S3).
+      BACKUP_REMOTE: ${BACKUP_REMOTE-}
+      BACKUP_REMOTE_PORT: ${BACKUP_REMOTE_PORT:-22}
+      BACKUP_REMOTE_SSH_KEY: ${BACKUP_REMOTE_SSH_KEY:-/ssh/id_rsa}
     volumes:
       - ./backups:/backups
       - ./deploy/scripts:/scripts:ro

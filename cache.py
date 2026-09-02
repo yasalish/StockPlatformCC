@@ -888,3 +888,52 @@ def release_slot(token):
         r.delete(token)
     except (RedisError, OSError):
         pass
+
+
+# ---------------------------------------------------------------------------
+# Per-user versioning (review finding H-2)
+# ---------------------------------------------------------------------------
+# The global version key above is deliberately coarse: bump_version() is for
+# "the market data changed", and every worker recomputing every key is exactly
+# what is wanted there. It is the wrong tool for per-user state, where one
+# person saving a preference must not invalidate the other 99,999 people's
+# bundles.
+#
+# So each user carries their own counter. It is INCRemented by db.py inside the
+# functions that write user-scoped rows, and it forms part of the bundle's
+# cache key — so a write makes the old key unreachable rather than needing a
+# delete, which is the same trick the global version uses and is equally
+# atomic across workers.
+#
+# With no Redis, user_version() returns 0 for everyone. That is correct rather
+# than degraded: get_or_set falls back to the bounded local cache with a short
+# TTL, and the bundle producer runs against PostgreSQL as it did before.
+
+def user_version(user_id):
+    """This user's state version. 0 when Redis is unavailable or never bumped."""
+    r = _client()
+    if r is None:
+        return 0
+    try:
+        raw = r.get(f"{PREFIX}:uver:{int(user_id)}")
+        return int(raw) if raw else 0
+    except (RedisError, OSError, ValueError, TypeError) as e:
+        if isinstance(e, (RedisError, OSError)):
+            _down(e)
+        return 0
+
+
+def bump_user(user_id):
+    """Invalidate one user's cached bundle. Called from every db.py writer that
+    touches users / user_prefs / watchlist / alert_events.
+
+    Silent on failure: a cache that cannot be invalidated is a correctness
+    problem bounded by the bundle's TTL, and raising here would turn a Redis
+    hiccup into a failed «ذخیره» the user can see."""
+    r = _client()
+    if r is None:
+        return
+    try:
+        r.incr(f"{PREFIX}:uver:{int(user_id)}")
+    except (RedisError, OSError):
+        pass

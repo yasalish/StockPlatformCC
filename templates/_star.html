@@ -3,5 +3,5 @@
 <button type="button"
         class="watch-star{{ ' on' if (kind ~ ':' ~ ticker) in watched }}"
         data-kind="{{ kind }}" data-ticker="{{ ticker }}" data-id="{{ eid or '' }}"
-        onclick="event.stopPropagation();BN.toggleWatch(this)"
+        data-role="watch-star"
         title="افزودن/حذف از دیده‌بان" aria-label="دیده‌بان">★</button>

@@ -16,13 +16,13 @@
       free — that feature saves the query string.  #}
   <form method="get" class="filterbar hm-toolbar">
     <label>بازار:</label>
-    <select name="kind" onchange="this.form.submit()">
+    <select name="kind" data-autosubmit>
       <option value="stock" {{ 'selected' if kind == 'stock' }}>سهام</option>
       <option value="etf" {{ 'selected' if kind == 'etf' }}>صندوق‌ها</option>
     </select>
 
     <label>دوره:</label>
-    <select name="period" onchange="this.form.submit()">
+    <select name="period" data-autosubmit>
       {% for p in periods %}
       <option value="{{ p.key }}" {{ 'selected' if p.key == period }}>{{ p.label }}</option>
       {% endfor %}

@@ -284,12 +284,28 @@ defineExpose({ visibleCount: computed(() => visibleRows.value.length) });
 
 <template>
   <div class="table-scroll">
-    <table class="grid sortable grid-virtual" :style="{ minWidth: minWidth + 'px' }">
+      <!-- M-6. Window virtualization is hostile to assistive technology: only
+           ~60 of ~780 rows exist in the DOM at any moment, so without these a
+           screen reader announces a 60-row table and a user has no idea the
+           other 720 are there.
+
+           aria-rowcount is the TRUE total (header rows included) and
+           aria-rowindex is each row's position in that total, so the reported
+           size and position stay right however few rows are mounted.
+
+           NOT role="grid", which the review suggested. These are real <table>
+           elements with real <thead>/<tbody>, and role="grid" would REPLACE
+           those native semantics with a widget contract this component does not
+           honour — arrow-key cell navigation, a managed focus point. Native
+           table semantics plus accurate counts is the better trade; the counts
+           were the part that was missing. -->
+    <table class="grid sortable grid-virtual" :style="{ minWidth: minWidth + 'px' }"
+           :aria-rowcount="visibleRows.length + 1">
       <colgroup>
         <col v-for="col in columns" :key="col.id" :style="{ width: col.width + 'px' }" />
       </colgroup>
       <thead>
-        <tr>
+        <tr aria-rowindex="1">
           <th
             v-for="col in columns"
             :key="col.id"
@@ -311,6 +327,7 @@ defineExpose({ visibleCount: computed(() => visibleRows.value.length) });
           :key="visibleRows[vr.index].ticker"
           :ref="(el) => virtualizer.measureElement(el as Element)"
           :data-index="vr.index"
+          :aria-rowindex="vr.index + 2"
           class="clickable"
           :class="{ pinned: pinned && pinned.includes(visibleRows[vr.index].ticker) }"
           :data-ticker="visibleRows[vr.index].ticker"

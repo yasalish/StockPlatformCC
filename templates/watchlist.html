@@ -81,7 +81,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
   if (document.getElementById("wl-stock")) BN.initTable("wl-stock", null);
   if (document.getElementById("wl-etf")) BN.initTable("wl-etf", null);
 </script>

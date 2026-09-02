@@ -296,7 +296,7 @@
 <script src="{{ url_for('static', filename='js/jdatepicker.js') }}?v={{ asset_version('js/jdatepicker.js') }}"></script>
 
 <!-- shared helpers + delete panel (available whether or not finpy_tse is installed) -->
-<script>
+<script nonce="{{ csp_nonce() }}">
   const fa = (s) => String(s).replace(/[0-9]/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
 
   /*  Rewrite a button's words without touching its icon. The buttons here have
@@ -421,7 +421,7 @@
 </script>
 
 {% if updater_available %}
-<script>
+<script nonce="{{ csp_nonce() }}">
   const STOCK_NEXT = "{{ stock_next }}", ETF_NEXT = "{{ etf_next }}";
   const RETRY_URL = "{{ url_for('update_retry') }}";
 

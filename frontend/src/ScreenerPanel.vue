@@ -105,7 +105,13 @@ function onWatchToggled(key: string, on: boolean) {
   else next.delete(key);
   watched.value = next;
 }
-watch(data, (d) => (watched.value = new Set(d.watched)));
+// H-1. Refetched payloads no longer carry `watched` — the stars come from
+// /api/watchlist/keys once, at boot. Guarded rather than removed: without the
+// check this assigned `new Set(undefined)` on every filter change and every
+// star silently vanished until reload.
+watch(data, (d) => {
+  if (d.watched) watched.value = new Set(d.watched);
+});
 
 const buySignals = computed(() => data.value.rows.filter((r) => r.verdict?.tone === "pos").length);
 const shown = computed(() => {

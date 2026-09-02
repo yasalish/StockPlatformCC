@@ -190,7 +190,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
   /*  The unit next to the value field, and the one-line explanation under the
       form. Both come from db.ALERT_RULES via data-unit, so the catalogue is
       defined once in Python and this file never restates it — a second copy of

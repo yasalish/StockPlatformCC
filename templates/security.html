@@ -21,7 +21,7 @@
       <button type="button"
               class="watch-star big{{ ' on' if (kind ~ ':' ~ entity.ticker) in watched }}"
               data-kind="{{ kind }}" data-ticker="{{ entity.ticker }}" data-id="{{ entity.id }}"
-              onclick="BN.toggleWatch(this)" title="افزودن/حذف از دیده‌بان">
+              data-role="watch-star" title="افزودن/حذف از دیده‌بان">
         <span class="star-glyph">★</span><span class="star-label">دیده‌بان</span>
       </button>
     </div>
@@ -369,7 +369,7 @@
    (pitchforks, Gann, Fibonacci set) BEFORE the chart mounts #}
 <script src="{{ url_for('static', filename='js/chart-tools.js') }}?v={{ asset_version('js/chart-tools.js') }}"></script>
 <script src="{{ url_for('static', filename='js/chart.js') }}?v={{ asset_version('js/chart.js') }}"></script>
-<script>
+<script nonce="{{ csp_nonce() }}">
   document.getElementById("pxchart").className = "pro-chart chart-full";
   BNChart.mount("pxchart", "{{ kind }}", {{ entity.id }}, "pxhistory");
   ["flow-hist", "queue-hist", "holders-tbl"].forEach(function (id) {

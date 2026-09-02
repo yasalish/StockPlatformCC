@@ -226,7 +226,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
 (function () {
   const chartBox = document.getElementById("idx-chart");
   if (!chartBox) return;

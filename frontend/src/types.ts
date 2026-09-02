@@ -28,7 +28,11 @@ export interface MarketPayload {
   periods: Period[];
   calc_periods: Period[];
   etf_type_colors: Record<string, string>;
-  watched: string[];
+  /** H-1: NOT sent by the server any more — the island fetches it from
+   *  /api/watchlist/keys and merges it in before mount, so the shared
+   *  payload stays identical for every user and cacheable at the edge.
+   *  Optional because a refetch on a filter change does not carry it. */
+  watched?: string[];
   server_ms: number;
 }
 
@@ -79,7 +83,11 @@ export interface PerfPayload {
   markets: string[];
   market: string | null;
   etf_type_colors: Record<string, string>;
-  watched: string[];
+  /** H-1: NOT sent by the server any more — the island fetches it from
+   *  /api/watchlist/keys and merges it in before mount, so the shared
+   *  payload stays identical for every user and cacheable at the edge.
+   *  Optional because a refetch on a filter change does not carry it. */
+  watched?: string[];
   server_ms: number;
 }
 
@@ -160,7 +168,11 @@ export interface ScreenerPayload {
   subgroups: string[];
   subgroup: string | null;
   etf_type_colors: Record<string, string>;
-  watched: string[];
+  /** H-1: NOT sent by the server any more — the island fetches it from
+   *  /api/watchlist/keys and merges it in before mount, so the shared
+   *  payload stays identical for every user and cacheable at the edge.
+   *  Optional because a refetch on a filter change does not carry it. */
+  watched?: string[];
   server_ms: number;
 }
 

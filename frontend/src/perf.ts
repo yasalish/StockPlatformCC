@@ -8,7 +8,7 @@
 import { createApp, h } from "vue";
 import PerfPanel from "./PerfPanel.vue";
 import type { PerfPayload } from "./types";
-import { getJson, revealIslandFallback } from "./http";
+import { getJson, fetchWatched, revealIslandFallback } from "./http";
 
 async function boot() {
   const host = document.getElementById("perf-app");
@@ -22,7 +22,17 @@ async function boot() {
 
   let payload: PerfPayload;
   try {
-    payload = await getJson<PerfPayload>(`/api/performance/${kind}?${q.toString()}`);
+        // H-1. The stars are their own request now, in PARALLEL with this
+    // one, so the shared payload stays a document nginx can cache and
+    // hand to every user. Promise.all rather than sequentially: the two
+    // are independent and the page should not wait for both in series.
+    const [main, watched] = await Promise.all([
+      getJson<PerfPayload>(`/api/performance/${kind}?${q.toString()}`),
+      fetchWatched(),
+    ]);
+    // Merged in so every panel's `payload.watched` keeps working with no
+    // change; fetchWatched() cannot throw, so this cannot fail the table.
+    payload = { ...main, watched };
   } catch (err) {
     console.error("[bn] performance data failed to load:", err);
     revealIslandFallback(err);

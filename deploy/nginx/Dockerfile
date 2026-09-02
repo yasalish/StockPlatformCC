@@ -77,7 +77,7 @@ COPY snippets/             /etc/nginx/snippets/
 COPY entrypoint.sh         /usr/local/bin/entrypoint.sh
 
 RUN chmod +x /usr/local/bin/entrypoint.sh \
- && mkdir -p /etc/nginx/tls /var/cache/nginx
+ && mkdir -p /etc/nginx/tls /var/cache/nginx /var/cache/nginx/api \n && chown -R www-data:www-data /var/cache/nginx
 
 # `nginx -t` at build time catches a syntax error in the committed config before
 # it can take the site down. It needs a certificate to exist, so a throwaway one

@@ -11,7 +11,7 @@ import { createApp, h } from "vue";
 import MarketPanel from "./MarketPanel.vue";
 import CalcGrid from "./CalcGrid.vue";
 import type { MarketPayload } from "./types";
-import { getJson, revealIslandFallback } from "./http";
+import { getJson, fetchWatched, revealIslandFallback } from "./http";
 
 function readJson<T>(el: HTMLElement, attr: string, fallback: T): T {
   const raw = el.dataset[attr];
@@ -35,7 +35,17 @@ async function boot() {
   const url = `/api/market/${kind}${asOf ? `?as_of=${encodeURIComponent(asOf)}` : ""}`;
   let payload: MarketPayload;
   try {
-    payload = await getJson<MarketPayload>(url);
+        // H-1. The stars are their own request now, in PARALLEL with this
+    // one, so the shared payload stays a document nginx can cache and
+    // hand to every user. Promise.all rather than sequentially: the two
+    // are independent and the page should not wait for both in series.
+    const [main, watched] = await Promise.all([
+      getJson<MarketPayload>(url),
+      fetchWatched(),
+    ]);
+    // Merged in so every panel's `payload.watched` keeps working with no
+    // change; fetchWatched() cannot throw, so this cannot fail the table.
+    payload = { ...main, watched };
   } catch (err) {
     // Leave the server-rendered fallback in place and say why, rather than
     // replacing a working table with an empty one.

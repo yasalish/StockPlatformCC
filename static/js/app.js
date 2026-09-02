@@ -1,9 +1,25 @@
 /* app.js — بورس‌نگار front-end: global search, sortable/filterable gainer table,
    and a self-contained SVG price chart (no external libraries). */
 const BN = (function () {
+  // M-2. Persian formatting has ONE implementation now:
+  // frontend/src/format.ts, published on window.BN_FORMAT by the
+  // legacy-format bundle that base.html loads just above this file.
+  //
+  // The local fallbacks are not duplication for its own sake — they are what
+  // keeps the nav, the search box and the chart working if that bundle fails
+  // to load, on a page where a missing thousands separator is a cosmetic
+  // problem and a thrown TypeError is a dead page. They are deliberately the
+  // simplest possible version and are never the one that runs when the bundle
+  // is present.
   const FA = "۰۱۲۳۴۵۶۷۸۹";
-  const faDigits = (s) => String(s).replace(/[0-9]/g, (d) => FA[d]);
-  const fmt = (n) => faDigits(Math.round(n || 0).toLocaleString("en-US"));
+  const faDigits = (s) =>
+    window.BN_FORMAT
+      ? window.BN_FORMAT.toFaDigits(String(s))
+      : String(s).replace(/[0-9]/g, (d) => FA[d]);
+  const fmt = (n) =>
+    window.BN_FORMAT
+      ? window.BN_FORMAT.fa(Math.round(n || 0))
+      : faDigits(Math.round(n || 0).toLocaleString("en-US"));
   const SVGNS = "http://www.w3.org/2000/svg";
 
   function el(tag, attrs, txt) {
@@ -248,9 +264,10 @@ const BN = (function () {
   }
 
   // ---------- Watchlist (دیده‌بان) ----------
-  const FA_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
+  // The SECOND copy of the digit map that used to live in this file, 246 lines
+  // below the first. Now the same delegation as faDigits above.
   function toFa(n) {
-    return String(n).replace(/\d/g, (d) => FA_DIGITS[d]);
+    return faDigits(n);
   }
 
   function updateWatchBadge(count) {

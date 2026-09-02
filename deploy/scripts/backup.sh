@@ -6,11 +6,24 @@
 # back, records a checksum, and prunes old ones.
 #
 # Storage is a local directory (a Docker named volume or a bind mount on the
-# VPS). Nothing is uploaded anywhere: the deployment target is inside Iran and
-# foreign object storage is both unreachable and out of scope. To keep a copy
-# off-box, rsync BACKUP_DIR to another machine you control or to a domestic
-# provider — that is a one-line addition at the end of this script, deliberately
-# left out rather than guessed at.
+# VPS). Foreign object storage stays out of the picture: the deployment target
+# is inside Iran and S3-compatible SaaS is unreachable from there.
+#
+# But local-only was itself the risk (review finding H-4): host loss destroyed
+# the database AND every backup of it in the same event. So this script now
+# ships each dump to a second machine when one is configured, and says so in
+# its log either way. It is opt-in by configuration, not by editing the script.
+#
+#   BACKUP_REMOTE   rsync/ssh destination, e.g. backup@10.0.0.9:/srv/bn-backups
+#                   Empty (the default) keeps the old local-only behaviour and
+#                   logs a warning naming H-4, so an unreplicated deployment is
+#                   visible in the logs rather than silent.
+#   BACKUP_REMOTE_SSH_KEY  identity file for that host (default ~/.ssh/id_rsa)
+#   BACKUP_REMOTE_PORT     ssh port (default 22)
+#
+# The copy is a push over ssh on purpose. A pull would need the backup host to
+# hold credentials to production; a push means the production host holds only a
+# write path, and the destination can be append-only if you configure it so.
 #
 #   ./backup.sh                 dump, verify, prune
 #   ./backup.sh --no-prune      keep everything
@@ -115,4 +128,36 @@ if [ "$PRUNE" = "1" ]; then
     fi
     log INFO "retention applied" \
         ",\"kept\":$((TOTAL - DELETED)),\"deleted\":$DELETED,\"keep_days\":$KEEP_DAYS,\"keep_min\":$KEEP_MIN"
+fi
+
+# --- off-box copy (H-4) ----------------------------------------------------
+# Runs AFTER verification and retention, so what leaves the box is a dump that
+# has already been read back successfully.
+#
+# A failure here is logged at ERROR and sets the exit status, but does NOT undo
+# the local backup: a good local dump plus a failed upload is strictly better
+# than no dump, and the operator needs to know about the second half without
+# losing the first.
+REMOTE="${BACKUP_REMOTE:-}"
+if [ -z "$REMOTE" ]; then
+    log WARN "no off-box copy configured — host loss would take the backups with it (H-4)"         ",\"hint\":\"set BACKUP_REMOTE\""
+else
+    SSH_KEY="${BACKUP_REMOTE_SSH_KEY:-$HOME/.ssh/id_rsa}"
+    SSH_PORT="${BACKUP_REMOTE_PORT:-22}"
+    RSYNC_RC=0
+    if command -v rsync >/dev/null 2>&1; then
+        # --append-verify resumes a dump interrupted by a dropped link rather
+        # than starting the transfer again, which matters on a slow uplink with
+        # a multi-hundred-megabyte file.
+        rsync -az --append-verify --partial               -e "ssh -p ${SSH_PORT} -i ${SSH_KEY} -o BatchMode=yes -o StrictHostKeyChecking=accept-new"               "$TARGET" "$TARGET.sha256"               "$REMOTE"/ || RSYNC_RC=$?
+    else
+        log ERROR "rsync not installed — cannot copy off-box"
+        RSYNC_RC=127
+    fi
+    if [ "$RSYNC_RC" -eq 0 ]; then
+        log INFO "off-box copy complete" ",\"remote\":\"$(esc "$REMOTE")\""
+    else
+        log ERROR "off-box copy FAILED — the local dump is still good"             ",\"remote\":\"$(esc "$REMOTE")\",\"rsync_rc\":$RSYNC_RC"
+        exit 1
+    fi
 fi

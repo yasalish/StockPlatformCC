@@ -233,3 +233,29 @@ export function revealIslandFallback(err: unknown): void {
     });
   });
 }
+
+/**
+ * The signed-in user's starred symbols (review finding H-1).
+ *
+ * These used to ride along inside the market / performance / scan payloads,
+ * which made those documents user-specific and therefore uncacheable at the
+ * edge — for the sake of a few hundred bytes. They are fetched separately now,
+ * in parallel with the main payload, and merged into it before mount so every
+ * panel's `payload.watched` keeps working untouched.
+ *
+ * NEVER throws and never blocks the table. A failure here means stars render
+ * empty, which is a cosmetic loss; failing the page over it would trade the
+ * whole table for a decoration. Deliberately no retry for the same reason.
+ */
+export async function fetchWatched(): Promise<string[]> {
+  try {
+    const res = await getJson<{ watched?: string[] }>(
+      "/api/watchlist/keys",
+      {},
+      { timeoutMs: 5000, retries: 0 },
+    );
+    return Array.isArray(res.watched) ? res.watched : [];
+  } catch {
+    return [];
+  }
+}

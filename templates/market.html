@@ -26,7 +26,7 @@
     {% endif %}
     {% if cat_options %}
     <label>{{ cat_label }}:</label>
-    <select name="cat" onchange="this.form.submit()">
+    <select name="cat" data-autosubmit>
       <option value="">همه</option>
       {% for f in cat_options %}<option value="{{ f }}" {{ 'selected' if f == cat }}>{{ f }}</option>{% endfor %}
     </select>

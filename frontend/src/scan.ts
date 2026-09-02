@@ -25,6 +25,10 @@ async function boot() {
 
   let payload: ScanPayload;
   try {
+        // No star fetch here, unlike the other three islands: /api/scan was
+    // SENDING `watched` and nothing on this page ever read it — ScanPanel has
+    // no star column, and ScanPayload never even declared the field. So H-1's
+    // per-user query is simply gone from this endpoint rather than moved.
     payload = await getJson<ScanPayload>(`/api/scan/${what}/${kind}?${q.toString()}`);
   } catch (err) {
     console.error(`[bn] ${what} data failed to load:`, err);

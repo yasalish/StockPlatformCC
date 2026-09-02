@@ -3063,6 +3063,7 @@ def link_google(user_id, google_id, email=""):
                 (google_id, email or "", user_id),
             )
         conn.commit()
+        cache.bump_user(user_id)
     finally:
         release(conn)
 
@@ -3073,6 +3074,7 @@ def touch_user_login(user_id):
         with conn.cursor() as cur:
             cur.execute("UPDATE users SET last_login = %s WHERE id = %s", (_utcnow(), user_id))
         conn.commit()
+        cache.bump_user(user_id)
     finally:
         release(conn)
 
@@ -3100,6 +3102,7 @@ def toggle_watch(user_id, kind, ticker, entity_id=None):
             )
             if cur.rowcount:                       # was there → removed
                 conn.commit()
+                cache.bump_user(user_id)
                 return False
             cur.execute(
                 "INSERT INTO watchlist (user_id, kind, ticker, entity_id, created_at)"
@@ -3107,6 +3110,7 @@ def toggle_watch(user_id, kind, ticker, entity_id=None):
                 (user_id, kind, ticker, entity_id, _utcnow()),
             )
         conn.commit()
+        cache.bump_user(user_id)
         return True
     finally:
         release(conn)
@@ -3183,6 +3187,7 @@ def set_prefs(user_id, values):
         with conn.cursor() as cur:
             cur.execute(sql, (user_id, *[clean[c] for c in cols], _utcnow()))
         conn.commit()
+        cache.bump_user(user_id)
     finally:
         release(conn)
     return get_prefs(user_id)
@@ -3201,6 +3206,7 @@ def reset_prefs(user_id):
         with conn.cursor() as cur:
             cur.execute("DELETE FROM user_prefs WHERE user_id = %s", (user_id,))
         conn.commit()
+        cache.bump_user(user_id)
     finally:
         release(conn)
     return get_prefs(user_id)
@@ -3563,6 +3569,7 @@ def mark_alerts_seen(user_id):
                         "WHERE user_id = %s AND NOT seen", (user_id,))
             n = cur.rowcount
         conn.commit()
+        cache.bump_user(user_id)
         return n
     finally:
         release(conn)
@@ -3729,8 +3736,77 @@ def evaluate_alerts():
                             WHERE id = %s""",
                         (_utcnow(), snap.get("j_date"), a["id"]))
                 conn.commit()
+                # The badge this event feeds is served from the user's cached
+                # bundle, so the owner of the RULE — not the caller, which is a
+                # Celery worker with no user at all — is the one to invalidate.
+                cache.bump_user(a["user_id"])
             finally:
                 release(conn)
             fired.append({"alert_id": a["id"], "ticker": a["ticker"],
                           "rule": a["rule"], "message": msg})
     return {"checked": checked, "fired": len(fired), "events": fired}
+
+
+# ---------------------------------------------------------------------------
+# The per-user bundle (review finding H-2)
+# ---------------------------------------------------------------------------
+# Every authenticated page view used to pay a fixed floor of FOUR indexed
+# lookups before any route logic ran:
+#
+#   auth.load_user()      -> get_user(user_id)
+#   app.inject_prefs()    -> get_prefs(user_id)
+#   app.inject_watchlist()-> watch_keys(user_id)
+#   app.inject_alerts()   -> unseen_alert_count(user_id)
+#
+# Each is genuinely cheap, and the source comments correctly said so. The
+# problem is that this is a PER-USER cost that no amount of global caching
+# removes, multiplied by every navigation by every user — so at a market-open
+# peak it is the dominant load on PostgreSQL. (The review named three; there
+# are four.)
+#
+# They now travel together, cached in Redis under the user's own version
+# counter. One round trip instead of four, and on a hit, zero.
+#
+# WHY A SHORT TTL AS WELL AS A VERSION
+#
+# The version is the correctness mechanism: cache.bump_user() runs inside every
+# db writer that touches these four tables, so a save makes the old key
+# unreachable immediately. The TTL is the safety net for the failure this
+# design is most exposed to — a writer added later that forgets to bump. With
+# it, such a bug shows as up to USER_BUNDLE_TTL seconds of staleness that
+# self-corrects; without it, it would show as a star that never appears and a
+# badge that never clears. Same reasoning as the TTL on the analytics keys.
+USER_BUNDLE_TTL = int(os.environ.get("USER_BUNDLE_TTL", "30"))
+
+
+def user_bundle(user_id):
+    """The four per-request per-user reads, as one cached dict.
+
+    Keys: "user" (row or None), "prefs" (merged), "watch" (sorted list of
+    "kind:ticker"), "alert_unseen" (int).
+
+    `watch` is a LIST rather than the set watch_keys() returns, because the
+    value is JSON-serialised into Redis and a set is not JSON. Callers that
+    want set membership build one from it — which is what they were doing with
+    the query result anyway.
+    """
+    uid = int(user_id)
+
+    def produce():
+        row = get_user(uid)
+        try:
+            unseen = unseen_alert_count(uid)
+        except Exception:
+            # A database created before the alerts feature has no
+            # alert_events table. A missing badge must not take the page down —
+            # the same reason app.inject_alerts() swallowed this before.
+            unseen = 0
+        return {
+            "user": dict(row) if row else None,
+            "prefs": get_prefs(uid),
+            "watch": sorted(watch_keys(uid)),
+            "alert_unseen": unseen,
+        }
+
+    return cache.get_or_set("ubundle", (uid, cache.user_version(uid)),
+                            produce, ttl=USER_BUNDLE_TTL)

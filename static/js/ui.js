@@ -308,7 +308,63 @@ const BNUi = (function () {
     autoRefresh();
   }
 
+  /* ---------------------------------------------------------------------
+     Delegated handlers that replace inline on* attributes (finding M-4)
+     ---------------------------------------------------------------------
+     A Content-Security-Policy without 'unsafe-inline' blocks inline event
+     handler ATTRIBUTES as surely as it blocks inline <script> — they are
+     script evaluated from a string. There were fourteen of them:
+
+       12 x <select onchange="this.form.submit()">   -> [data-autosubmit]
+        2 x <button onclick="BN.toggleWatch(this)">  -> [data-role=watch-star]
+
+     Both are delegated from `document` rather than bound per element, which
+     also fixes something the inline version got for free and a naive
+     per-element rewrite would have broken: rows the islands re-render after
+     load never existed at bind time. Delegation covers them.
+     --------------------------------------------------------------------- */
+  function initDelegated() {
+    // Any control marked data-autosubmit submits its own form on change.
+    // `change` and not `input`: a <select> fires change on commit, and input
+    // would submit while the user is still arrowing through the options.
+    document.addEventListener("change", function (e) {
+      var el = e.target;
+      if (!el || !el.matches || !el.matches("[data-autosubmit]")) return;
+      if (el.form) el.form.submit();
+    });
+
+    // The watchlist star.
+    //
+    // CAPTURE PHASE, and that is the whole point. tables.js makes every
+    // `tr.clickable` navigate on click, and the inline handler this replaces
+    // read `onclick="event.stopPropagation();BN.toggleWatch(this)"` — it ran ON
+    // THE BUTTON, so it stopped the event before the row ever saw it.
+    //
+    // A delegated listener on `document` in the BUBBLE phase runs LAST, after
+    // the row's handler has already fired: stopPropagation() there is too late
+    // and starring a symbol would also open it. Verified in a browser, which is
+    // how this was caught — the first version of this function had exactly that
+    // bug. Capture runs document -> target, so stopping here prevents both the
+    // rest of the capture path and the entire bubble phase, and the row handler
+    // never runs.
+    document.addEventListener("click", function (e) {
+      var t = e.target;
+      var btn = t && t.closest ? t.closest('[data-role="watch-star"]') : null;
+      if (!btn) return;
+      e.stopPropagation();
+      e.preventDefault();
+      try {
+        if (typeof BN !== "undefined" && BN && BN.toggleWatch) BN.toggleWatch(btn);
+      } catch (err) { /* app.js absent: the star does nothing rather than throw */ }
+    }, true);
+  }
+
+
   document.addEventListener("DOMContentLoaded", init);
+  // Bound immediately rather than on DOMContentLoaded: both listen on
+  // `document`, so there is no element to wait for, and binding early
+  // means a click during a slow parse is not lost.
+  initDelegated();
 
   var api = { renderRecents: renderRecents };
   try { if (typeof BN !== "undefined" && BN) BN.ui = api; } catch (e) {}

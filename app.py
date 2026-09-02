@@ -24,6 +24,7 @@ except ImportError:
 
 from flask import (
     Flask, render_template, request, jsonify, send_file, abort, redirect, url_for, flash, g,
+    Response,
 )
 from markupsafe import Markup, escape
 from flask_login import current_user, login_required
@@ -328,7 +329,7 @@ def _require_login():
     # exists to report happens on the login page as often as anywhere else, and
     # a reporter that needs a session cannot report the bug that stopped you
     # getting one. It is rate-limited and size-capped in its own handler.
-    if endpoint in ("healthz", "readyz", "client_error"):
+    if endpoint in ("healthz", "readyz", "client_error", "csp_report"):
         return
     if current_user.is_authenticated:
         # The data-update pages (downloads / deletes) are admin-only.
@@ -408,6 +409,94 @@ def spark(values, w=120, h=34, pad=2):
     }
 
 
+# ---------------------------------------------------------------------------
+# Content-Security-Policy (review finding M-4)
+# ---------------------------------------------------------------------------
+# The header snippet said CSP "belongs with the Vue conversion, where the inline
+# code goes away and a nonce-based policy is real". The review's judgement is
+# that the deferral has earned out, and it was right: the templates carried 15
+# inline <script> blocks and 14 inline on* handlers. The handlers are now gone
+# entirely (delegated in ui.js) and the scripts carry a nonce, so a policy
+# without 'unsafe-inline' on script-src is finally honest.
+#
+# WHY THIS IS SET IN FLASK AND NOT IN THE NGINX SNIPPET
+#
+# A nonce has to be unpredictable per response AND appear in both the header and
+# the markup. nginx cannot put a value into the HTML, so the two would have to
+# agree by some other means; the application already renders the markup, so it
+# owns both halves here. Every other security header stays in nginx.
+#
+# WHAT IS STILL PERMISSIVE, STATED PLAINLY
+#
+#   style-src 'unsafe-inline'  — 67 style="" attributes remain across the
+#     templates, and an attribute cannot take a nonce; CSP offers only
+#     'unsafe-inline' or 'unsafe-hashes' for them. Removing them is a real
+#     refactor and buys little: the XSS that matters is script execution, and
+#     script-src is strict. This is a deliberate stopping point, not an
+#     oversight.
+#
+#   REPORT-ONLY BY DEFAULT. The policy ships as
+#   Content-Security-Policy-Report-Only so a page this change did not exercise
+#   cannot break in production. Violations are logged. Set CSP_ENFORCE=1 once
+#   the report endpoint has been quiet for a day, which is the only responsible
+#   way to turn a first CSP on for an app with 31 templates.
+CSP_ENFORCE = os.environ.get("CSP_ENFORCE", "").strip().lower() in ("1", "true", "yes")
+
+
+def _csp_nonce():
+    """One nonce per request, generated lazily and reused within the request.
+
+    Lazily because a response that renders no HTML never needs one, and
+    `secrets.token_urlsafe` is not free at 1,200 requests/second.
+    """
+    n = getattr(g, "_csp_nonce", None)
+    if n is None:
+        n = secrets.token_urlsafe(16)
+        g._csp_nonce = n
+    return n
+
+
+@app.context_processor
+def inject_csp_nonce():
+    """`csp_nonce` for the 15 inline <script> blocks.
+
+    A callable, not a string: a template that never uses it never pays for one.
+    Jinja calls it on access, so `nonce="{{ csp_nonce() }}"` is what appears in
+    the markup.
+    """
+    return {"csp_nonce": _csp_nonce}
+
+
+@app.route("/api/csp-report", methods=["POST"])
+def csp_report():
+    """Where the browser posts violations while the policy is Report-Only.
+
+    Logged at WARNING rather than ERROR: in report-only mode a violation is
+    information, not a fault, and routing it to Sentry as an error would bury
+    the real ones. Answers 204 always, and is size-capped — this endpoint is
+    unauthenticated by necessity, since a violation on the login page is
+    exactly the kind worth hearing about.
+    """
+    raw = request.get_data(cache=False)
+    if len(raw or b"") > 8 * 1024:
+        return ("", 204)
+    try:
+        body = json.loads((raw or b"{}").decode("utf-8"))
+        rep = body.get("csp-report", body) if isinstance(body, dict) else {}
+    except Exception:
+        return ("", 204)
+    if not isinstance(rep, dict):
+        return ("", 204)
+    log.warning("csp violation", extra={
+        "csp_directive": str(rep.get("violated-directive") or rep.get("effectiveDirective") or "")[:80],
+        "csp_blocked": str(rep.get("blocked-uri") or rep.get("blockedURL") or "")[:200],
+        "csp_document": str(rep.get("document-uri") or rep.get("documentURL") or "")[:200],
+        "csp_sample": str(rep.get("script-sample") or "")[:120],
+        "csp_enforced": CSP_ENFORCE,
+    })
+    return ("", 204)
+
+
 @app.context_processor
 def inject_helpers():
     def asset_version(filename):
@@ -466,7 +555,11 @@ def inject_prefs():
     app for a preference that changes once a month.
     """
     if current_user.is_authenticated:
-        p = db.get_prefs(current_user.id)
+        # From the cached bundle load_user already fetched this request, not a
+        # fresh query (H-2). prefs.payload() is re-applied because the cached
+        # dict came back through JSON and a preference added since it was
+        # written must still resolve to its default rather than be missing.
+        p = prefs.payload(db.user_bundle(current_user.id).get("prefs") or {})
         return {"prefs": p, "prefs_json": prefs.client_payload(p),
                 "prefs_attrs": _prefs_attrs(p), "prefs_meta": prefs}
     p = prefs.payload({})
@@ -481,7 +574,10 @@ def inject_watchlist():
     shows a count. Cheap single query; only runs for logged-in users."""
     if not current_user.is_authenticated:
         return {"watched": set(), "watch_count": 0}
-    keys = db.watch_keys(current_user.id)
+    # Same cached bundle (H-2). Stored as a sorted list because the value is
+    # JSON in Redis; the templates want set membership, so build it here once
+    # per render rather than in every {% if %}.
+    keys = set(db.user_bundle(current_user.id).get("watch") or ())
     return {"watched": keys, "watch_count": len(keys)}
 
 
@@ -500,7 +596,9 @@ def inject_alerts():
     if not current_user.is_authenticated:
         return {"alert_unseen": 0}
     try:
-        return {"alert_unseen": db.unseen_alert_count(current_user.id)}
+        # Same cached bundle (H-2) — the count is produced inside it, which is
+        # also where the missing-table case is handled.
+        return {"alert_unseen": int(db.user_bundle(current_user.id).get("alert_unseen") or 0)}
     except Exception:
         return {"alert_unseen": 0}
 
@@ -624,6 +722,40 @@ def _cache_policy(resp):
             resp.headers.pop("Expires", None)
     elif ctype.startswith("text/html"):
         resp.headers["Cache-Control"] = "private, no-cache, must-revalidate"
+        # CSP (M-4). Only on HTML: a policy on a JSON body protects nothing and
+        # a policy on /static/ would need its own, looser one for the same
+        # assets this policy already allows by origin.
+        #
+        # Only if a nonce was actually generated — i.e. a template asked for
+        # one. A response with no nonce would get `script-src 'nonce-...'`
+        # naming a nonce nothing carries, which blocks every inline script on
+        # the page instead of allowing the intended ones.
+        nonce = getattr(g, "_csp_nonce", None)
+        if nonce:
+            resp.headers[
+                "Content-Security-Policy" if CSP_ENFORCE
+                else "Content-Security-Policy-Report-Only"
+            ] = "; ".join([
+                "default-src 'self'",
+                # The 15 inline blocks carry this nonce. No 'unsafe-inline' and
+                # no 'unsafe-eval' — the filter designer walks graphs as data
+                # rather than compiling them, which is what makes this possible.
+                f"script-src 'self' 'nonce-{nonce}'",
+                # 'unsafe-inline' ONLY here, for the 67 style="" attributes an
+                # attribute cannot nonce. See the note above _csp_nonce.
+                "style-src 'self' 'unsafe-inline'",
+                "img-src 'self' data:",
+                # Vazirmatn is self-hosted precisely so this can be 'self'.
+                "font-src 'self'",
+                # Every fetch this app makes is same-origin: there is no CDN and
+                # no third-party analytics.
+                "connect-src 'self'",
+                "form-action 'self'",
+                "base-uri 'self'",
+                "object-src 'none'",
+                "frame-ancestors 'self'",
+                "report-uri /api/csp-report",
+            ])
         # Pragma/Expires are the HTTP/1.0 spelling of no-cache. They are dropped
         # rather than kept: some intermediaries read `Pragma: no-cache` as
         # no-store, which would put the bfcache block straight back.
@@ -975,13 +1107,12 @@ def api_screener(kind):
     keep = ("id", "ticker", "name", "group", "latest", "score", "verdict",
             "trend", "momentum", "rsi")
     rows = [{k: r.get(k) for k in keep} for r in scan["rows"]]
-    watched = sorted(db.watch_keys(current_user.id)) if current_user.is_authenticated else []
     return jsonify({
         "kind": kind, "as_of": scan["as_of"], "scanned": scan["scanned"],
         "count": scan["count"], "rows": rows, "verdict": verdict,
         "bands": [{"min": b[0], "key": b[1], "label": b[2], "tone": b[3]}
                   for b in db.SCORE_BANDS],
-        "etf_type_colors": db.ETF_TYPE_COLORS, "watched": watched,
+        "etf_type_colors": db.ETF_TYPE_COLORS,
         **scope, "server_ms": round(elapsed, 1),
     })
 
@@ -1007,7 +1138,6 @@ def api_performance(kind):
     d = _performance_data(args)
     elapsed = (time.perf_counter() - t0) * 1000.0
 
-    watched = sorted(db.watch_keys(current_user.id)) if current_user.is_authenticated else []
     return jsonify({
         # Full precision, deliberately. Rounding the percentages to four decimals
         # would take ~20% off the payload, but checked against the live data it
@@ -1023,7 +1153,6 @@ def api_performance(kind):
         "subgroups": d["subgroups"], "subgroup": d["subgroup"],
         "markets": d["markets"], "market": d["market"],
         "etf_type_colors": db.ETF_TYPE_COLORS,
-        "watched": watched,
         "server_ms": round(elapsed, 1),
     })
 
@@ -1672,6 +1801,44 @@ def api_watchlist_toggle():
     return jsonify({"ok": True, "watched": watched, "count": db.watch_count(current_user.id)})
 
 
+@app.route("/api/watchlist/keys")
+def api_watch_keys():
+    """The signed-in user's starred symbols, as ["stock:فولاد", ...] (H-1).
+
+    WHY THIS ENDPOINT EXISTS
+
+    /api/market/<kind>, /api/performance/<kind> and /api/scan/... are otherwise
+    byte-identical for every user between daily updates — the whole point of the
+    cache design in db.py, whose keys deliberately carry no user identity. One
+    line undid that: each of those three embedded `watched` so the island could
+    render pre-filled stars, which meant a PostgreSQL query per request and, far
+    more expensively, a document nginx could not cache and hand to everyone.
+
+    Splitting the stars out makes those three static documents again. This
+    endpoint is the per-user half, and it is deliberately tiny: a few hundred
+    bytes, served from the user's cached bundle, so on a hit it touches neither
+    PostgreSQL nor anything else.
+
+    It is NOT cacheable and must never be given a cache header — it is the one
+    piece of the pair that is genuinely per-person.
+    """
+    if current_user.is_authenticated:
+        keys = sorted(db.user_bundle(current_user.id).get("watch") or ())
+    else:
+        # 200 with an empty list rather than 401: an anonymous visitor has no
+        # stars, which is an answer, not an error, and the island should render
+        # the table rather than treat this as a failed load.
+        keys = []
+    resp = jsonify({"watched": keys, "count": len(keys)})
+    # UNCONDITIONALLY no-store, on the anonymous path too. C-2 turns proxy_cache
+    # on for the /api/ documents this endpoint was split out of; if a shared
+    # cache ever stored THIS response, one account's watchlist would be served
+    # to another. Setting it only for signed-in users would leave that hole open
+    # for exactly as long as it took someone to add a matching cache rule.
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 # ---------------------------------------------------------------------------
 # هشدارها — alerts
 # ---------------------------------------------------------------------------
@@ -2041,26 +2208,44 @@ def api_market(kind):
         abort(404)
     as_of_arg = request.args.get("as_of") or None
 
-    t0 = time.perf_counter()
-    rows, as_of = db.market_gainer(kind, as_of=as_of_arg)
-    calc_rows, _ = db.period_gainer(kind, as_of=as_of_arg)
-    elapsed = (time.perf_counter() - t0) * 1000.0
+    # M-1. The ROWS were cached; the JSON was not. jsonify() re-encoded roughly
+    # 780 rows on every single request — CPU under the GIL, holding a worker
+    # thread, to produce byte-for-byte the same output each time. What is cached
+    # here is the finished string.
+    #
+    # This is only correct because H-1 removed `watched` from the payload. While
+    # a per-user field was in it, one cached body could not be reused, and that
+    # is exactly why M-1 and H-1 are the same piece of work.
+    #
+    # `server_ms` inside the cached body is the cost of the render that BUILT
+    # the entry, not of the request being served. That is deliberate: it is a
+    # diagnostic, and the honest number to show is what the work actually cost
+    # rather than the microseconds a cache read takes.
+    def produce():
+        t0 = time.perf_counter()
+        rows, as_of = db.market_gainer(kind, as_of=as_of_arg)
+        calc_rows, _ = db.period_gainer(kind, as_of=as_of_arg)
+        elapsed = (time.perf_counter() - t0) * 1000.0
+        return json.dumps({
+            "kind": kind,
+            "as_of": as_of,
+            "rows": rows,
+            "calc_rows": calc_rows,
+            "periods": db.PERIODS,
+            "calc_periods": db.CALC_PERIODS,
+            "etf_type_colors": db.ETF_TYPE_COLORS,
+            # H-1. `watched` used to be here, and it is why this endpoint could
+            # not be cached at the edge: one db.watch_keys() call per request
+            # made an otherwise byte-identical market document user-specific.
+            # The stars now come from /api/watchlist/keys, which the island
+            # fetches alongside this one.
+            "server_ms": round(elapsed, 1),
+        }, ensure_ascii=False, separators=(",", ":"), default=str)
 
-    watched = sorted(db.watch_keys(current_user.id)) if current_user.is_authenticated else []
-
-    return jsonify({
-        "kind": kind,
-        "as_of": as_of,
-        "rows": rows,
-        "calc_rows": calc_rows,
-        "periods": db.PERIODS,
-        "calc_periods": db.CALC_PERIODS,
-        "etf_type_colors": db.ETF_TYPE_COLORS,
-        # The star state, so the island renders pre-filled stars exactly as the
-        # inject_watchlist context processor does for the Jinja pages.
-        "watched": watched,
-        "server_ms": round(elapsed, 1),
-    })
+    body = cache.get_or_set("mktjson", (kind, as_of_arg or "__latest__"), produce)
+    # Response, not jsonify: the point is to hand back bytes that were already
+    # encoded rather than re-encode a dict.
+    return Response(body, mimetype="application/json")
 
 
 @app.route("/api/ohlc/<kind>/<int:entity_id>")

@@ -48,6 +48,11 @@ export default defineConfig({
       // shared by the two scan pages (filters.html / strategies.html), the
       // screener, and the filter designer.
       input: {
+        // M-2. Publishes format.ts on window.BN_FORMAT so static/js/app.js
+        // stops carrying its own two copies of the same logic. Loaded on every
+        // page by base.html, ahead of app.js. See the file's header for why a
+        // global rather than an ES import.
+        "legacy-format": resolve(__dirname, "src/legacy-format.ts"),
         market: resolve(__dirname, "src/market.ts"),
         perf: resolve(__dirname, "src/perf.ts"),
         scan: resolve(__dirname, "src/scan.ts"),

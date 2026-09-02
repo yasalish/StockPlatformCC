@@ -60,20 +60,20 @@
 {# ── filters ──────────────────────────────────────────────────────────────── #}
 <form method="get" class="filterbar">
   <label>نوع:
-    <select name="kind" onchange="this.form.submit()">
+    <select name="kind" data-autosubmit>
       <option value="stock" {{ 'selected' if kind == 'stock' }}>سهام</option>
       <option value="etf" {{ 'selected' if kind == 'etf' }}>صندوق‌ها</option>
     </select>
   </label>
   <label>بازه:
-    <select name="days" onchange="this.form.submit()">
+    <select name="days" data-autosubmit>
       {% for d, dlabel in periods %}
       <option value="{{ d }}" {{ 'selected' if d == days }}>{{ dlabel }}</option>
       {% endfor %}
     </select>
   </label>
   <label>مرتب‌سازی:
-    <select name="order" onchange="this.form.submit()">
+    <select name="order" data-autosubmit>
       {% for o, olabel in sorts %}
       <option value="{{ o }}" {{ 'selected' if o == order }}>{{ olabel }}</option>
       {% endfor %}
@@ -81,14 +81,14 @@
   </label>
   {% if kind == 'stock' %}
   <label>گروه:
-    <select name="sector" onchange="this.form.submit()">
+    <select name="sector" data-autosubmit>
       <option value="">همهٔ گروه‌ها</option>
       {% for s in sectors %}<option value="{{ s }}" {{ 'selected' if s == sector }}>{{ s }}</option>{% endfor %}
     </select>
   </label>
   {% endif %}
   <label>{{ 'نوع صندوق' if kind == 'etf' else 'بازار' }}:
-    <select name="market" onchange="this.form.submit()">
+    <select name="market" data-autosubmit>
       <option value="">همه</option>
       {% for m in markets %}<option value="{{ m }}" {{ 'selected' if m == market }}>{{ m }}</option>{% endfor %}
     </select>
@@ -220,7 +220,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
   if (document.getElementById("flow-table")) BN.initTable("flow-table", "flow-filter");
 </script>
 {% endblock %}

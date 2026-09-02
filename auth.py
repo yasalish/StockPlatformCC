@@ -146,10 +146,19 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
+    """Flask-Login calls this on EVERY authenticated request.
+
+    Reads the cached per-user bundle rather than querying users directly
+    (review finding H-2). The bundle also carries the prefs, watch keys and
+    unread-alert count that app.py's three context processors used to fetch
+    with a query each, so the four lookups every authenticated page view used
+    to make are now one Redis read — and zero on a hit within the bundle's TTL.
+    """
     try:
-        row = db.get_user(int(user_id))
+        bundle = db.user_bundle(int(user_id))
     except (TypeError, ValueError):
         return None
+    row = bundle.get("user") if bundle else None
     return User(row) if row else None
 
 

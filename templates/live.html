@@ -68,25 +68,25 @@
 
 <form method="get" class="filterbar">
   <label>مرتب‌سازی:
-    <select name="order" onchange="this.form.submit()">
+    <select name="order" data-autosubmit>
       {% for o, olabel in sorts %}<option value="{{ o }}" {{ 'selected' if o == order }}>{{ olabel }}</option>{% endfor %}
     </select>
   </label>
   <label>وضعیت صف:
-    <select name="queue" onchange="this.form.submit()">
+    <select name="queue" data-autosubmit>
       <option value="">همه</option>
       <option value="buy" {{ 'selected' if queue == 'buy' }}>فقط صف خرید</option>
       <option value="sell" {{ 'selected' if queue == 'sell' }}>فقط صف فروش</option>
     </select>
   </label>
   <label>بازار:
-    <select name="market" onchange="this.form.submit()">
+    <select name="market" data-autosubmit>
       <option value="">همه</option>
       {% for m in markets %}<option value="{{ m }}" {{ 'selected' if m == market }}>{{ m }}</option>{% endfor %}
     </select>
   </label>
   <label>گروه:
-    <select name="sector" onchange="this.form.submit()">
+    <select name="sector" data-autosubmit>
       <option value="">همهٔ گروه‌ها</option>
       {% for s in sectors %}<option value="{{ s }}" {{ 'selected' if s == sector }}>{{ s }}</option>{% endfor %}
     </select>
@@ -200,7 +200,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
 (function () {
   const table = document.getElementById("live-table");
   if (!table) return;

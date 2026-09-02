@@ -7,7 +7,7 @@
       at the end of the body: a dark-theme visitor would see a white page flash
       first, which is the single most-reported complaint about bolt-on dark
       modes. Same key and same fallback order as base.html.  #}
-  <script>
+  <script nonce="{{ csp_nonce() }}">
     (function () {
       try {
         var p = JSON.parse(localStorage.getItem("boursenegar-prefs") || "{}") || {};
@@ -27,7 +27,7 @@
       anything, and it is the one page where the reporter runs without a
       session. /api/client-error is exempted from the login gate for exactly
       this case.  #}
-  <script>window.BN_RELEASE = "{{ asset_version('js/app.js') }}";</script>
+  <script nonce="{{ csp_nonce() }}">window.BN_RELEASE = "{{ asset_version('js/app.js') }}";</script>
   <script src="{{ url_for('static', filename='js/errors.js') }}?v={{ asset_version('js/errors.js') }}"></script>
 
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}?v={{ asset_version('favicon.svg') }}" type="image/svg+xml">

@@ -17,7 +17,7 @@
       Wrapped in try/catch because localStorage throws outright in private
       browsing, and a settings read must never be able to stop a page from
       rendering.  #}
-  <script>
+  <script nonce="{{ csp_nonce() }}">
     (function () {
       try {
         var d = document.documentElement;
@@ -40,7 +40,7 @@
   {#  The same values as an object, for theme.js / tables.js / ui.js. Rendered
       for anonymous visitors too (as prefs.DEFAULTS), so no default is ever
       repeated in JavaScript.  #}
-  <script>window.BN_PREFS = {{ prefs_json | tojson }};</script>
+  <script nonce="{{ csp_nonce() }}">window.BN_PREFS = {{ prefs_json | tojson }};</script>
 
   {#  ── گزارش خطای مرورگر / client error reporting (review finding C-4) ──────
       FIRST script in the document, and not deferred, so it is installed before
@@ -55,7 +55,7 @@
       static/js/errors.js explains why this is a beacon to our own endpoint
       rather than the Sentry browser SDK — the server logs it at ERROR and
       Sentry's LoggingIntegration turns it into an event from there.  #}
-  <script>window.BN_RELEASE = "{{ asset_version('js/app.js') }}";</script>
+  <script nonce="{{ csp_nonce() }}">window.BN_RELEASE = "{{ asset_version('js/app.js') }}";</script>
   <script src="{{ url_for('static', filename='js/errors.js') }}?v={{ asset_version('js/errors.js') }}"></script>
 
   {#  Declared so the browser stops requesting /favicon.ico, which this app has
@@ -261,6 +261,21 @@
     <a href="{{ url_for('settings_page') }}">تنظیمات</a>
   </footer>
 
+  {#  M-2: the shared formatting layer — ONE implementation of Persian number
+      formatting for both front ends. See frontend/src/legacy-format.ts.
+
+      type="module" is required, not stylistic: Vite emits it as an ES module
+      that imports the shared format chunk, and a classic <script nonce="{{ csp_nonce() }}"> would throw
+      "Cannot use import statement outside a module" and leave BN_FORMAT unset
+      on every page.
+
+      That makes it deferred, which is FINE here and was checked rather than
+      assumed: module scripts execute after the document is parsed but before
+      DOMContentLoaded, and app.js does all of its formatting from
+      DOMContentLoaded handlers. The one case that runs earlier is an inline
+      script in a template calling BN.fmt during parse — and that is precisely
+      what the local fallbacks in app.js are for.  #}
+  <script type="module" src="{{ url_for('static', filename='dist/legacy-format.js') }}?v={{ asset_version('dist/legacy-format.js') }}"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}?v={{ asset_version('js/app.js') }}"></script>
   {#  theme.js after app.js: it extends the BN namespace app.js creates. Both are
       independent of the islands, which load in the per-page scripts block.  #}

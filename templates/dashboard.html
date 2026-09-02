@@ -42,7 +42,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
   (function () {
     var host = document.getElementById("dashboard");
     if (!host) return;
