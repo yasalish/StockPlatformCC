@@ -199,26 +199,56 @@ const BNUi = (function () {
      the trigger, and aria-expanded tracks the state so a screen reader
      announces it. */
   function userMenu() {
-    var wrap = document.querySelector('[data-role="user-menu"]');
-    if (!wrap) return;
-    var trigger = wrap.querySelector('[data-role="user-trigger"]');
-    var pop = wrap.querySelector('[data-role="user-pop"]');
-    if (!trigger || !pop) return;
+    dropdowns('[data-role="user-menu"]', "user-trigger", "user-pop");
+  }
 
-    var open = function (on) {
-      pop.hidden = !on;
-      trigger.setAttribute("aria-expanded", on ? "true" : "false");
-    };
-    trigger.addEventListener("click", function (e) {
-      e.stopPropagation();
-      open(pop.hidden);
+  /* ---- منوهای ناوبری («بازار ▾» و «تحلیل ▾») ----
+     The nav outgrew a flat bar when شاخص‌ها, تابلوی زنده and پول حقیقی و حقوقی
+     arrived: sixteen top-level links do not fit, and the existing
+     `overflow-x:auto` turned the difference into a horizontal scroll nobody
+     discovers. Two grouped menus bring it back to eight.
+
+     Same machinery as the user menu, so there is ONE dropdown implementation
+     rather than two that drift: click to open (not hover — a hover menu is
+     unreachable on a touchscreen), Escape closes and returns focus, click
+     outside closes, and aria-expanded tracks the state. Opening one closes the
+     others so two panels can never overlap. */
+  function dropdowns(selector, triggerRole, popRole) {
+    var wraps = Array.prototype.slice.call(document.querySelectorAll(selector));
+    if (!wraps.length) return;
+    var all = [];
+    wraps.forEach(function (wrap) {
+      var trigger = wrap.querySelector('[data-role="' + triggerRole + '"]');
+      var pop = wrap.querySelector('[data-role="' + popRole + '"]');
+      if (!trigger || !pop) return;
+      var entry = { wrap: wrap, trigger: trigger, pop: pop };
+      all.push(entry);
+      trigger.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var willOpen = pop.hidden;
+        all.forEach(function (o) { setOpen(o, false); });
+        setOpen(entry, willOpen);
+      });
     });
+    function setOpen(o, on) {
+      o.pop.hidden = !on;
+      o.trigger.setAttribute("aria-expanded", on ? "true" : "false");
+    }
     document.addEventListener("click", function (e) {
-      if (!pop.hidden && !wrap.contains(e.target)) open(false);
+      all.forEach(function (o) {
+        if (!o.pop.hidden && !o.wrap.contains(e.target)) setOpen(o, false);
+      });
     });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && !pop.hidden) { open(false); trigger.focus(); }
+      if (e.key !== "Escape") return;
+      all.forEach(function (o) {
+        if (!o.pop.hidden) { setOpen(o, false); o.trigger.focus(); }
+      });
     });
+  }
+
+  function navMenus() {
+    dropdowns('[data-role="nav-menu"]', "nav-trigger", "nav-pop");
   }
 
   /* ---- ذخیرهٔ نما («غربالگر ذخیره‌شده») ----
@@ -268,6 +298,7 @@ const BNUi = (function () {
 
   function init() {
     userMenu();
+    navMenus();
     presets();
     recordVisit();
     renderRecents();

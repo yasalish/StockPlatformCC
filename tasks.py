@@ -85,6 +85,35 @@ def fetch_batch(self, job_id, kind, tickers, start, end, full=False):
     finished, and tse_fetch.store() replaces rather than appends. That pair is
     what "resumes without losing or duplicating tickers" reduces to."""
     jobs.mark_started(job_id)
+
+    # A KIND THIS WORKER HAS NEVER HEARD OF IS A STALE WORKER, NOT A BAD JOB.
+    #
+    # The web process and the Celery workers are separate long-running
+    # processes, so after a release that adds a data type the web side enqueues
+    # `etf_ri` batches at a worker whose tse_fetch.KINDS predates it. Every
+    # ticker then died on `KeyError('etf_ri')` deep inside the fetch — and
+    # because acks_late redelivers the batch, it was claimed again, raised
+    # again, and climbed to six attempts per symbol while the page sat at
+    # «۱ از ۲۹۳» for fifteen minutes with nothing in the failed list to explain
+    # it. Measured, on this machine.
+    #
+    # Failing the whole batch ONCE, with a message naming the actual fix, turns
+    # that into something an operator can act on in ten seconds. Not retried:
+    # no amount of waiting teaches a running process a new module.
+    if kind not in tse_fetch.KINDS:
+        msg = (f"کارگر این نوع داده («{kind}») را نمی‌شناسد — یعنی نسخهٔ کد کارگر "
+               "قدیمی است. کارگرهای Celery را دوباره راه‌اندازی کنید "
+               "(«ادامه از جایی که مانده» در همین صفحه، یا اجرای دوبارهٔ برنامه).")
+        log.error("job %s: worker does not know kind %r — it is running stale "
+                  "code; restart the celery workers", job_id, kind)
+        for ticker in tickers:
+            if jobs.claim_ticker(job_id, ticker) is not None:
+                jobs.mark_failed(job_id, ticker, "کارگر قدیمی است", msg)
+        jobs.heartbeat(job_id)
+        _maybe_finalize(job_id)
+        return {"job_id": job_id, "ok": 0, "failed": len(tickers), "skipped": 0,
+                "stale_worker": True}
+
     done = failed = skipped = 0
     streak = 0
 
@@ -216,6 +245,31 @@ def finalize_update(job_id):
         return {"job_id": job_id, "timings": timings, "skipped_refresh": True,
                 **counts}
 
+    # The twenty materialized views are built from the PRICE tables and read
+    # nothing else, so a run that fetched شاخص‌ها, حقیقی/حقوقی, the dollar or the
+    # board has left every one of them exactly as correct as it was. Rebuilding
+    # them anyway is six measured minutes of identical output, and it would put
+    # the «به‌روزرسانی» page on «در حال بازسازی تحلیل‌ها…» after a three-second
+    # snapshot. The cache version is still bumped: those runs DID change what
+    # /indices, /moneyflow and /live read.
+    import tse_fetch
+    job_kind = (already or {}).get("kind")
+    # `job_kind is not None` matters: a job row that could not be read is an
+    # UNKNOWN kind, and the safe answer for unknown is to rebuild.
+    if job_kind is not None and not tse_fetch.is_price_kind(job_kind):
+        log.info("job %s: %s writes no price rows — bumping the cache only",
+                 job_id, job_kind)
+        try:
+            db.clear_cache()
+        except Exception as e:
+            log.error("job %s: cache version bump failed: %s", job_id, e)
+        jobs.finish_job(job_id)
+        counts = jobs.summary_counts(job_id)
+        log.info("job %s finished: ok=%s failed=%s of %s",
+                 job_id, counts["ok"], counts["failed"], counts["total"])
+        return {"job_id": job_id, "timings": timings, "skipped_refresh": True,
+                **counts}
+
     log.info("job %s: refreshing materialized analytics", job_id)
     try:
         timings = db.refresh_analytics()          # this already calls clear_cache()
@@ -336,7 +390,32 @@ def nightly_update(kind="stock"):
         log.warning("nightly %s skipped — job %s is still running", kind, active)
         return {"skipped": True, "active_job": active}
 
-    latest = db.latest_date(kind)
+    import tse_fetch
+    if kind not in tse_fetch.KINDS:
+        log.error("nightly: unknown kind %r", kind)
+        return {"skipped": True, "reason": "unknown-kind", "kind": kind}
+
+    # The two snapshot datasets have no window: Get_MarketWatch returns the
+    # board as it stands and Build_Market_StockList returns today's symbol list.
+    # They are run, not caught up.
+    if not market.DATASET_DATED.get(kind, True):
+        job_id = market.start_job(kind, market.yesterday_jalali(),
+                                  market.yesterday_jalali(), source="beat")
+        log.info("nightly %s: snapshot job %s queued", kind, job_id)
+        return {"job_id": job_id, "kind": kind, "snapshot": True}
+
+    latest = market.dataset_latest(kind)
+
+    # A dataset that has NEVER been fetched is not "a night behind" — it is a
+    # back-fill, and next_day(None) would hand it FIRST_JALALI and quietly start
+    # five years × 800 symbols at 23:00. That is an operator's decision, made
+    # once on the /update page with the cost written next to the button, not
+    # something a schedule springs on a machine overnight.
+    if latest is None and not tse_fetch.is_price_kind(kind):
+        log.info("nightly %s: no data yet — the first back-fill is a manual run",
+                 kind)
+        return {"skipped": True, "reason": "never-fetched", "kind": kind}
+
     start = market.next_day(latest)      # market.FIRST_JALALI when there is none
     end = market.yesterday_jalali()
     if start > end:

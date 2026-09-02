@@ -92,6 +92,15 @@ def ensure_tables():
     finally:
         conn.autocommit = False
         db.release(conn)
+    # The tables the non-price datasets write into. Here rather than only in
+    # app.py because the Celery worker reaches this function and not that one,
+    # and a worker that can claim a «شاخص‌ها» ticker but has nowhere to put the
+    # rows would fail every symbol with a StoreError.
+    try:
+        import market_data
+        market_data.ensure_tables()
+    except Exception:                          # a price-only run must still start
+        pass
 
 
 # ---------------------------------------------------------------------------

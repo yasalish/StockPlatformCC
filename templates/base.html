@@ -77,16 +77,65 @@
       </a>
       <span class="brand-sub">سامانهٔ یکپارچهٔ تحلیل بازار سرمایه</span>
     </div>
+    {#  GROUPED, not flat. This bar carried twelve links and the four new pages
+        (شاخص‌ها، تابلوی زنده، پول حقیقی و حقوقی) would have made sixteen — past
+        the width of any laptop, where `overflow-x:auto` turns the overflow into
+        a horizontal scroll nobody discovers. Two menus bring it back to eight
+        top-level items.
+
+        The grouping is by QUESTION, not by data source: «بازار» is "what is
+        the market doing right now", «تحلیل» is "which symbols should I look
+        at". A menu lights up when any page inside it is open, so the current
+        location is still visible without opening anything.  #}
+    {% set market_eps = ('stocks_page','stock_detail','etfs_page','etf_detail',
+                         'heatmap_page','live_page','indices_page') %}
+    {% set study_eps = ('screener_page','performance_page','strategies_page',
+                        'filters_page','moneyflow_page') %}
     <nav class="topnav">
       <a href="{{ url_for('index') }}" class="{{ 'on' if request.endpoint == 'index' }}">خانه</a>
       <a href="{{ url_for('dashboard') }}" class="{{ 'on' if request.endpoint == 'dashboard' }}">داشبورد</a>
-      <a href="{{ url_for('stocks_page') }}" class="{{ 'on' if request.endpoint in ('stocks_page','stock_detail') }}">سهام</a>
-      <a href="{{ url_for('etfs_page') }}" class="{{ 'on' if request.endpoint in ('etfs_page','etf_detail') }}">صندوق‌ها</a>
-      <a href="{{ url_for('heatmap_page') }}" class="{{ 'on' if request.endpoint == 'heatmap_page' }}">نقشهٔ بازار</a>
-      <a href="{{ url_for('screener_page') }}" class="{{ 'on' if request.endpoint == 'screener_page' }}">غربالگر</a>
-      <a href="{{ url_for('performance_page') }}" class="{{ 'on' if request.endpoint == 'performance_page' }}">بازدهٔ بازه</a>
-      <a href="{{ url_for('strategies_page') }}" class="{{ 'on' if request.endpoint == 'strategies_page' }}">استراتژی‌ها</a>
-      <a href="{{ url_for('filters_page') }}" class="{{ 'on' if request.endpoint == 'filters_page' }}">فیلترها</a>
+
+      <div class="nav-menu" data-role="nav-menu">
+        <button type="button" class="nav-trigger {{ 'on' if request.endpoint in market_eps }}"
+                data-role="nav-trigger" aria-haspopup="true" aria-expanded="false">
+          بازار <span class="nav-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="nav-pop" data-role="nav-pop" hidden>
+          <a href="{{ url_for('stocks_page') }}" class="{{ 'on' if request.endpoint in ('stocks_page','stock_detail') }}">
+            <span class="menu-ico">▤</span>سهام</a>
+          <a href="{{ url_for('etfs_page') }}" class="{{ 'on' if request.endpoint in ('etfs_page','etf_detail') }}">
+            <span class="menu-ico">◫</span>صندوق‌ها</a>
+          <a href="{{ url_for('live_page') }}" class="{{ 'on' if request.endpoint == 'live_page' }}">
+            <span class="menu-ico">◉</span>تابلوی زنده
+            <span class="menu-sub">صف‌ها، عمق بازار، EPS</span></a>
+          <a href="{{ url_for('indices_page') }}" class="{{ 'on' if request.endpoint == 'indices_page' }}">
+            <span class="menu-ico">📈</span>شاخص‌ها
+            <span class="menu-sub">کل، هم‌وزن، صنایع، دلار</span></a>
+          <a href="{{ url_for('heatmap_page') }}" class="{{ 'on' if request.endpoint == 'heatmap_page' }}">
+            <span class="menu-ico">▩</span>نقشهٔ بازار</a>
+        </div>
+      </div>
+
+      <div class="nav-menu" data-role="nav-menu">
+        <button type="button" class="nav-trigger {{ 'on' if request.endpoint in study_eps }}"
+                data-role="nav-trigger" aria-haspopup="true" aria-expanded="false">
+          تحلیل <span class="nav-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="nav-pop" data-role="nav-pop" hidden>
+          <a href="{{ url_for('screener_page') }}" class="{{ 'on' if request.endpoint == 'screener_page' }}">
+            <span class="menu-ico">⌕</span>غربالگر</a>
+          <a href="{{ url_for('moneyflow_page') }}" class="{{ 'on' if request.endpoint == 'moneyflow_page' }}">
+            <span class="menu-ico">⇄</span>پول حقیقی و حقوقی
+            <span class="menu-sub">ورود پول، سرانه، قدرت خریدار</span></a>
+          <a href="{{ url_for('performance_page') }}" class="{{ 'on' if request.endpoint == 'performance_page' }}">
+            <span class="menu-ico">↗</span>بازدهٔ بازه</a>
+          <a href="{{ url_for('strategies_page') }}" class="{{ 'on' if request.endpoint == 'strategies_page' }}">
+            <span class="menu-ico">◈</span>استراتژی‌ها</a>
+          <a href="{{ url_for('filters_page') }}" class="{{ 'on' if request.endpoint == 'filters_page' }}">
+            <span class="menu-ico">▽</span>فیلترها</a>
+        </div>
+      </div>
+
       {# One nav item for the three designer pages — the canvas, its results and
          its backtest are one workflow, and the other two are only ever reached
          from the first, so lighting the tab on all three says "you are still in

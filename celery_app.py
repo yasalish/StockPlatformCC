@@ -176,6 +176,63 @@ app.conf.beat_schedule = {
         "kwargs": {"kind": "etf"},
         "options": {"queue": MAINTENANCE_QUEUE, "expires": 6 * 3600},
     },
+    # ---- the datasets beyond price -------------------------------------
+    #
+    # Ordered so nothing competes with anything else for TSETMC connections,
+    # and so each runs when its data is actually meaningful:
+    #
+    #   13:30  دیده‌بان — the ONLY one whose timing is substantive. The board is
+    #          a photograph, and the photograph worth keeping is the one taken
+    #          after the 12:30 close, when the queues have frozen: that is what
+    #          makes market_snapshot a usable end-of-day queue history and the
+    #          reason Get_Queue_History is not fetched symbol by symbol at all.
+    #          Run it at 20:30 with everything else and every «صف خرید» in the
+    #          history would be eight hours stale.
+    #   20:30  سهام, 21:30 صندوق‌ها  (unchanged)
+    #   22:30  شاخص‌ها و دلار — fifty small requests, after the price runs.
+    #   23:00  حقیقی/حقوقی سهام, 00:30 صندوق‌ها — the long ones, last.
+    #
+    # Each is skipped rather than queued when another job is in flight
+    # (nightly_update checks blocking_job_id), and each derives its own «از
+    # تاریخ» from its own table, so a skipped night is caught up by the next
+    # successful one instead of leaving a permanent hole.
+    "eod-market-watch": {
+        "task": "tasks.nightly_update",
+        "schedule": crontab(hour=int(os.environ.get("BEAT_WATCH_HOUR", "13")),
+                            minute=30, day_of_week=TRADING_DAYS),
+        "kwargs": {"kind": "watch"},
+        "options": {"queue": MAINTENANCE_QUEUE, "expires": 3 * 3600},
+    },
+    "nightly-index-update": {
+        "task": "tasks.nightly_update",
+        "schedule": crontab(hour=BEAT_HOUR + 2, minute=BEAT_MINUTE,
+                            day_of_week=TRADING_DAYS),
+        "kwargs": {"kind": "index"},
+        "options": {"queue": MAINTENANCE_QUEUE, "expires": 6 * 3600},
+    },
+    "nightly-usd-update": {
+        "task": "tasks.nightly_update",
+        "schedule": crontab(hour=BEAT_HOUR + 2, minute=BEAT_MINUTE + 20,
+                            day_of_week=TRADING_DAYS),
+        "kwargs": {"kind": "usd"},
+        "options": {"queue": MAINTENANCE_QUEUE, "expires": 6 * 3600},
+    },
+    "nightly-stock-ri-update": {
+        "task": "tasks.nightly_update",
+        "schedule": crontab(hour=BEAT_HOUR + 3, minute=0,
+                            day_of_week=TRADING_DAYS),
+        "kwargs": {"kind": "stock_ri"},
+        "options": {"queue": MAINTENANCE_QUEUE, "expires": 8 * 3600},
+    },
+    "nightly-etf-ri-update": {
+        "task": "tasks.nightly_update",
+        # 00:30 — past midnight, so the day_of_week set shifts by one: a
+        # Wednesday-evening run lands on Thursday. Trading days here are the
+        # MORNINGS AFTER a session (Sunday…Thursday = 0,1,2,3,4).
+        "schedule": crontab(hour=0, minute=30, day_of_week="0,1,2,3,4"),
+        "kwargs": {"kind": "etf_ri"},
+        "options": {"queue": MAINTENANCE_QUEUE, "expires": 8 * 3600},
+    },
     "evaluate-alerts": {
         # The safety net, not the main path: finalize_update() evaluates alerts
         # the moment it writes new prices. This covers the case where prices

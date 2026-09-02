@@ -58,6 +58,14 @@
     <button type="button" class="tab-btn" data-tab="summary" role="tab">خلاصهٔ تکنیکال</button>
     <button type="button" class="tab-btn" data-tab="technical" role="tab">نمودار تکنیکال</button>
     <button type="button" class="tab-btn" data-tab="returns" role="tab">بازدهی</button>
+    {#  Shown only when there is something behind it. A tab that opens onto
+        «داده‌ای موجود نیست» teaches the reader to stop clicking tabs.  #}
+    {% if flow or fund or queue or holders.rows %}
+    <button type="button" class="tab-btn" data-tab="flow" role="tab">حقیقی/حقوقی و صف</button>
+    {% endif %}
+    {% if holders.rows %}
+    <button type="button" class="tab-btn" data-tab="holders" role="tab">سهامداران</button>
+    {% endif %}
     <button type="button" class="tab-btn" data-tab="history" role="tab">سابقهٔ داده‌ها</button>
   </nav>
 
@@ -117,6 +125,229 @@
       </div>
     </div>
 
+    {% if flow or fund or queue or holders.rows %}
+    <div class="tab-pane" data-pane="flow" role="tabpanel">
+      {% if fund %}
+      <section class="panel">
+        <div class="panel-head">
+          <h2>داده‌های بنیادی و صف</h2>
+          <span class="muted small">از عکس دیده‌بان بازار · {{ fy(fund.j_date) }}</span>
+        </div>
+        <div class="cover-grid">
+          <div class="cover-cell"><div class="cover-name">EPS</div>
+            <div class="cover-date">{{ fa(fund.eps|round|int) if fund.eps else '—' }}</div></div>
+          <div class="cover-cell"><div class="cover-name">P/E</div>
+            <div class="cover-date">{{ fa(fund.pe|round(1)) if fund.pe is not none else '—' }}</div>
+            <div class="cover-meta muted small">{{ 'زیان‌ده' if fund.eps and fund.eps <= 0 else '' }}</div></div>
+          <div class="cover-cell"><div class="cover-name">ارزش بازار</div>
+            <div class="cover-date">{{ money(fund.market_cap) or '—' }}</div></div>
+          <div class="cover-cell"><div class="cover-name">تعداد سهام</div>
+            <div class="cover-date">{{ cnt(fund.share_no) or '—' }}</div></div>
+          <div class="cover-cell"><div class="cover-name">حجم مبنا</div>
+            <div class="cover-date">{{ cnt(fund.base_vol) or '—' }}</div></div>
+          <div class="cover-cell"><div class="cover-name">دامنهٔ مجاز</div>
+            <div class="cover-date">{{ fa(fund.day_ll|round|int) if fund.day_ll else '—' }} – {{ fa(fund.day_ul|round|int) if fund.day_ul else '—' }}</div></div>
+          <div class="cover-cell"><div class="cover-name">صف خرید</div>
+            <div class="cover-date up-t">{{ money(fund.bq_value) if fund.bq_value else '—' }}</div>
+            <div class="cover-meta muted small">سرانه {{ money(fund.bqpc) or '—' }}</div></div>
+          <div class="cover-cell"><div class="cover-name">صف فروش</div>
+            <div class="cover-date down-t">{{ money(fund.sq_value) if fund.sq_value else '—' }}</div>
+            <div class="cover-meta muted small">سرانه {{ money(fund.sqpc) or '—' }}</div></div>
+        </div>
+      </section>
+      {% endif %}
+
+      {% if book %}
+      <section class="panel">
+        <div class="panel-head">
+          <h2>عمق بازار</h2>
+          <span class="muted small">آخرین عکس · {{ fy(book[0].captured_at.strftime('%Y-%m-%d %H:%M')) }}</span>
+        </div>
+        <div class="table-scroll">
+          <table class="grid ob-table">
+            <thead><tr>
+              <th class="numh ob-sell">تعداد فروشنده</th><th class="numh ob-sell">حجم فروش</th>
+              <th class="numh ob-sell">قیمت فروش</th>
+              <th class="numh ob-buy">قیمت خرید</th><th class="numh ob-buy">حجم خرید</th>
+              <th class="numh ob-buy">تعداد خریدار</th>
+            </tr></thead>
+            <tbody>
+              {% for r in book %}
+              <tr>
+                <td class="num ob-sell">{{ fa(r.sell_no) }}</td>
+                <td class="num ob-sell">{{ fa(r.sell_vol) }}</td>
+                <td class="num ob-sell b">{{ fa(r.sell_price|round|int) }}</td>
+                <td class="num ob-buy b">{{ fa(r.buy_price|round|int) }}</td>
+                <td class="num ob-buy">{{ fa(r.buy_vol) }}</td>
+                <td class="num ob-buy">{{ fa(r.buy_no) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {% endif %}
+
+      {% if flow %}
+      <section class="panel">
+        <div class="panel-head">
+          <h2>جریان پول حقیقی</h2>
+          <span class="muted small">{{ fa(flow|length) }} روز معاملاتی · جدیدترین در بالا</span>
+        </div>
+        <div class="table-scroll">
+          <table class="grid sortable" id="flow-hist">
+            <thead>
+              <tr>
+                <th data-sort="str">تاریخ</th>
+                <th data-sort="num" class="numh">خالص ورود پول حقیقی</th>
+                <th data-sort="num" class="numh">ارزش خرید حقیقی</th>
+                <th data-sort="num" class="numh">ارزش فروش حقیقی</th>
+                <th data-sort="num" class="numh">سرانهٔ خرید</th>
+                <th data-sort="num" class="numh">سرانهٔ فروش</th>
+                <th data-sort="num" class="numh">قدرت خریدار</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in flow|reverse %}
+              <tr>
+                <td>{{ fy(r.j_date) }}</td>
+                <td class="num {{ 'up-t' if r.net > 0 else 'down-t' }}" data-v="{{ r.net }}">{{ money(r.net, signed=True) }}</td>
+                <td class="num" data-v="{{ r.buy_r }}">{{ money(r.buy_r) }}</td>
+                <td class="num" data-v="{{ r.sell_r }}">{{ money(r.sell_r) }}</td>
+                <td class="num" data-v="{{ r.pc_buy if r.pc_buy is not none else -1 }}">{{ money(r.pc_buy) or '—' }}</td>
+                <td class="num" data-v="{{ r.pc_sell if r.pc_sell is not none else -1 }}">{{ money(r.pc_sell) or '—' }}</td>
+                <td class="num" data-v="{{ r.power if r.power is not none else -1 }}">
+                  {% if r.power is none %}<span class="muted">—</span>
+                  {% else %}<span class="pill {{ 'up' if r.power >= 1 else 'down' }}">{{ fa(r.power|round(2)) }}</span>{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="muted small note">
+          «خالص ورود پول حقیقی» مثبت یعنی حقیقی‌ها بیش از آنچه فروخته‌اند خریده‌اند.
+          «سرانه» ارزش را بر تعداد افراد تقسیم می‌کند؛ در روزی که خریدار یا فروشندهٔ
+          حقیقی نبوده، این نسبت تعریف‌نشده است و «—» نمایش داده می‌شود.
+          <a href="{{ url_for('moneyflow_page') }}">مقایسه با کل بازار ›</a>
+        </p>
+      </section>
+      {% endif %}
+
+      {% if queue %}
+      <section class="panel">
+        <div class="panel-head">
+          <h2>سابقهٔ صف</h2>
+          <span class="muted small">
+            ارزش صف در لحظهٔ بسته شدن بازار · {{ fa(queue|length) }} روز معاملاتی
+          </span>
+        </div>
+        <div class="table-scroll">
+          <table class="grid sortable" id="queue-hist">
+            <thead>
+              <tr>
+                <th data-sort="str">تاریخ</th>
+                <th data-sort="str">ساعت</th>
+                <th data-sort="num" class="numh">صف خرید</th>
+                <th data-sort="num" class="numh">سرانهٔ صف خرید</th>
+                <th data-sort="num" class="numh">صف فروش</th>
+                <th data-sort="num" class="numh">سرانهٔ صف فروش</th>
+                <th data-sort="num" class="numh">دامنهٔ مجاز</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in queue|reverse %}
+              <tr>
+                <td>{{ fy(r.j_date) }}</td>
+                <td class="small muted">{{ fy(r.board_time or '—') }}</td>
+                <td class="num {{ 'up-t' if r.bq_value }}" data-v="{{ r.bq_value or 0 }}">
+                  {{ money(r.bq_value) if r.bq_value else '—' }}</td>
+                <td class="num small" data-v="{{ r.bqpc or 0 }}">{{ money(r.bqpc) if r.bqpc else '—' }}</td>
+                <td class="num {{ 'down-t' if r.sq_value }}" data-v="{{ r.sq_value or 0 }}">
+                  {{ money(r.sq_value) if r.sq_value else '—' }}</td>
+                <td class="num small" data-v="{{ r.sqpc or 0 }}">{{ money(r.sqpc) if r.sqpc else '—' }}</td>
+                <td class="num small muted" data-v="{{ r.day_ul or 0 }}">
+                  {{ fa(r.day_ll|round|int) if r.day_ll else '—' }} – {{ fa(r.day_ul|round|int) if r.day_ul else '—' }}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="muted small note">
+          «صف خرید» یعنی بهترین قیمت خرید روی سقف مجاز روز نشسته باشد و کسی در آن قیمت
+          نفروشد؛ «صف فروش» قرینهٔ آن روی کف مجاز. روزی که هیچ‌کدام برقرار نبوده «—»
+          می‌گیرد — یعنی معاملهٔ عادی، نه دادهٔ ناموجود.
+        </p>
+      </section>
+      {% endif %}
+
+      {% if tapes.trades or tapes.orderbook %}
+      <section class="panel">
+        <div class="panel-head"><h2>داده‌های درون‌روز موجود</h2></div>
+        <ul class="note-list">
+          {% if tapes.trades %}
+          <li><b>ریز معاملات:</b> {{ fa(tapes.trades.rows) }} معامله در
+            {{ fa(tapes.trades.days) }} روز ({{ fy(tapes.trades.lo) }} تا {{ fy(tapes.trades.hi) }})</li>
+          {% endif %}
+          {% if tapes.orderbook %}
+          <li><b>عمق بازار درون‌روز:</b> {{ fa(tapes.orderbook.rows) }} ردیف در
+            {{ fa(tapes.orderbook.days) }} روز ({{ fy(tapes.orderbook.lo) }} تا {{ fy(tapes.orderbook.hi) }})</li>
+          {% endif %}
+        </ul>
+      </section>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if holders.rows %}
+    <div class="tab-pane" data-pane="holders" role="tabpanel">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>سهامداران بالای یک درصد</h2>
+          <span class="muted small">
+            {{ fa(holders.rows|length) }} سهامدار · مجموعاً {{ fa(holders.covered|round(2)) }}٪ از سهام
+            {% if holders.j_date %} · {{ fy(holders.j_date) }}{% endif %}
+          </span>
+        </div>
+        <div class="table-scroll">
+          <table class="grid sortable" id="holders-tbl">
+            <thead>
+              <tr>
+                <th data-sort="str">سهامدار</th>
+                <th data-sort="num" class="numh">درصد مالکیت</th>
+                <th data-sort="num" class="numh">تعداد سهم</th>
+                <th data-sort="num" class="numh">تغییر آخر</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in holders.rows %}
+              <tr>
+                <td class="rtl-name">{{ r.holder }}</td>
+                <td class="num" data-v="{{ r.share_pct or 0 }}">{{ fa(r.share_pct|round(3)) }}٪</td>
+                <td class="num" data-v="{{ r.share_no or 0 }}">{{ cnt(r.share_no) }}</td>
+                <td class="num {{ 'up-t' if (r.changes or 0) > 0 }}{{ ' down-t' if (r.changes or 0) < 0 }}"
+                    data-v="{{ r.changes or 0 }}">
+                  {{ cnt(r.changes) if r.changes else '—' }}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="muted small note">
+          {#  The single most likely misreading of this table, answered before it
+              happens: the column does not add up to 100 and is not supposed to. #}
+          این فهرست فقط سهامداران <b>بالای یک درصد</b> را نشان می‌دهد، چون آستانهٔ
+          افشای بورس همین است. جمع درصدها ({{ fa(holders.covered|round(2)) }}٪) به ۱۰۰
+          نمی‌رسد و نباید برسد؛ باقیمانده ({{ fa((100 - holders.covered)|round(2)) }}٪)
+          در دست سهامداران خرد است. «تغییر آخر» جابه‌جایی ثبت‌شده در آخرین به‌روزرسانی
+          همین فهرست است.
+        </p>
+      </section>
+    </div>
+    {% endif %}
+
     <div class="tab-pane" data-pane="history" role="tabpanel">
       <section class="panel">
         <div class="panel-head">
@@ -141,6 +372,9 @@
 <script>
   document.getElementById("pxchart").className = "pro-chart chart-full";
   BNChart.mount("pxchart", "{{ kind }}", {{ entity.id }}, "pxhistory");
+  ["flow-hist", "queue-hist", "holders-tbl"].forEach(function (id) {
+    if (document.getElementById(id)) BN.initTable(id, null);
+  });
 </script>
 {% endif %}
 {% endblock %}

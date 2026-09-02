@@ -46,7 +46,28 @@ STATUS = {
 }
 
 SUMMARY = {"stock_latest": "1405-05-24", "etf_latest": "1405-05-24",
-           "stocks": 780, "etfs": 293}
+           "stocks": 780, "etfs": 293, "stock_rows": 2051797, "etf_rows": 218283}
+
+# «پوشش داده» — what market_data.freshness() returns, as the page reads it. The
+# shape is stubbed rather than queried because this file renders the template
+# without a database; `ri_etf` is deliberately empty so the never-fetched branch
+# of the coverage grid is exercised too.
+FRESH = {
+    "ri": {"latest": "1405-05-20", "rows": 120000},
+    "ri_stock": {"latest": "1405-05-20"},
+    "ri_etf": {"latest": None},
+    "index": {"latest": "1405-05-24", "rows": 5000},
+    "usd": {"latest": "1405-05-24", "rows": 2400},
+    "watch": {"latest": "1405-05-25", "rows": 1543},
+    "orderbook": {"captured": None, "rows": 1543},
+    # The per-symbol intraday datasets: counted in symbols, and deliberately
+    # mixed here — two present, two never fetched — so both branches of the
+    # coverage grid render in this test.
+    "queue": {"latest": "1405-06-09", "rows": 40, "symbols": 2},
+    "intraday_ob": {"latest": None, "rows": 0, "symbols": 0},
+    "intraday_trades": {"latest": "1405-06-04", "rows": 8454, "symbols": 1},
+    "shareholders": {"latest": None, "rows": 0},
+}
 
 DOM = r"""
 const els = {};
@@ -106,11 +127,19 @@ def page_js():
     processors that supply asset_version() and prefs_json run."""
     webapp = pytest.importorskip("app")
     flask = pytest.importorskip("flask")
+    market = pytest.importorskip("market")
     with webapp.app.test_request_context("/update"):
         html = flask.render_template(
             "update.html", summary=SUMMARY, updater_available=True,
             updater_error=None, yesterday="1405-05-28",
-            stock_next="1405-05-25", etf_next="1405-05-25", status=STATUS)
+            stock_next="1405-05-25", etf_next="1405-05-25", status=STATUS,
+            # The «نوع داده» selector and «پوشش داده» grid. DATASET_CHOICES is a
+            # plain constant, so taking it from the real module keeps this test
+            # honest about what the page offers without needing a database.
+            datasets=market.DATASET_CHOICES,
+            dataset_groups=market.DATASET_GROUPS, fresh=FRESH,
+            ri_stock_next="1405-05-21", ri_etf_next="1400-01-01",
+            index_next="1405-05-25", usd_next="1405-05-25")
     js = "\n".join(body for tag, body in
                    re.findall(r"<script([^>]*)>(.*?)</script>", html, re.S)
                    if "src=" not in tag)

@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · تابلوی زنده{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">تابلوی زنده</h1>
+    <p class="page-sub">
+      عکس کل بازار از دیده‌بان TSETMC: صف خرید و فروش و سرانهٔ آن‌ها، حجم حقیقی و
+      حقوقی، EPS و P/E، ارزش بازار، حجم مبنا و دفتر سفارش پنج‌سطحی.
+    </p>
+  </div>
+</div>
+
+{% if not rows and not j_date %}
+<section class="panel empty-state">
+  <div class="empty-star">📋</div>
+  <h2>هنوز عکسی از تابلو گرفته نشده است</h2>
+  <p class="muted">
+    این صفحه از جدول <code>market_snapshot</code> می‌خواند.
+    {% if current_user.is_admin %}
+    در صفحهٔ <a href="{{ url_for('update_page') }}">به‌روزرسانی</a> نوع دادهٔ
+    «دیده‌بان و عمق بازار» را اجرا کنید — کل بازار در یک درخواست و حدود پنج ثانیه.
+    {% else %}
+    از مدیر سامانه بخواهید به‌روزرسانی «دیده‌بان و عمق بازار» را اجرا کند.
+    {% endif %}
+  </p>
+</section>
+{% else %}
+
+{#  زمان دریافت is not decoration and not a footnote: this is the ONE page on
+    the platform whose numbers are a photograph rather than a settled session.
+    A board captured at 06:32 shows zero volume and every symbol flat, and
+    without the capture time that reads as a broken page instead of as
+    "the market has not opened yet".  #}
+<div class="live-stamp">
+  <span class="live-dot" aria-hidden="true"></span>
+  <span>عکس تابلو در <b>{{ fy(captured.strftime('%H:%M')) if captured else '—' }}</b>
+        روز <b>{{ fy(j_date) }}</b></span>
+  <span class="muted small">— اعداد این صفحه به همان لحظه مربوط‌اند، نه به پایان روز معاملاتی</span>
+</div>
+
+{% if totals %}
+<div class="stat-row">
+  <div class="stat-card">
+    <div class="stat-num">{{ money(totals.value) or '۰' }}</div>
+    <div class="stat-label">ارزش کل معاملات تا این لحظه</div>
+  </div>
+  <div class="stat-card">
+    {#  Breadth as one line: green up, red down, grey unchanged. Before the open
+        every symbol is «بدون تغییر», which is the truth about that moment.  #}
+    <div class="stat-num breadth-num">
+      <span class="up-t">{{ fa(totals.up) }}</span><span class="muted"> / </span
+      ><span class="down-t">{{ fa(totals.down) }}</span><span class="muted"> / {{ fa(totals.flat) }}</span>
+    </div>
+    <div class="stat-label">مثبت / منفی / بدون تغییر</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num up-t">{{ money(totals.bq) or '۰' }}</div>
+    <div class="stat-label">ارزش کل صف خرید ({{ fa(totals.bq_n) }} نماد)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num down-t">{{ money(totals.sq) or '۰' }}</div>
+    <div class="stat-label">ارزش کل صف فروش ({{ fa(totals.sq_n) }} نماد)</div>
+  </div>
+</div>
+{% endif %}
+
+<form method="get" class="filterbar">
+  <label>مرتب‌سازی:
+    <select name="order" onchange="this.form.submit()">
+      {% for o, olabel in sorts %}<option value="{{ o }}" {{ 'selected' if o == order }}>{{ olabel }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>وضعیت صف:
+    <select name="queue" onchange="this.form.submit()">
+      <option value="">همه</option>
+      <option value="buy" {{ 'selected' if queue == 'buy' }}>فقط صف خرید</option>
+      <option value="sell" {{ 'selected' if queue == 'sell' }}>فقط صف فروش</option>
+    </select>
+  </label>
+  <label>بازار:
+    <select name="market" onchange="this.form.submit()">
+      <option value="">همه</option>
+      {% for m in markets %}<option value="{{ m }}" {{ 'selected' if m == market }}>{{ m }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>گروه:
+    <select name="sector" onchange="this.form.submit()">
+      <option value="">همهٔ گروه‌ها</option>
+      {% for s in sectors %}<option value="{{ s }}" {{ 'selected' if s == sector }}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <input type="text" name="q" value="{{ q or '' }}" placeholder="نماد یا نام…" dir="rtl"
+         class="date-inp" autocomplete="off">
+  <button type="submit" class="btn primary">اعمال</button>
+  {% if sector or market or queue or q %}
+  <a class="btn ghost" href="{{ url_for('live_page', order=order) }}">پاک‌کردن صافی‌ها</a>
+  {% endif %}
+</form>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>{{ dict(sorts)[order] }}</h2>
+    <span class="muted small">
+      نمایش {{ fa(shown) }} از {{ fa(total) }} نماد
+      {%- if total > shown %} — برای دیدن بقیه از صافی‌ها یا مرتب‌سازی دیگری استفاده کنید{% endif %}
+    </span>
+  </div>
+  <div class="table-scroll">
+    <table class="grid sortable" id="live-table">
+      <thead>
+        <tr>
+          <th data-sort="str">نماد</th>
+          <th data-sort="str">نام</th>
+          <th data-sort="num" class="numh">پایانی</th>
+          <th data-sort="num" class="numh">٪ پایانی</th>
+          <th data-sort="num" class="numh">آخرین</th>
+          <th data-sort="num" class="numh">٪ آخرین</th>
+          <th data-sort="num" class="numh">ارزش معاملات</th>
+          <th data-sort="num" class="numh">صف خرید</th>
+          <th data-sort="num" class="numh" title="میانگین ارزش سفارش هر نفر در صف خرید">سرانهٔ صف خرید</th>
+          <th data-sort="num" class="numh">صف فروش</th>
+          <th data-sort="num" class="numh" title="میانگین ارزش سفارش هر نفر در صف فروش">سرانهٔ صف فروش</th>
+          <th data-sort="num" class="numh">EPS</th>
+          <th data-sort="num" class="numh">P/E</th>
+          <th data-sort="num" class="numh">ارزش بازار</th>
+          <th data-sort="num" class="numh">حجم مبنا</th>
+          <th data-sort="str">گروه</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="clickable live-row" data-ticker="{{ r.ticker }}" title="برای دیدن عمق بازار کلیک کنید">
+          <td class="sym">{{ r.ticker }}</td>
+          <td class="rtl-name">{{ r.name or '—' }}</td>
+          <td class="num" data-v="{{ r.final or 0 }}">{{ fa(r.final|round|int) if r.final else '—' }}</td>
+          <td class="num" data-v="{{ r.pct_final if r.pct_final is not none else -99999 }}">{{ pill(r.pct_final) }}</td>
+          <td class="num" data-v="{{ r.close or 0 }}">{{ fa(r.close|round|int) if r.close else '—' }}</td>
+          <td class="num" data-v="{{ r.pct_close if r.pct_close is not none else -99999 }}">{{ pill(r.pct_close) }}</td>
+          <td class="num" data-v="{{ r.value or 0 }}">{{ money(r.value) or '۰' }}</td>
+          <td class="num {{ 'up-t' if (r.bq_value or 0) >= queue_floor }}" data-v="{{ r.bq_value or 0 }}">
+            {{ money(r.bq_value) if r.bq_value else '—' }}
+          </td>
+          <td class="num small" data-v="{{ r.bqpc or 0 }}">{{ money(r.bqpc) if r.bqpc else '—' }}</td>
+          <td class="num {{ 'down-t' if (r.sq_value or 0) >= queue_floor }}" data-v="{{ r.sq_value or 0 }}">
+            {{ money(r.sq_value) if r.sq_value else '—' }}
+          </td>
+          <td class="num small" data-v="{{ r.sqpc or 0 }}">{{ money(r.sqpc) if r.sqpc else '—' }}</td>
+          <td class="num small" data-v="{{ r.eps or -99999 }}">{{ fa(r.eps|round|int) if r.eps else '—' }}</td>
+          {#  P/E only where EPS is positive. A loss-making symbol has no
+              meaningful ratio, and printing a negative one invites it to be
+              read as «ارزان».  #}
+          <td class="num" data-v="{{ r.pe if r.pe is not none else 999999 }}">
+            {{ fa(r.pe|round(1)) if r.pe is not none else '—' }}
+          </td>
+          <td class="num small" data-v="{{ r.market_cap or 0 }}">{{ money(r.market_cap) or '—' }}</td>
+          <td class="num small muted" data-v="{{ r.base_vol or 0 }}">{{ cnt(r.base_vol) }}</td>
+          <td class="small muted">{{ r.sector or '—' }}</td>
+          <td class="chev ob-chev">▾</td>
+        </tr>
+        {#  The order-book drawer. One empty row per symbol rather than five
+            rendered ones: five depths × 300 symbols is 1,500 rows of markup for
+            a panel that is opened one at a time. It is filled from
+            /api/orderbook/<ticker> on first click and kept after that.  #}
+        <tr class="ob-drawer" hidden data-nosort data-for="{{ r.ticker }}">
+          <td colspan="17"><div class="ob-slot">…</div></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>دربارهٔ این صفحه</h2></div>
+  <ul class="note-list">
+    <li>
+      داده‌ها از تابع <code>Get_MarketWatch</code> گرفته می‌شود: کل بازار — بیش از
+      هزار نماد به‌همراه دفتر سفارش پنج‌سطحی — در یک درخواست و حدود پنج ثانیه.
+    </li>
+    <li>
+      «صف خرید» یعنی ارزش صف دست‌کم {{ money(queue_floor) }}؛ چند لات کوچک روی
+      قیمت مجاز، صف نیست.
+    </li>
+    <li>
+      برای ثبت وضعیت پایان روز، به‌روزرسانی «دیده‌بان» را <b>پس از بسته شدن بازار</b>
+      اجرا کنید. هر اجرا ردیف همان روز را بازنویسی می‌کند، پس چند بار اجرا در یک
+      روز رکورد تکراری نمی‌سازد.
+    </li>
+    <li>
+      عمق بازار فقط برای <b>آخرین</b> عکس نگه‌داری می‌شود. نمادی که در عکس تازه
+      نبوده، دفتر سفارش نشان نمی‌دهد — نمایش صف دیروز به‌جای امروز، گمراه‌کننده‌تر
+      از نمایش‌ندادن است.
+    </li>
+  </ul>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const table = document.getElementById("live-table");
+  if (!table) return;
+  const OB_URL = "{{ url_for('api_order_book', ticker='__T__') }}";
+  const fa = (s) => String(s).replace(/[0-9]/g, d => "۰۱۲۳۴۵۶۷۸۹"[d]);
+  const num = (v) => v == null ? "—" : fa(Math.round(v).toLocaleString("en-US"));
+
+  function render(slot, j) {
+    if (!j.rows.length) {
+      slot.innerHTML = '<p class="muted small" style="margin:0">برای این نماد عمق بازاری در آخرین عکس ثبت نشده است.</p>';
+      return;
+    }
+    /*  Buy side on the right, sell side on the left — the order the TSETMC
+        board itself uses, so someone reading both does not have to mirror it in
+        their head.  */
+    const rows = j.rows.map(r => `
+      <tr>
+        <td class="num ob-sell">${num(r.sell_no)}</td>
+        <td class="num ob-sell">${num(r.sell_vol)}</td>
+        <td class="num ob-sell b">${num(r.sell_price)}</td>
+        <td class="num ob-buy b">${num(r.buy_price)}</td>
+        <td class="num ob-buy">${num(r.buy_vol)}</td>
+        <td class="num ob-buy">${num(r.buy_no)}</td>
+      </tr>`).join("");
+    slot.innerHTML = `
+      <table class="grid ob-table">
+        <thead><tr>
+          <th class="numh ob-sell">تعداد فروشنده</th><th class="numh ob-sell">حجم فروش</th>
+          <th class="numh ob-sell">قیمت فروش</th>
+          <th class="numh ob-buy">قیمت خرید</th><th class="numh ob-buy">حجم خرید</th>
+          <th class="numh ob-buy">تعداد خریدار</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="muted small" style="margin:8px 0 0">
+        دامنهٔ مجاز امروز: ${num(j.day_ll)} تا ${num(j.day_ul)}
+      </p>`;
+  }
+
+  table.addEventListener("click", async (ev) => {
+    const row = ev.target.closest("tr.live-row");
+    if (!row) return;
+    const drawer = row.nextElementSibling;
+    if (!drawer || !drawer.classList.contains("ob-drawer")) return;
+    const open = !drawer.hidden;
+    drawer.hidden = open;
+    row.classList.toggle("ob-open", !open);
+    if (open || drawer.dataset.loaded) return;
+
+    const slot = drawer.querySelector(".ob-slot");
+    slot.textContent = "در حال بارگذاری عمق بازار…";
+    try {
+      const res = await fetch(OB_URL.replace("__T__", encodeURIComponent(row.dataset.ticker)));
+      render(slot, await res.json());
+      /*  Marked loaded only on success, so a failed fetch retries on the next
+          click instead of leaving the drawer permanently showing an error.  */
+      drawer.dataset.loaded = "1";
+    } catch (e) {
+      slot.textContent = "عمق بازار بارگذاری نشد.";
+    }
+  });
+
+  /*  The drawers carry data-nosort / data-for, so BN.initTable keeps them out
+      of the sort and re-parks each one under its own symbol afterwards.  */
+  BN.initTable("live-table", null);
+})();
+</script>
+{% endblock %}

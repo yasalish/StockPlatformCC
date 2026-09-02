@@ -202,6 +202,40 @@ def backtest(graph, kind="stock", *, sessions=DEFAULT_SESSIONS,
     if kind not in ("stock", "etf"):
         kind = "stock"
     nodes, edges, order, out_node = fe.normalise(graph)
+
+    # «داده بنیادی» IS LOOK-AHEAD, AND IT CANNOT BE MADE NOT TO BE.
+    #
+    # That block reads the latest دیده‌بان snapshot — today's EPS, today's market
+    # cap, today's buy queue. There is one value per symbol and no history
+    # behind it, so replaying it over two years applies TODAY'S numbers to bars
+    # from 1402. A «P/E کمتر از ۸» backtest would then be selecting symbols that
+    # are cheap NOW and asking what they did back then, which is precisely the
+    # bias this file's control test exists to catch — except this one is
+    # structural, so no amount of care in the engine removes it.
+    #
+    # Refused rather than quietly returning None: a backtest that silently
+    # scores zero is indistinguishable from a filter with no edge, and the whole
+    # argument of this module is that a number which looks like a fact must be
+    # one. «حقیقی و حقوقی» is deliberately NOT refused — ri_history is real
+    # per-session history, so replaying it is honest.
+    fundamental = sorted(n["id"] for n in nodes.values()
+                         if n["type"] == "fundamental")
+    if fundamental:
+        raise BacktestError(
+            "بلاک «داده بنیادی» را نمی‌توان بک‌تست کرد: مقدارهای آن (EPS، "
+            "P/E، ارزش بازار، صف) فقط برای آخرین عکس دیده‌بان موجودند و "
+            "سابقهٔ روزانه ندارند، پس اجرای آن‌ها روی گذشته یعنی نسبت دادن "
+            "عددهای امروز به کندل‌های دو سال پیش. برای بک‌تست، این بلاک را از "
+            "گراف بردارید؛ بلاک «حقیقی و حقوقی» سابقهٔ واقعی دارد و مشکلی ندارد.")
+
+    # …and «حقیقی و حقوقی» over an empty ri_history would score a flat zero,
+    # which reads as "this filter has no edge" rather than "this filter has no
+    # data". Same refusal the live run gives, for the same reason.
+    try:
+        fe._require_datasets(nodes, kind)
+    except fe.GraphError as exc:
+        raise BacktestError(str(exc)) from exc
+
     horizons = tuple(sorted({int(h) for h in horizons if int(h) > 0})) or HORIZONS
     max_h = max(horizons)
     hold = int(hold or max_h)

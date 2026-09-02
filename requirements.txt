@@ -13,7 +13,16 @@ python-dotenv>=1.0
 # Optional — only needed for «ورود با گوگل» (Google sign-in):
 Authlib>=1.3
 requests>=2.31
-# Only needed for the «به‌روزرسانی» (data-update) page:
+# Only needed for the «به‌روزرسانی» (data-update) page. Beyond daily prices it
+# also supplies حقیقی/حقوقی, the market and sector indices, the whole-market
+# دیده‌بان snapshot and the dollar — see «دادهٔ فراتر از قیمت» in README.md.
+#
+# ⚠ Two of its functions do not behave as its own guide documents, and this
+# project depends on both facts: Get_RI_History RAISES unless called with
+# alt=True, and Get_SectorIndex_History matches sector names EXACTLY against a
+# hard-coded list of forty (falling back to scraping Google on a miss).
+# verify_marketdata.py asserts both against the installed package, so an
+# upgrade that changes either is caught rather than silently emptying a page.
 finpy-tse>=1.2
 # Task queue for the market-data fetch (celery_app.py / tasks.py). [redis] pulls
 # the broker transport; the broker IS the order 04 Redis, on its own logical DBs.

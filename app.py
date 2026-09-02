@@ -147,6 +147,15 @@ try:
 except Exception as _e:
     log.error("could not ensure custom_filters table", exc_info=True)
 
+# شاخص‌ها / حقیقی و حقوقی / دیده‌بان / دلار — the five tables market_data.py owns.
+# Same terms as the three above: idempotent, called from the worker too, and a
+# laptop that has never run Alembic must still be able to open «شاخص‌ها».
+try:
+    import market_data
+    market_data.ensure_tables()
+except Exception as _e:
+    log.error("could not ensure market-data tables", exc_info=True)
+
 # The analytics cache is in Redis (cache.py) so all Gunicorn workers share one
 # copy and one invalidation. Probe it once at startup purely so the operator sees
 # which mode this process is in; an unreachable Redis is NOT fatal — reads fall
@@ -290,11 +299,17 @@ def inject_helpers():
             return int(os.path.getmtime(os.path.join(app.static_folder, filename)))
         except OSError:
             return 0
+    import market_data
     return {"asset_version": asset_version, "fa": db.to_persian,
             "fy": db.to_persian_plain, "pill": pill, "PERIODS": db.PERIODS,
             "CALC_PERIODS": db.CALC_PERIODS,
             "PERF_PERIODS": db.PERF_PERIODS,
-            "ETF_TYPE_COLORS": db.ETF_TYPE_COLORS}
+            "ETF_TYPE_COLORS": db.ETF_TYPE_COLORS,
+            # «۱۲.۳ همت» / «۱.۲ میلیارد» — rials and counts at a magnitude a
+            # reader can hold. Every new page prints money; none of them should
+            # print 2309378183184.
+            "money": market_data.rial_short,
+            "cnt": market_data.count_short}
 
 
 def _prefs_attrs(p):
@@ -1135,6 +1150,21 @@ def api_designer_filter(filter_id):
     return jsonify(row)
 
 
+def _detail_extras(kind, ticker):
+    """The «حقیقی و حقوقی» tab's data for one symbol, plus its snapshot numbers.
+
+    Both degrade to None/[] when the datasets have not been fetched, and the
+    template shows the tab only when there is something in it — an empty tab
+    that says nothing is worse than no tab at all."""
+    md = _md()
+    return {"flow": md.flow_history(kind, ticker, bars=60),
+            "fund": md.fundamentals(ticker),
+            "book": md.order_book(ticker),
+            "queue": md.queue_history(kind, ticker, bars=60),
+            "holders": md.shareholders(ticker),
+            "tapes": md.intraday_coverage(ticker)}
+
+
 @app.route("/stock/<int:stock_id>")
 def stock_detail(stock_id):
     s = db.get_stock(stock_id)
@@ -1143,7 +1173,8 @@ def stock_detail(stock_id):
     analysis = db.security_analysis("stock", s["ticker"])
     tech = db.technical_summary("stock", s["ticker"])
     return render_template("security.html", kind="stock", entity=s, analysis=analysis,
-                           tech=tech, back_url=url_for("stocks_page"), back_label="سهام")
+                           tech=tech, back_url=url_for("stocks_page"), back_label="سهام",
+                           **_detail_extras("stock", s["ticker"]))
 
 
 @app.route("/etf/<int:etf_id>")
@@ -1154,7 +1185,8 @@ def etf_detail(etf_id):
     analysis = db.security_analysis("etf", e["ticker"])
     tech = db.technical_summary("etf", e["ticker"])
     return render_template("security.html", kind="etf", entity=e, analysis=analysis,
-                           tech=tech, back_url=url_for("etfs_page"), back_label="صندوق‌ها")
+                           tech=tech, back_url=url_for("etfs_page"), back_label="صندوق‌ها",
+                           **_detail_extras("etf", e["ticker"]))
 
 
 # The periods نقشهٔ بازار and نبض بازار can be read over. 'd1' (the last
@@ -1234,6 +1266,141 @@ def api_breadth(kind):
     if kind not in ("stock", "etf"):
         abort(404)
     return jsonify(db.market_breadth(kind, period=_breadth_period(request.args.get("period"))))
+
+
+# ===========================================================================
+# شاخص‌ها / پول حقیقی و حقوقی / تابلوی زنده
+#
+# The three pages the four new datasets earn. Server-rendered rather than Vue
+# islands, and deliberately: the island pattern on this platform exists for the
+# four tables that render 800 symbols × 20+ columns, where the markup itself was
+# the bottleneck. None of these is that shape. «شاخص‌ها» is fifty rows, «پول
+# حقیقی و حقوقی» answers a ranked question and is LIMITed to what a person can
+# read, and «تابلوی زنده» keeps its filters on the server so the default view is
+# 300 rows that mean something rather than a 1,500-row dump. A fourth build
+# entry for that would cost more than it buys.
+# ===========================================================================
+def _md():
+    """market_data, imported lazily so a database without the new tables cannot
+    stop the whole app from importing."""
+    import market_data
+    return market_data
+
+
+@app.route("/indices")
+def indices_page():
+    """«شاخص‌ها» — the ten market indices, the forty sector ones, and the dollar."""
+    md = _md()
+    focus = (request.args.get("focus") or "cwi").strip()
+    market_rows = md.index_rows()
+    sector_rows = md.index_rows(sectors=True)
+    known = {r["key"] for r in market_rows} | {r["key"] for r in sector_rows}
+    if focus not in known:
+        focus = market_rows[0]["key"] if market_rows else "cwi"
+    headline = [r for r in market_rows if r["key"] in md.HEADLINE_INDICES]
+    headline.sort(key=lambda r: md.HEADLINE_INDICES.index(r["key"]))
+    return render_template(
+        "indices.html",
+        market_rows=market_rows, sector_rows=sector_rows, headline=headline,
+        periods=md.INDEX_PERIODS, focus=focus,
+        focus_label=md.index_label(focus),
+        series=md.index_series(focus, bars=240),
+        usd=md.usd_summary(), usd_series=md.usd_rows(bars=240),
+        sector_of_group=md.SECTOR_OF_GROUP,
+        fresh=md.freshness())
+
+
+@app.route("/api/indices/series/<path:key>")
+def api_index_series(key):
+    """Chart points for one index — the shape static/js/chart.js already reads."""
+    md = _md()
+    bars = max(20, min(2000, int(request.args.get("bars") or 240)))
+    if key == "usd":
+        pts = md.usd_rows(bars=bars)
+        label = "دلار آزاد"
+    else:
+        pts = md.index_series(key, bars=bars)
+        label = md.index_label(key)
+    return jsonify({"key": key, "label": label,
+                    "points": [{"d": d, "v": v} for d, v in pts]})
+
+
+@app.route("/moneyflow")
+def moneyflow_page():
+    """«پول حقیقی و حقوقی» — where retail money went, and with what conviction."""
+    md = _md()
+    kind = request.args.get("kind", "stock")
+    if kind not in ("stock", "etf"):
+        kind = "stock"
+    try:
+        days = int(request.args.get("days") or 5)
+    except ValueError:
+        days = 5
+    if days not in [d for d, _ in md.FLOW_PERIODS]:
+        days = 5
+    order = request.args.get("order") or "net_desc"
+    if order not in dict(md.FLOW_SORTS):
+        order = "net_desc"
+    sector = (request.args.get("sector") or "").strip() or None
+    market = (request.args.get("market") or "").strip() or None
+
+    data = md.money_flow(kind=kind, days=days, sector=sector, market=market,
+                         order=order, limit=300)
+    return render_template(
+        "moneyflow.html", kind=kind, days=days, order=order,
+        sector=sector, market=market,
+        rows=data["rows"], lo=data["lo"], hi=data["hi"],
+        periods=md.FLOW_PERIODS, sorts=md.FLOW_SORTS,
+        totals=md.flow_totals(kind=kind, days=days),
+        by_sector=md.flow_by_sector(kind=kind, days=days),
+        sectors=db.stock_sectors() if kind == "stock" else [],
+        markets=db.stock_markets() if kind == "stock" else db.etf_types(),
+        fresh=md.freshness())
+
+
+@app.route("/live")
+def live_page():
+    """«تابلوی زنده» — the whole-market snapshot: queues, per-capita queue
+    values, EPS / P-E, ارزش بازار and حجم مبنا, plus the five-level order book."""
+    md = _md()
+    order = request.args.get("order") or "value_desc"
+    if order not in dict(md.BOARD_SORTS):
+        order = "value_desc"
+    queue = request.args.get("queue") or None
+    if queue not in ("buy", "sell", None):
+        queue = None
+    sector = (request.args.get("sector") or "").strip() or None
+    market = (request.args.get("market") or "").strip() or None
+    q = (request.args.get("q") or "").strip() or None
+
+    data = md.board(sector=sector, market=market, queue=queue, q=q,
+                    order=order, limit=300)
+    return render_template(
+        "live.html", order=order, queue=queue, sector=sector, market=market, q=q,
+        rows=data["rows"], j_date=data["j_date"], captured=data["captured"],
+        total=data["total"], shown=data["shown"],
+        sorts=md.BOARD_SORTS, sectors=md.board_sectors(),
+        markets=md.board_markets(), totals=md.board_totals(),
+        queue_floor=md.QUEUE_FLOOR, fresh=md.freshness())
+
+
+@app.route("/api/orderbook/<path:ticker>")
+def api_order_book(ticker):
+    """One symbol's five depths, fetched when a board row is expanded rather
+    than rendered into all 300 of them: five rows per symbol is 1,500 rows of
+    markup nobody has asked to see."""
+    md = _md()
+    rows = md.order_book(ticker)
+    return jsonify({
+        "ticker": ticker,
+        "captured": rows[0]["captured_at"].isoformat() if rows else None,
+        "rows": [{"depth": r["depth"],
+                  "sell_no": r["sell_no"], "sell_vol": r["sell_vol"],
+                  "sell_price": r["sell_price"], "buy_price": r["buy_price"],
+                  "buy_vol": r["buy_vol"], "buy_no": r["buy_no"]} for r in rows],
+        "day_ul": rows[0]["day_ul"] if rows else None,
+        "day_ll": rows[0]["day_ll"] if rows else None,
+    })
 
 
 @app.route("/settings")
@@ -1377,25 +1544,60 @@ def alerts_delete(alert_id):
 
 @app.route("/update")
 def update_page():
+    md = _md()
     summary = db.db_summary()
+    fresh = md.freshness()
     return render_template("update.html", summary=summary,
                            updater_available=market.UPDATER_AVAILABLE,
                            updater_error=market.UPDATER_ERROR,
                            yesterday=market.yesterday_jalali(),
                            stock_next=market.next_day(summary["stock_latest"]),
                            etf_next=market.next_day(summary["etf_latest"]),
+                           fresh=fresh,
+                           # «از تاریخ» for each dataset that has its own
+                           # calendar, so «افزایشی» starts where that dataset
+                           # actually stopped rather than where prices did.
+                           ri_stock_next=market.next_day(fresh["ri_stock"]["latest"]),
+                           ri_etf_next=market.next_day(fresh["ri_etf"]["latest"]),
+                           index_next=market.next_day(fresh["index"]["latest"]),
+                           usd_next=market.next_day(fresh["usd"]["latest"]),
+                           datasets=market.DATASET_CHOICES,
+                           dataset_groups=market.DATASET_GROUPS,
                            status=market.job_status())
 
 
 @app.route("/update/run", methods=["POST"])
 def update_run():
     kind = request.form.get("kind", "stock")
+    if kind not in market.RUNNABLE_KINDS:
+        flash("نوع دادهٔ نامعتبر.", "error")
+        return redirect(url_for("update_page"))
     full = request.form.get("mode") == "full"
     start = (request.form.get("start_date") or "").strip()
     end = (request.form.get("end_date") or "").strip()
     # optional single symbol: blank → update every symbol of this kind
     ticker = (request.form.get("ticker") or "").strip()
     tickers = [ticker] if ticker else None
+
+    # The snapshot datasets have no date range to speak of: Get_MarketWatch
+    # returns "right now" and Build_Market_StockList returns "the market as it
+    # stands". Sending them a range would put two date pickers on the form that
+    # change nothing, so the form omits them and this fills in the bounds the
+    # job row still wants for its bookkeeping.
+    if not market.DATASET_DATED.get(kind, True):
+        start = start or market.yesterday_jalali()
+        end = end or market.yesterday_jalali()
+
+    # A per-symbol-day dataset across the whole market is thousands of requests
+    # and hours of fetching. It is allowed — «همهٔ نمادها» is a real thing to
+    # want — but it has to be ASKED for, because the difference between typing a
+    # symbol and not typing one is otherwise invisible until the job is running.
+    if kind in market.HEAVY_KINDS and not tickers \
+            and request.form.get("heavy_all") != "1":
+        flash(f"«{market.kind_label(kind)}» برای هر نماد و هر روز یک درخواست "
+              "جداگانه می‌فرستد. یک نماد وارد کنید، یا اگر واقعاً همهٔ نمادها را "
+              "می‌خواهید گزینهٔ «همهٔ نمادها» را علامت بزنید.", "error")
+        return redirect(url_for("update_page"))
     # «رد کردن نمادهای انجام‌شده» — on by default, so re-running a range after a
     # run that died part-way continues instead of re-downloading what worked.
     # Unchecking it forces every symbol to be fetched again, which is what you
@@ -1413,12 +1615,18 @@ def update_run():
             kind, start, end, full=full, tickers=tickers, resume=resume,
             created_by=getattr(current_user, "username", None))
         carried = market.job_skipped_count(job_id)
-        scope = f"نماد «{ticker}»" if ticker else ("کل سابقه" if full else "همهٔ نمادها")
-        msg = (f"دریافت {scope} در پس‌زمینه آغاز شد (ممکن است طولانی باشد). "
+        # The unit belongs to the dataset: «همهٔ نمادها» is right for prices and
+        # wrong for a fifty-index sweep or a one-shot snapshot.
+        unit = market.kind_unit(kind)
+        label = market.kind_label(kind)
+        scope = (f"نماد «{ticker}»" if ticker
+                 else ("کل سابقه" if full else f"همهٔ {unit}‌ها"))
+        msg = (f"دریافت {label} — {scope} — در پس‌زمینه آغاز شد (ممکن است طولانی باشد). "
                "پیشرفت در همین صفحه نمایش داده می‌شود.") if full else \
-              f"به‌روزرسانی {scope} در پس‌زمینه آغاز شد. پیشرفت در همین صفحه نمایش داده می‌شود."
+              (f"به‌روزرسانی {label} — {scope} — در پس‌زمینه آغاز شد. "
+               "پیشرفت در همین صفحه نمایش داده می‌شود.")
         if carried:
-            msg += (f" {db.to_persian(carried)} نماد در همین بازه قبلاً دریافت شده بود "
+            msg += (f" {db.to_persian(carried)} {unit} در همین بازه قبلاً دریافت شده بود "
                     "و دوباره دانلود نمی‌شود.")
         flash(msg, "ok")
     except Exception as e:
@@ -1498,13 +1706,32 @@ def update_delete():
     start = (data.get("start_date") or "").strip()
     end = (data.get("end_date") or "").strip()
     all_history = bool(data.get("all_history"))
-    if kind not in ("stock", "etf", "all"):
+    md = _md()
+    if kind not in ("stock", "etf", "all") and kind not in md.DELETABLE:
         return jsonify({"ok": False, "error": "نوع نامعتبر است."}), 400
     if not all_history:
         if not start or not end:
             return jsonify({"ok": False, "error": "تاریخ «از» و «تا» را وارد کنید."}), 400
         if start > end:
             return jsonify({"ok": False, "error": "تاریخ «از» نباید بعد از «تا» باشد."}), 400
+
+    # The non-price datasets. Routed here rather than through
+    # db.delete_price_history because they are not price tables and have their
+    # own calendars — see market_data.delete_dataset.
+    if kind in md.DELETABLE:
+        try:
+            n = md.delete_dataset(kind, ticker=ticker, start=start, end=end,
+                                  all_history=all_history)
+            # No forget_completed() and no analytics rebuild: these tables feed
+            # neither the resume marks (which are keyed on price windows) nor the
+            # materialized views. The cache bump inside delete_dataset is what
+            # the freshness numbers need, and it is all they need.
+            return jsonify({"ok": True, "deleted": n, "kind": kind,
+                            "ticker": ticker, "all": ticker is None,
+                            "all_history": all_history})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
     kinds = ("stock", "etf") if kind == "all" else (kind,)
     try:
         deleted = 0

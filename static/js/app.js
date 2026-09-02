@@ -78,7 +78,30 @@ const BN = (function () {
     const table = document.getElementById(tableId);
     if (!table) return;
     const tbody = table.tBodies[0];
-    const rows = Array.from(tbody.rows);
+    /*  Rows marked data-nosort are not records — they are attached to one, like
+        the order-book drawer under each row of «تابلوی زنده». They are kept out
+        of the sort and out of the filter, and re-parked under their anchor row
+        afterwards (see reattach() below); sorting them as if they were records
+        would scatter five order books across the table.
+
+        Each such row names its anchor with data-for="<ticker>", matched against
+        the anchor row's data-ticker.  */
+    /*  hasAttribute, NOT `r.dataset.nosort`. A valueless boolean attribute —
+        `<tr data-nosort>` — reads back as the EMPTY STRING, which is falsy, so
+        the truthiness test excluded nothing: every drawer stayed in the sort,
+        the comparator reached for a column its single colspan cell does not
+        have, and the resulting TypeError aborted the click handler. The table
+        then looked correct, because a sort that throws before it moves anything
+        leaves the rows where they were.  */
+    const isPinned = (r) => r.hasAttribute("data-nosort");
+    const rows = Array.from(tbody.rows).filter((r) => !isPinned(r));
+    const pinned = Array.from(tbody.rows).filter(isPinned);
+    const reattach = () => {
+      pinned.forEach((p) => {
+        const anchor = rows.find((r) => r.dataset.ticker === p.dataset.for);
+        if (anchor) anchor.after(p);
+      });
+    };
 
     // text filter (by ticker)
     const fi = filterInputId && document.getElementById(filterInputId);
@@ -88,6 +111,12 @@ const BN = (function () {
         rows.forEach((r) => {
           const tk = r.dataset.ticker || "";
           r.style.display = (!q || tk.includes(q)) ? "" : "none";
+        });
+        //  A hidden row's attachment must hide with it, or a filtered-out
+        //  symbol leaves its open drawer stranded among the matches.
+        pinned.forEach((p) => {
+          const anchor = rows.find((r) => r.dataset.ticker === p.dataset.for);
+          p.style.display = (anchor && anchor.style.display !== "none") ? "" : "none";
         });
       });
     }
@@ -116,6 +145,11 @@ const BN = (function () {
     // in BOTH directions, not stacked on top as a fake −99999٪ record low.
     const MISSING = -99999;
     const numOf = (cell) => {
+      // A row shorter than the header has no cell in this column. Treated as
+      // missing rather than allowed to throw: one such row used to take the
+      // whole sort down with it, and a click that silently does nothing is the
+      // hardest kind of broken to notice.
+      if (!cell) return null;
       const v = parseFloat(cell.dataset.v ?? cell.textContent);
       return (Number.isNaN(v) || v === MISSING) ? null : v;
     };
@@ -137,9 +171,13 @@ const BN = (function () {
               return va === vb ? 0 : (va === null ? 1 : -1);
             return (va - vb) * dir;
           }
-          return ca.textContent.trim().localeCompare(cb.textContent.trim(), "fa") * dir;
+          // Same guard as numOf(): a short row sorts as empty, not as a crash.
+          const ta = ca ? ca.textContent.trim() : "";
+          const tb = cb ? cb.textContent.trim() : "";
+          return ta.localeCompare(tb, "fa") * dir;
         });
         visible.forEach((r) => tbody.appendChild(r));
+        reattach();
       });
     });
   }

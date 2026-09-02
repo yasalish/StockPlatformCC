@@ -283,9 +283,19 @@ for _spec in fe.NODE_TYPES:
         # …and against ETFs, which are a different table and a different
         # metadata shape. Everything here was written and tested against stocks;
         # the only thing that proves it works for صندوق‌ها is running it there.
-        _re = fe.run(_g, kind="etf")
-        if _re["scanned"] < 100:
-            _broken.append(f"{_t} (etf): scanned only {_re['scanned']}")
+        # A block whose dataset has not been fetched for THIS kind refuses by
+        # design, with a message naming the run that fixes it — that is
+        # filter_engine._require_datasets, and it is the opposite of the silent
+        # failure this sweep hunts for. «حقیقی و حقوقی» legitimately hits it for
+        # صندوق‌ها on any install whose ETF back-fill has not been run.
+        # verify_marketdata.py is what asserts the refusal itself.
+        try:
+            _re = fe.run(_g, kind="etf")
+            if _re["scanned"] < 100:
+                _broken.append(f"{_t} (etf): scanned only {_re['scanned']}")
+        except fe.GraphError as _ge:
+            if "به‌روزرسانی" not in str(_ge):
+                _broken.append(f"{_t} (etf): {_ge}")
 
         # …and every dropdown value, asserting on `errors` rather than on an
         # exception: run() catches per-symbol failures so one bad symbol cannot

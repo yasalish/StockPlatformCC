@@ -107,7 +107,15 @@ _TF_KEY = {"W": "wk", "M": "mo"}
 
 #: How each price column collapses when several daily bars become one frame bar.
 _TF_AGG = {"o": "first", "h": "max", "l": "min", "c": "last", "f": "last",
-           "v": "sum", "val": "sum", "cnt": "sum"}
+           "v": "sum", "val": "sum", "cnt": "sum",
+           # حقیقی و حقوقی: every one of these is a per-session TOTAL, so a week
+           # is the sum of its sessions — including the head-counts. That makes
+           # a weekly سرانه = (week's rials) ÷ (week's buyer-sessions), which is
+           # the definition every Iranian data vendor publishes; averaging the
+           # daily ratios instead would weight a dead Wednesday the same as a
+           # heavy Saturday.
+           "rbuy": "sum", "rsell": "sum", "ibuy": "sum", "isell": "sum",
+           "rnbuy": "sum", "rnsell": "sum", "rvbuy": "sum", "rvsell": "sum"}
 
 
 # ---------------------------------------------------------------------------
@@ -1069,10 +1077,24 @@ def _causal_index(idx):
     return out
 
 
-def _resample_col(series, idx, count, how):
-    """One daily column collapsed onto `count` frame bars."""
+def _resample_col(series, idx, count, how, fill=0.0):
+    """One daily column collapsed onto `count` frame bars.
+
+    None inputs are SKIPPED rather than accumulated. For the price columns that
+    changes nothing — _load_columns repairs those to floats before they get
+    here — but the حقیقی و حقوقی columns are legitimately None on any session
+    whose row has not been fetched, and `cur + None` would raise. Because run()
+    swallows per-symbol exceptions, that raise would have surfaced as a weekly
+    money-flow filter silently matching nothing.
+
+    `fill` is what an EMPTY bucket becomes: 0.0 for a price column (a frame with
+    no volume traded no volume), None for a nullable one (a week with no
+    حقیقی/حقوقی rows is not a week in which nobody bought).
+    """
     acc = [None] * count
     for i, v in enumerate(series):
+        if v is None:
+            continue
         g = idx[i]
         cur = acc[g]
         if cur is None or how == "last":
@@ -1086,7 +1108,7 @@ def _resample_col(series, idx, count, how):
         elif how == "sum":
             acc[g] = cur + v
         # "first" keeps whatever the first bar of the group already put there
-    return [0.0 if v is None else v for v in acc]
+    return acc if fill is None else [fill if v is None else v for v in acc]
 
 
 class _FrameBars(dict):
@@ -1114,7 +1136,8 @@ class _FrameBars(dict):
         src = self._daily.get(col)
         if src is None:
             raise KeyError(col)
-        val = _resample_col(src, self._idx, self._count, _TF_AGG.get(col, "last"))
+        val = _resample_col(src, self._idx, self._count, _TF_AGG.get(col, "last"),
+                            fill=None if col in _NULLABLE_COLS else 0.0)
         self[col] = val
         return val
 
@@ -1497,6 +1520,10 @@ CATEGORIES = [
     {"key": "cross",     "label": "تقاطع",       "color": "#ffe07a"},
     {"key": "logic",     "label": "منطق",        "color": "#f3bd86"},
     {"key": "symbol",    "label": "اطلاعات نماد", "color": "#a9e3dc"},
+    # A shelf of its own rather than more «اطلاعات نماد»: these two blocks read
+    # datasets the price table does not contain, and grouping them says so —
+    # a filter that uses one of them needs a fetch the others do not.
+    {"key": "flow",      "label": "حقیقی و حقوقی", "color": "#f2a8c4"},
     # A paper tone, unlike every other swatch: «توضیحات» is the only block on
     # this shelf and it has to read as a note without breaking the rule that a
     # chip's colour is its shelf's colour.
@@ -2073,6 +2100,73 @@ NODE_TYPES = [
              "تازه‌پذیرش که تاریخچهٔ کافی برای اندیکاتور ندارند.",
      "inputs": [], "outputs": _out(("out", "", "num")), "params": []},
 
+    # ---- حقیقی و حقوقی ----------------------------------------------------
+    #
+    # «بلاک حقیقی و حقوقی» from the reference guide, which this platform could
+    # not build until ri_history existed. It is a TIME SERIES block, not a
+    # symbol-metadata one: every output below is a per-session number aligned to
+    # the price calendar, so it can be fed to a moving average, a cross, or
+    # «در N کندل اخیر» exactly like a price.
+    #
+    # One block with an output selector rather than eight blocks: they are eight
+    # readings of one measurement, and a palette with «سرانهٔ خرید حقیقی» three
+    # rows away from «سرانهٔ فروش حقیقی» hides that they are a pair.
+    {"type": "moneyflow", "cat": "flow", "sub": "حقیقی و حقوقی",
+     "label": "حقیقی و حقوقی", "title": "{field}{~shift}",
+     "help": "داده‌های خرید و فروش حقیقی و حقوقی هر روز. «خالص ورود پول حقیقی» "
+             "یعنی ارزش خرید حقیقی منهای ارزش فروش حقیقی — مثبت یعنی سهم از "
+             "دست حقوقی به دست حقیقی رفته است. «سرانه» ارزش را بر تعداد افراد "
+             "تقسیم می‌کند و چیزی را نشان می‌دهد که حجم نمی‌تواند: تفاوت یک "
+             "خریدار بزرگ با چهارصد خریدار خرد. برای این بلاک باید دادهٔ "
+             "«حقیقی/حقوقی» در صفحهٔ به‌روزرسانی دریافت شده باشد.",
+     "inputs": [], "outputs": _out(("out", "", "num")),
+     "params": [{"id": "field", "label": "مقدار", "type": "select",
+                 "default": "net",
+                 "options": [
+                     {"v": "net",     "l": "خالص ورود پول حقیقی (ریال)"},
+                     {"v": "power",   "l": "قدرت خریدار حقیقی (نسبت سرانه‌ها)"},
+                     {"v": "pcbuy",   "l": "سرانهٔ خرید حقیقی (ریال)"},
+                     {"v": "pcsell",  "l": "سرانهٔ فروش حقیقی (ریال)"},
+                     {"v": "buy",     "l": "ارزش خرید حقیقی"},
+                     {"v": "sell",    "l": "ارزش فروش حقیقی"},
+                     {"v": "inet",    "l": "خالص ورود پول حقوقی"},
+                     {"v": "rshare",  "l": "سهم حقیقی از خرید (٪)"},
+                     {"v": "volnet",  "l": "خالص حجم خرید حقیقی"},
+                     {"v": "nbuy",    "l": "تعداد خریداران حقیقی"},
+                     {"v": "nsell",   "l": "تعداد فروشندگان حقیقی"},
+                 ]}]},
+
+    # ---- داده بنیادی و صف --------------------------------------------------
+    #
+    # «بلاک داده عمومی» and the readable half of «بلاک عرضه و تقاضا». These are
+    # per-symbol SCALARS from the newest دیده‌بان snapshot, not series — the
+    # snapshot builds forward from the day it is first run, so there is no
+    # history to make a series out of and pretending otherwise would give every
+    # symbol a one-bar line. A scalar broadcasts across the window, which is
+    # what «P/E کمتر از ۸» means anyway.
+    {"type": "fundamental", "cat": "flow", "sub": "داده بنیادی و صف",
+     "label": "داده بنیادی", "title": "{field}",
+     "help": "اعداد بنیادی و وضعیت صف از آخرین عکس دیده‌بان بازار: EPS، P/E، "
+             "ارزش بازار، حجم مبنا، تعداد سهام، و ارزش و سرانهٔ صف خرید و فروش. "
+             "این‌ها یک عدد برای هر نماد هستند (نه سری زمانی) و در کل بازه ثابت "
+             "در نظر گرفته می‌شوند. برای این بلاک باید «دیده‌بان و عمق بازار» "
+             "در صفحهٔ به‌روزرسانی اجرا شده باشد.",
+     "inputs": [], "outputs": _out(("out", "", "num")),
+     "params": [{"id": "field", "label": "مقدار", "type": "select",
+                 "default": "pe",
+                 "options": [
+                     {"v": "pe",      "l": "P/E — قیمت به درآمد"},
+                     {"v": "eps",     "l": "EPS (دوازده‌ماههٔ متحرک)"},
+                     {"v": "cap",     "l": "ارزش بازار (ریال)"},
+                     {"v": "basevol", "l": "حجم مبنا"},
+                     {"v": "shares",  "l": "تعداد سهام"},
+                     {"v": "bq",      "l": "ارزش صف خرید (ریال)"},
+                     {"v": "sq",      "l": "ارزش صف فروش (ریال)"},
+                     {"v": "bqpc",    "l": "سرانهٔ صف خرید"},
+                     {"v": "sqpc",    "l": "سرانهٔ صف فروش"},
+                     {"v": "qnet",    "l": "خالص صف (خرید منهای فروش)"},
+                 ]}]},
+
     # ---- خروجی ------------------------------------------------------------
     {"type": "output", "cat": "output", "sub": "خروجی", "label": "خروجی فیلتر",
      "title": "خروجی فیلتر",
@@ -2228,9 +2322,15 @@ _FRAMED_CATS = {"price", "indicator", "candle", "stat", "cross"}
 #: «سقف مجاز هفتگی» is not a thing that exists.
 _UNFRAMED = {"const", "bars", "pricelimit"}
 
-#: …plus this. «فرمول‌نویسی» sits in the math shelf but reads price fields, so a
-#: weekly formula is exactly as meaningful as a weekly indicator.
-_FRAMED_EXTRA = {"formula"}
+#: …plus these. «فرمول‌نویسی» sits in the math shelf but reads price fields, so a
+#: weekly formula is exactly as meaningful as a weekly indicator — and
+#: «حقیقی و حقوقی» is a daily series on the price calendar, so «خالص ورود پول
+#: هفتگی» is both meaningful and the thing people actually want to see.
+#:
+#: «داده بنیادی» is deliberately NOT here. It is one number per symbol from the
+#: latest snapshot, so it has no time axis to reframe and no earlier bar to
+#: shift back to; giving it «تایم فریم» would be a dial that does nothing.
+_FRAMED_EXTRA = {"formula", "moneyflow"}
 
 FRAMED_TYPES = frozenset(
     {n["type"] for n in NODE_TYPES if n["cat"] in _FRAMED_CATS} - _UNFRAMED
@@ -2579,6 +2679,10 @@ def fields_needed(nodes):
         t, p = n["type"], n["params"]
         for col in _NODE_FIELDS.get(t, ()):
             need.add(col)
+        if t == "moneyflow":
+            # Not a price field, so it goes straight to the column set rather
+            # than through _want() — which resolves catalogue field names.
+            need.update(_FLOW_NEEDS.get(p.get("field", "net"), ()))
         src = p.get("field") if t == "price" else p.get("src")
         if src:
             _want(need, src)
@@ -2651,15 +2755,49 @@ _COL_SQL = {
     # gives weeks that begin on Saturday — the Tehran trading week. An ISO week
     # would put Saturday's session in with the previous Sunday-to-Wednesday and
     # split every real trading week across two buckets.
-    "wk": "((date - DATE '2000-01-01') / 7)",
+    "wk": "((p.date - DATE '2000-01-01') / 7)",
     # The JALALI month off j_date ('1405-06-04'), not the Gregorian one: «شهریور»
     # is a month a user can reason about, «August» straddles two of them. The
     # regex guard is not decoration — one malformed j_date would otherwise make
     # the whole market-wide query raise on a cast.
-    "mo": ("(CASE WHEN j_date ~ '^[0-9]{4}-[0-9]{1,2}' "
-           "THEN split_part(j_date, '-', 1)::int * 12 "
-           "   + split_part(j_date, '-', 2)::int ELSE 0 END)"),
+    "mo": ("(CASE WHEN p.j_date ~ '^[0-9]{4}-[0-9]{1,2}' "
+           "THEN split_part(p.j_date, '-', 1)::int * 12 "
+           "   + split_part(p.j_date, '-', 2)::int ELSE 0 END)"),
 }
+
+# ---------------------------------------------------------------------------
+# حقیقی و حقوقی, as bar columns
+#
+# These live in ri_history, not in the price table, and they are pulled in with
+# a LEFT JOIN on (ticker, date) rather than loaded separately. That join is the
+# whole correctness argument: it aligns every حقیقی/حقوقی value to the PRICE
+# calendar, so «میانگین ۵ روزهٔ خالص حقیقی» and «RSI روی پایانی» index the same
+# bars. Two independently-loaded series would drift by one on any session the
+# two tables disagree about — and they do disagree, routinely, while a back-fill
+# is still running.
+#
+# LEFT, not INNER: a symbol with no حقیقی/حقوقی row for a session must still
+# have its price bar. An INNER JOIN would silently shorten the price series for
+# every symbol whose RI back-fill is behind, quietly changing what every OTHER
+# indicator in the same graph computes.
+# ---------------------------------------------------------------------------
+_RI_SQL = {
+    "rbuy":   "ri.val_buy_r",     # ارزش خرید حقیقی
+    "rsell":  "ri.val_sell_r",    # ارزش فروش حقیقی
+    "ibuy":   "ri.val_buy_i",     # ارزش خرید حقوقی
+    "isell":  "ri.val_sell_i",    # ارزش فروش حقوقی
+    "rnbuy":  "ri.no_buy_r",      # تعداد خریداران حقیقی
+    "rnsell": "ri.no_sell_r",     # تعداد فروشندگان حقیقی
+    "rvbuy":  "ri.vol_buy_r",     # حجم خرید حقیقی
+    "rvsell": "ri.vol_sell_r",    # حجم فروش حقیقی
+}
+_COL_SQL.update(_RI_SQL)
+
+#: Columns whose absence means "no data", not "zero". A session with no
+#: حقیقی/حقوقی row is UNKNOWN, and _load_columns' usual None → 0.0 repair would
+#: turn it into «هیچ‌کس نخرید» — a fact the data never stated. They stay None and
+#: every consumer treats them the way it treats an indicator's warm-up.
+_NULLABLE_COLS = frozenset(_RI_SQL)
 
 
 #: The columns that are PRICES. A price of zero is not a price — see the repair
@@ -2703,15 +2841,22 @@ def _load_columns(kind, as_of, bars, cols, tickers=None, dates=False):
     if repair and "f" not in need:
         need.append("f")
     select = ", ".join(f"{_COL_SQL[c]}::float8" for c in need)
+    # The حقیقی/حقوقی join, added only when a graph actually reads one of those
+    # columns — a price-only filter must not pay for a join over two million
+    # rows to select nothing from it.
+    ri_join = ""
+    if any(c in _RI_SQL for c in need):
+        ri_join = ("LEFT JOIN ri_history ri "
+                   "ON ri.ticker = p.ticker AND ri.date = p.date")
     # The backtester asks for the calendar too. The live screener never does —
     # it reads the last bar, and "the last bar" needs no date to be found — but a
     # backtest has to say WHEN a signal fired and line eight hundred symbols up
     # on one axis, and the only honest source for that is the row itself.
-    tail = ", j_date" if dates else ""
+    tail = ", p.j_date" if dates else ""
     # One chunk of the market, not all of it. A 1300-bar panel of every symbol is
     # 1.1 GB of Python floats; the backtester walks the market in slices so its
     # peak stays flat however deep the history goes.
-    where = " AND ticker = ANY(%s)" if tickers else ""
+    where = " AND p.ticker = ANY(%s)" if tickers else ""
     args = [*db._window(kind, as_of, max(2, bars // 200 + 2))]
     if tickers:
         args.append(list(tickers))
@@ -2719,10 +2864,12 @@ def _load_columns(kind, as_of, bars, cols, tickers=None, dates=False):
     rows = db._tuples(
         f"""
         WITH ranked AS (
-            SELECT ticker, {select}{tail},
-                   ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) rn
-            FROM {price_tbl}
-            WHERE adj_close > 0 AND adj_final > 0 AND date <= %s AND date >= %s{where}
+            SELECT p.ticker, {select}{tail},
+                   ROW_NUMBER() OVER (PARTITION BY p.ticker ORDER BY p.date DESC) rn
+            FROM {price_tbl} p
+            {ri_join}
+            WHERE p.adj_close > 0 AND p.adj_final > 0
+              AND p.date <= %s AND p.date >= %s{where}
         )
         SELECT * FROM ranked WHERE rn <= %s ORDER BY ticker, rn DESC
         """,
@@ -2748,8 +2895,11 @@ def _load_columns(kind, as_of, bars, cols, tickers=None, dates=False):
                     v = settle if (settle is not None and settle > 0) else None
                 if v is None:
                     v = 0.0                      # nothing left to repair it with
-            elif v is None:
+            elif v is None and c not in _NULLABLE_COLS:
                 v = 0.0                          # volume / value / count
+            # …and a حقیقی/حقوقی column falls through as None. Zero would say
+            # «هیچ حقیقی‌ای نخرید», which is a claim about the session; the
+            # missing row only says the data has not been fetched for it.
             out[c].setdefault(t, []).append(v)
         if dates:
             out[DATE_COL].setdefault(t, []).append(r[d_at])
@@ -2897,6 +3047,128 @@ def _src(ctx, field):
         return [0.0 if v is None else v for v in out]
     col = _FIELD_COL[field]
     return b.get(col) or [None] * len(b["c"])
+
+
+#: Which bar columns each «حقیقی و حقوقی» output is built from — the same role
+#: _DERIVED plays for the price fields, and what fields_needed() consults so a
+#: graph asking only for «قدرت خریدار» loads four columns rather than eight.
+_FLOW_NEEDS = {
+    "net":    ("rbuy", "rsell"),
+    "power":  ("rbuy", "rsell", "rnbuy", "rnsell"),
+    "pcbuy":  ("rbuy", "rnbuy"),
+    "pcsell": ("rsell", "rnsell"),
+    "buy":    ("rbuy",),
+    "sell":   ("rsell",),
+    "inet":   ("ibuy", "isell"),
+    "rshare": ("rbuy", "ibuy"),
+    "volnet": ("rvbuy", "rvsell"),
+    "nbuy":   ("rnbuy",),
+    "nsell":  ("rnsell",),
+}
+
+
+def _flow_series(ctx, field):
+    """One «حقیقی و حقوقی» reading, per session, over the price calendar.
+
+    EVERY division here is guarded, and every guard returns None rather than 0.
+    A session with no retail buyer has an undefined سرانه, and the difference
+    matters twice over: «قدرت خریدار > ۲» must not match a symbol nobody traded,
+    and «قدرت خریدار < ۰.۵» must not match it either. Zero would do both.
+
+    None also propagates correctly through everything downstream — the binary
+    and rolling helpers already treat it as "not known here", the same way they
+    treat an indicator's warm-up bars.
+    """
+    b = ctx["bars"]
+    n = ctx["n"]
+
+    def col(name):
+        return b.get(name) or [None] * n
+
+    def combine(x, y, fn):
+        return [None if (u is None or v is None) else fn(u, v)
+                for u, v in zip(x, y)]
+
+    def ratio(x, y):
+        # None when the denominator is missing OR zero: dividing a rial figure
+        # by "no people" has no value, it has no meaning.
+        return [None if (u is None or not v) else u / v for u, v in zip(x, y)]
+
+    if field == "net":
+        return combine(col("rbuy"), col("rsell"), lambda x, y: x - y)
+    if field == "inet":
+        return combine(col("ibuy"), col("isell"), lambda x, y: x - y)
+    if field == "volnet":
+        return combine(col("rvbuy"), col("rvsell"), lambda x, y: x - y)
+    if field == "pcbuy":
+        return ratio(col("rbuy"), col("rnbuy"))
+    if field == "pcsell":
+        return ratio(col("rsell"), col("rnsell"))
+    if field == "power":
+        return ratio(ratio(col("rbuy"), col("rnbuy")),
+                     ratio(col("rsell"), col("rnsell")))
+    if field == "rshare":
+        # حقیقی as a share of the day's total buying. The denominator is the
+        # two sides of the SAME transaction total, so it is never negative and
+        # is zero only on a session with no trades at all.
+        tot = combine(col("rbuy"), col("ibuy"), lambda x, y: x + y)
+        return ratio([None if v is None else v * 100.0 for v in col("rbuy")], tot)
+    if field == "buy":
+        return col("rbuy")
+    if field == "sell":
+        return col("rsell")
+    if field == "nbuy":
+        return col("rnbuy")
+    if field == "nsell":
+        return col("rnsell")
+    return [None] * n
+
+
+#: Bump when the SHAPE of a _fundamentals() record changes, for the same reason
+#: _META_SHAPE exists: nothing else invalidates the cached dict on a deploy.
+_FUND_SHAPE = "v1"
+
+
+def _fundamentals():
+    """ticker → {pe, eps, cap, basevol, shares, bq, sq, bqpc, sqpc, qnet}.
+
+    Read from the newest market_snapshot row per symbol that HAS the numbers,
+    not from the newest row: a symbol suspended for a month still has an EPS,
+    and taking only the latest session would blank the block for exactly the
+    symbols someone screens for.
+    """
+    def build():
+        try:
+            rows = db._rows(
+                """SELECT DISTINCT ON (ticker)
+                          ticker, eps, market_cap, base_vol, share_no, final,
+                          bq_value, sq_value, bqpc, sqpc
+                     FROM market_snapshot
+                    WHERE eps IS NOT NULL OR market_cap IS NOT NULL
+                    ORDER BY ticker, date DESC""")
+        except Exception:                      # the table may not exist yet
+            return {}
+        out = {}
+        for r in rows:
+            eps, final = r["eps"], r["final"]
+            bq = float(r["bq_value"] or 0)
+            sq = float(r["sq_value"] or 0)
+            out[r["ticker"]] = {
+                # P/E only where EPS is positive. A loss-making symbol has no
+                # ratio, and a negative one sorts as «ارزان» in every screen
+                # that asks for a low P/E.
+                "pe": (final / eps) if (eps and eps > 0 and final) else None,
+                "eps": eps,
+                "cap": float(r["market_cap"]) if r["market_cap"] is not None else None,
+                "basevol": float(r["base_vol"]) if r["base_vol"] is not None else None,
+                "shares": float(r["share_no"]) if r["share_no"] is not None else None,
+                "bq": bq, "sq": sq,
+                "bqpc": float(r["bqpc"] or 0), "sqpc": float(r["sqpc"] or 0),
+                "qnet": bq - sq,
+            }
+        return out
+
+    return cache.get_or_set("designer_fund", (_FUND_SHAPE,), build)
 
 
 def _cross(a, b, op):
@@ -3057,6 +3329,16 @@ def _eval_node(node, ctx, get):
         return {"out": ("const", p["value"])}
     if t == "symbol":
         return {"out": ("text", str(ctx["meta"].get(p["field"]) or ""))}
+    if t == "moneyflow":
+        return {"out": ("num", _flow_series(ctx, p["field"]))}
+    if t == "fundamental":
+        # A scalar, broadcast. ("const", …) is the interpreter's own broadcast
+        # value, so this costs no list and composes with every numeric block.
+        # None where the symbol is missing from the snapshot — NOT zero: «P/E
+        # صفر» would pass «P/E کمتر از ۸» for every symbol never captured.
+        v = (ctx.get("fund") or {}).get(p["field"])
+        return {"out": ("num", [v] * ctx["n"]) if v is None
+                       else ("const", float(v))}
 
     # ---- indicators ------------------------------------------------------
     if t in ("sma", "ema", "wma", "rsi", "stdev"):
@@ -3555,7 +3837,7 @@ SIGNAL_COL = "__signal"
 
 
 def evaluate(nodes, order, out_node, columns, bars, meta,
-             kind="stock", signals=()):
+             kind="stock", signals=(), fund=None):
     """Run the graph for ONE symbol. Returns (matched, {column_id: value}, at,
     [signal labels]).
 
@@ -3569,7 +3851,11 @@ def evaluate(nodes, order, out_node, columns, bars, meta,
     the canvas would be painted ✕ next to a symbol the filter had just
     returned."""
     n = len(bars["c"])
-    ctx = {"bars": bars, "n": n, "meta": meta, "kind": kind, "frames": {}}
+    ctx = {"bars": bars, "n": n, "meta": meta, "kind": kind, "frames": {},
+           # This symbol's row from the دیده‌بان snapshot, or None. Passed in
+           # rather than looked up here: run() loads the whole dict once and
+           # evaluate() is called eight hundred times.
+           "fund": fund}
     memo = _memoise(nodes, order, ctx)
 
     cond = None
@@ -3627,6 +3913,48 @@ def evaluate(nodes, order, out_node, columns, bars, meta,
 # ---------------------------------------------------------------------------
 # The market-wide run
 # ---------------------------------------------------------------------------
+#: Blocks that read a dataset the price update does not fetch → (table, the
+#: «نوع داده» on /update that fills it, the block's own name).
+_BLOCK_DATASET = {
+    "moneyflow":   ("ri_history", "حقیقی/حقوقی", "حقیقی و حقوقی"),
+    "fundamental": ("market_snapshot", "دیده‌بان و عمق بازار", "داده بنیادی"),
+}
+
+
+def _require_datasets(nodes, kind):
+    """Refuse a graph whose data has never been fetched, and say which run fills it.
+
+    SILENCE IS THE ENEMY, and this is the exact shape of it. A «قدرت خریدار
+    بیشتر از ۲» block over an empty ri_history reads None on every bar of every
+    symbol, every comparison against None is False, and the user gets an empty
+    results table — indistinguishable from a threshold set too high. They would
+    lower it, get another empty table, and conclude the filter is broken.
+
+    The check is per KIND: حقیقی/حقوقی for سهام and for صندوق‌ها are two separate
+    jobs, so a user who has back-filled stocks and not funds must be told that,
+    not told the dataset is missing.
+    """
+    used = {n["type"] for n in nodes.values()} & set(_BLOCK_DATASET)
+    for t in sorted(used):
+        table, job, label = _BLOCK_DATASET[t]
+        try:
+            if table == "ri_history":
+                row = db._one("SELECT 1 AS x FROM ri_history WHERE kind = %s LIMIT 1",
+                              (kind,))
+            else:
+                row = db._one(f"SELECT 1 AS x FROM {table} LIMIT 1")
+        except Exception:                      # table absent → same conclusion
+            row = None
+        if row:
+            continue
+        scope = ("سهام" if kind == "stock" else "صندوق‌ها")
+        raise GraphError(
+            f"بلاک «{label}» به داده‌ای نیاز دارد که هنوز دریافت نشده است. "
+            f"در صفحهٔ «به‌روزرسانی»، نوع دادهٔ «{job}»"
+            + (f" ({scope})" if table == "ri_history" else "")
+            + " را اجرا کنید و بعد دوباره فیلتر را اجرا کنید.")
+
+
 def run(graph, kind="stock", as_of=None, group=None, sub_group=None, limit=MAX_ROWS):
     """Evaluate `graph` against every symbol of `kind` and return the matches.
 
@@ -3634,6 +3962,7 @@ def run(graph, kind="stock", as_of=None, group=None, sub_group=None, limit=MAX_R
     if kind not in ("stock", "etf"):
         kind = "stock"
     nodes, edges, order, out_node = normalise(graph)
+    _require_datasets(nodes, kind)
     columns = [n for n in nodes.values() if n["type"] == "column"]
     signals = [n for n in nodes.values() if n["type"] == "signal"]
     bars = bars_needed(nodes, out_node)
@@ -3652,6 +3981,10 @@ def run(graph, kind="stock", as_of=None, group=None, sub_group=None, limit=MAX_R
 
     panel = _panel(kind, as_of, bars, fields)
     meta = _meta(kind)
+    # Only when a «داده بنیادی» block is actually on the canvas: it is a
+    # market-wide dict, and a price-only filter must not pay to build it.
+    fund = (_fundamentals()
+            if any(nd["type"] == "fundamental" for nd in nodes.values()) else {})
     fallback_mode = out_node["params"].get("sort", "price")
     # An indicator needs its warm-up window; below that every value is None and
     # the symbol can only ever be a non-match, so it is not "scanned" either.
@@ -3673,7 +4006,8 @@ def run(graph, kind="stock", as_of=None, group=None, sub_group=None, limit=MAX_R
         scanned += 1
         try:
             ok, values, at, labels = evaluate(nodes, order, out_node, columns,
-                                              series, m, kind, signals)
+                                              series, m, kind, signals,
+                                              fund=fund.get(ticker))
         except GraphError:
             raise
         except Exception:                      # one bad symbol must not kill the run
@@ -3762,8 +4096,14 @@ def explain(graph, kind, ticker, as_of=None, tail=12, causal=False):  # noqa: D4
         raise GraphError(f"نماد «{ticker}» در این بازه داده ندارد.")
 
     n = len(series["c"])
+    # «چرا این نماد آمد؟» must paint the SAME chip values the run produced, so
+    # the explain context carries the same fundamentals row the run passed in.
+    # Without it a «داده بنیادی» chip would read «—» next to a symbol the block
+    # had just matched.
+    fund = (_fundamentals().get(ticker)
+            if any(nd["type"] == "fundamental" for nd in nodes.values()) else None)
     ctx = {"bars": series, "n": n, "meta": meta, "kind": kind, "frames": {},
-           "causal": causal}
+           "causal": causal, "fund": fund}
     memo = _memoise(nodes, order, ctx)
 
     out = {}
@@ -3783,7 +4123,7 @@ def explain(graph, kind, ticker, as_of=None, tail=12, causal=False):  # noqa: D4
 
     signals = [x for x in nodes.values() if x["type"] == "signal"]
     ok, values, at, labels = evaluate(nodes, order, out_node, columns, series,
-                                      meta, kind, signals)
+                                      meta, kind, signals, fund=fund)
     return {"ticker": ticker, "name": meta["name"], "as_of": as_of,
             "signals": labels,
             "matched": ok, "at": at, "ports": out, "bars": min(tail, n),

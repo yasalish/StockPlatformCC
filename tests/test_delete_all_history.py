@@ -289,14 +289,40 @@ DOM = r"""
 const els = {}, listeners = {};
 function el(id) {
   if (!els[id]) els[id] = {
-    id, style: { opacity: "" }, textContent: "", value: "", checked: false,
-    disabled: false, className: "",
+    id, style: { opacity: "", display: "" }, textContent: "", value: "",
+    checked: false, disabled: false, className: "",
+    parentElement: { style: {}, parentElement: { style: {} } },
     _label: { textContent: "" },
     querySelector(sel) { return sel === ".btn-label" ? this._label : null },
     addEventListener(ev, fn) { (listeners[id] = listeners[id] || {})[ev] = fn; },
   };
   return els[id];
 }
+
+/*  «نوع» on the delete panel is a real <select> now: it lists every dataset the
+    update page can write, and each option declares whether that dataset HAS a
+    date range and a ticker column. The handler reads those flags to decide what
+    to send, so the stand-in has to carry them — a select with no options is not
+    a state the page can be in.
+
+    data-dated / data-sym mirror the template. The defaults are the price
+    tables' (both true), which is what every test in this file exercises.  */
+const DEL_KINDS = {
+  stock: { dated: "1", sym: "1" }, etf: { dated: "1", sym: "1" },
+  all:   { dated: "1", sym: "1" }, ri:  { dated: "1", sym: "1" },
+  index: { dated: "1", sym: "0" }, usd: { dated: "1", sym: "0" },
+  watch: { dated: "1", sym: "1" }, orderbook: { dated: "0", sym: "1" },
+  queue: { dated: "1", sym: "1" }, intraday_ob: { dated: "1", sym: "1" },
+  intraday_trades: { dated: "1", sym: "1" }, shareholders: { dated: "0", sym: "1" },
+};
+(function (sel) {
+  sel.options = Object.keys(DEL_KINDS).map((k) => ({
+    value: k, textContent: k, dataset: DEL_KINDS[k],
+  }));
+  Object.defineProperty(sel, "selectedOptions", {
+    get() { return [sel.options.find((o) => o.value === sel.value) || sel.options[0]]; },
+  });
+})(el("del-kind"));
 function fire(id, ev) { return listeners[id][ev](); }
 global.document = { getElementById: el, querySelectorAll: () => [],
                     querySelector: () => null, addEventListener() {} };
@@ -346,10 +372,24 @@ def panel_js():
         html = flask.render_template(
             "update.html", summary={"stock_latest": "1405-05-24",
                                     "etf_latest": "1405-05-24",
-                                    "stocks": 780, "etfs": 293},
+                                    "stocks": 780, "etfs": 293,
+                                    "stock_rows": 2051797, "etf_rows": 218283},
             updater_available=False, updater_error="not installed",
             yesterday="1405-05-28", stock_next="1405-05-25",
-            etf_next="1405-05-25", status={"active": False})
+            etf_next="1405-05-25", status={"active": False},
+            # «پوشش داده» sits OUTSIDE the finpy_tse guard, for the same reason
+            # the delete panel does: what the database already holds is a fact
+            # worth showing on a machine that cannot fetch anything.
+            fresh={"ri": {"latest": None, "rows": 0},
+                   "ri_stock": {"latest": None}, "ri_etf": {"latest": None},
+                   "index": {"latest": None, "rows": 0},
+                   "usd": {"latest": None, "rows": 0},
+                   "watch": {"latest": None, "rows": 0},
+                   "orderbook": {"captured": None, "rows": 0},
+                   "queue": {"latest": None, "rows": 0, "symbols": 0},
+                   "intraday_ob": {"latest": None, "rows": 0, "symbols": 0},
+                   "intraday_trades": {"latest": None, "rows": 0, "symbols": 0},
+                   "shareholders": {"latest": None, "rows": 0}})
     js = "\n".join(body for tag, body in
                    re.findall(r"<script([^>]*)>(.*?)</script>", html, re.S)
                    if "src=" not in tag)

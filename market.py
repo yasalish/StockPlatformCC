@@ -44,6 +44,117 @@ UPDATER_AVAILABLE = importlib.util.find_spec("finpy_tse") is not None
 UPDATER_ERROR = None if UPDATER_AVAILABLE else "بستهٔ finpy-tse نصب نشده است"
 
 
+# ---------------------------------------------------------------------------
+# نوع داده — what the /update form offers
+#
+# One entry per runnable kind, in the order the page lists them. `dated` says
+# whether the run takes a از/تا range at all; `note` is the one line under the
+# selector that tells an operator what they are about to start, because these
+# differ enormously in cost — three seconds for the board, several hours for a
+# full حقیقی/حقوقی back-fill — and a form that presents them identically invites
+# someone to start the wrong one.
+#
+# Defined here rather than in tse_fetch.KINDS because it is presentation: the
+# fetch layer should not carry Persian sentences about how long things take.
+# ---------------------------------------------------------------------------
+DATASET_CHOICES = [
+    {"kind": "stock", "label": "قیمت سهام", "unit": "نماد", "dated": True,
+     "group": "قیمت",
+     "note": "سابقهٔ قیمت روزانهٔ سهام (OHLCV تعدیل‌شده) — پایهٔ همهٔ تحلیل‌های سامانه."},
+    {"kind": "etf", "label": "قیمت صندوق‌ها", "unit": "نماد", "dated": True,
+     "group": "قیمت",
+     "note": "سابقهٔ قیمت روزانهٔ صندوق‌های قابل معامله."},
+    {"kind": "stock_ri", "label": "حقیقی/حقوقی سهام", "unit": "نماد", "dated": True,
+     "group": "حقیقی و حقوقی",
+     "note": "تعداد، حجم و ارزش خرید و فروش حقیقی و حقوقی هر نماد. "
+             "منبع «پول حقیقی و حقوقی» و بلاک‌های حقیقی/حقوقی در طراحی فیلتر. "
+             "دریافت کل سابقه برای همهٔ نمادها چند ساعت طول می‌کشد."},
+    {"kind": "etf_ri", "label": "حقیقی/حقوقی صندوق‌ها", "unit": "نماد", "dated": True,
+     "group": "حقیقی و حقوقی",
+     "note": "همان داده برای صندوق‌های قابل معامله."},
+    {"kind": "index", "label": "شاخص‌ها", "unit": "شاخص", "dated": True,
+     "group": "شاخص و ارز",
+     "note": "ده شاخص کل بازار (کل، هم‌وزن، شناور آزاد، بازار اول و دوم، صنعت، "
+             "۵۰ شرکت فعال‌تر، ۳۰ شرکت بزرگ) و چهل شاخص گروه صنعت. "
+             "پنجاه درخواست؛ معمولاً کمتر از چند دقیقه."},
+    {"kind": "usd", "label": "قیمت دلار آزاد", "unit": "مرحله", "dated": True,
+     "group": "شاخص و ارز",
+     "note": "نرخ روزانهٔ دلار بازار آزاد. یک درخواست."},
+    {"kind": "watch", "label": "دیده‌بان و عمق بازار", "unit": "مرحله", "dated": False,
+     "group": "لحظه‌ای",
+     "note": "یک عکس از کل بازار: صف خرید و فروش و سرانهٔ آن‌ها، حجم حقیقی/حقوقی "
+             "همان لحظه، EPS، ارزش بازار، حجم مبنا، تعداد سهام و دفتر سفارش پنج‌سطحی. "
+             "کل بازار در یک درخواست (حدود ۵ ثانیه). برای ثبت وضعیت پایان روز، "
+             "پس از بسته شدن بازار اجرا کنید."},
+    {"kind": "symbols", "label": "فهرست مرجع نمادها", "unit": "مرحله", "dated": False,
+     "group": "لحظه‌ای",
+     "note": "بازسازی جدول نمادها از بورس، فرابورس و پایه — نام، گروه و زیرگروه "
+             "صنعت، تابلو و کدها. نمادهای جدید افزوده و موجودها به‌روز می‌شوند؛ "
+             "هیچ نمادی حذف نمی‌شود. چند دقیقه طول می‌کشد."},
+
+    # ---- درون‌روز ----------------------------------------------------------
+    #
+    # `heavy` is the honest label on these: one request per symbol-day. For a
+    # single symbol they are quick and exactly right; across the market they are
+    # thousands of requests, so the form refuses to start one without a symbol
+    # unless «همهٔ نمادها» is ticked deliberately.
+    {"kind": "shareholders", "label": "سهامداران عمده", "unit": "نماد", "dated": False,
+     "group": "بنیادی",
+     "note": "فهرست سهامداران بالای یک درصد هر نماد، با تعداد سهم، درصد مالکیت و "
+             "تغییر آخر. این داده «عکس امروز» است نه سابقه — هر بار اجرا، فهرست "
+             "قبلی همان نماد جایگزین می‌شود. برای یک نماد چند ثانیه."},
+    {"kind": "stock_queue", "label": "سابقهٔ صف سهام", "unit": "نماد", "dated": True,
+     "group": "درون‌روز", "heavy": True,
+     "note": "ارزش و سرانهٔ صف خرید و فروش در لحظهٔ بسته شدن بازار، برای هر روز "
+             "معاملاتی. برخلاف «دیده‌بان» که فقط از امروز به بعد را می‌سازد، این "
+             "به گذشته هم می‌رسد. اما یک درخواست برای هر نماد-روز است: یک نماد در "
+             "یک ماه ≈ ۲۰ درخواست، همهٔ نمادها در یک سال ≈ ۲۰۰٬۰۰۰ درخواست. "
+             "نماد را وارد کنید."},
+    {"kind": "etf_queue", "label": "سابقهٔ صف صندوق‌ها", "unit": "نماد", "dated": True,
+     "group": "درون‌روز", "heavy": True,
+     "note": "همان داده برای صندوق‌های قابل معامله."},
+    {"kind": "stock_ob", "label": "عمق بازار درون‌روز", "unit": "نماد", "dated": True,
+     "group": "درون‌روز", "heavy": True,
+     "note": "نوار کامل تغییرات دفتر سفارش پنج‌سطحی در طول روز — حدود ۷٬۰۰۰ ردیف "
+             "برای هر نماد-روز. برای تحلیل رفتار صف و عرضه/تقاضای یک نماد. "
+             "حتماً نماد و بازهٔ کوتاه وارد کنید."},
+    {"kind": "stock_trades", "label": "ریز معاملات", "unit": "نماد", "dated": True,
+     "group": "درون‌روز", "heavy": True,
+     "note": "تک‌تک معاملات انجام‌شده با ساعت، حجم و قیمت — حدود ۳۵٬۰۰۰ ردیف برای "
+             "یک نماد پرمعامله در یک روز. حتماً نماد و بازهٔ کوتاه وارد کنید."},
+]
+
+RUNNABLE_KINDS = tuple(d["kind"] for d in DATASET_CHOICES)
+DATASET_DATED = {d["kind"]: d["dated"] for d in DATASET_CHOICES}
+DATASET_BY_KIND = {d["kind"]: d for d in DATASET_CHOICES}
+
+#: The order «گروه» headings appear in the selector — cheapest and most-used
+#: first, so the heavy per-symbol-day jobs are the ones you have to scroll to.
+DATASET_GROUPS = ["قیمت", "حقیقی و حقوقی", "شاخص و ارز", "لحظه‌ای",
+                  "بنیادی", "درون‌روز"]
+
+#: The datasets that cost one request PER SYMBOL-DAY. Running one of these
+#: across the whole market is thousands of requests, so update_run() requires
+#: either a symbol or an explicit «همهٔ نمادها» tick before it will start one.
+HEAVY_KINDS = tuple(d["kind"] for d in DATASET_CHOICES if d.get("heavy"))
+
+
+def kind_label(kind):
+    d = DATASET_BY_KIND.get(kind)
+    if d:
+        return d["label"]
+    import tse_fetch
+    return tse_fetch.kind_label(kind)
+
+
+def kind_unit(kind):
+    d = DATASET_BY_KIND.get(kind)
+    if d:
+        return d["unit"]
+    import tse_fetch
+    return tse_fetch.kind_unit(kind)
+
+
 def yesterday_jalali():
     g = datetime.now() - timedelta(days=1)
     return str(jdatetime.date.fromgregorian(year=g.year, month=g.month, day=g.day))
@@ -54,6 +165,33 @@ def yesterday_jalali():
 #  delete panel makes it a normal, one-click destination, and next_day(None)
 #  used to hand the form the string "None" as its «از تاریخ».
 FIRST_JALALI = "1400-01-01"
+
+
+def dataset_latest(kind):
+    """The newest Jalali date this dataset already holds, or None.
+
+    Each dataset has its OWN calendar. Deriving «از تاریخ» for حقیقی/حقوقی from
+    the price table — which is a month ahead of it while a back-fill runs —
+    would ask TSETMC for a window that dataset has never covered and store
+    nothing, night after night, while the gap behind it stayed open.
+
+    Returns None for the two snapshot kinds: «right now» has no last date.
+    """
+    import tse_fetch
+    cfg = tse_fetch.KINDS.get(kind, {})
+    dataset = cfg.get("dataset")
+    if dataset == "price":
+        import db
+        return db.latest_date(kind)
+    import market_data
+    if dataset == "ri":
+        return market_data.latest_jdate(
+            "ri_history", "WHERE kind = %s", (cfg.get("for_kind", "stock"),))
+    if dataset == "index":
+        return market_data.latest_jdate("index_history")
+    if dataset == "usd":
+        return market_data.latest_jdate("usd_rial")
+    return None
 
 
 def next_day(jdate):
@@ -116,6 +254,20 @@ def start_job(kind, start, end, full=False, tickers=None, carry_failed=False,
     blocking = jobs.blocking_job_id()
     if blocking:
         raise RuntimeError(_busy_message(blocking))
+
+    # A SNAPSHOT IS NEVER "ALREADY DONE".
+    #
+    # already_done_elsewhere() skips a symbol an earlier job finished for the
+    # same (kind, start, end, full). That is exactly right for a dated fetch —
+    # it is what makes a resumed run continue instead of starting over — and
+    # exactly wrong for «دیده‌بان» and «فهرست نمادها», whose start/end are
+    # bookkeeping filler the server invents (update_run fills in yesterday's
+    # date). Two snapshots taken an hour apart share that filler, so the second
+    # one was skipped as a duplicate and returned «رد‌شده ۱» without taking a
+    # photograph. The whole point of a snapshot is that running it again gives
+    # you a different answer.
+    if not DATASET_DATED.get(kind, True):
+        resume = False
 
     job_id = jobs.create_job(kind, start, end, full=full, tickers=tickers,
                              created_by=created_by, source=source, resume=resume)

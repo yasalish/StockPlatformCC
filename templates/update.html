@@ -35,6 +35,60 @@
     </div>
   </div>
 
+{#  پوشش داده — one row per dataset, so the question «کدام داده عقب افتاده؟» is
+    answered by looking rather than by starting a run to find out. A dataset
+    that has never been fetched says «هرگز» in the down colour: an empty table
+    and a stale table are different problems and must not look alike.  #}
+<section class="panel" id="coverage-panel">
+  <div class="panel-head">
+    <h2>پوشش داده</h2>
+    <span class="muted small">آخرین تاریخی که از هر مجموعه‌داده در پایگاه داده موجود است</span>
+  </div>
+  <div class="cover-grid">
+    {% set _cover = [
+      ('قیمت سهام',            summary.stock_latest,     summary.stock_rows,  'قیمت'),
+      ('قیمت صندوق‌ها',        summary.etf_latest,       summary.etf_rows,    'قیمت'),
+      ('حقیقی/حقوقی سهام',     fresh.ri_stock.latest,    None,                'حقیقی و حقوقی'),
+      ('حقیقی/حقوقی صندوق‌ها', fresh.ri_etf.latest,      None,                'حقیقی و حقوقی'),
+      ('شاخص‌ها',              fresh['index'].latest,    fresh['index'].rows, 'شاخص و ارز'),
+      ('دلار آزاد',            fresh.usd.latest,         fresh.usd.rows,      'شاخص و ارز'),
+      ('دیده‌بان بازار',        fresh.watch.latest,       fresh.watch.rows,    'لحظه‌ای'),
+    ] %}
+    {% for name, latest, rows, group in _cover %}
+    <div class="cover-cell{{ ' is-empty' if not latest }}">
+      <div class="cover-name">{{ name }}</div>
+      <div class="cover-date {{ 'down-t' if not latest }}">{{ fy(latest) if latest else 'هرگز' }}</div>
+      <div class="cover-meta muted small">
+        {% if rows %}{{ fa(rows) }} رکورد{% else %}{{ group }}{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+    <div class="cover-cell{{ ' is-empty' if not fresh.orderbook.rows }}">
+      <div class="cover-name">عمق بازار</div>
+      <div class="cover-date {{ 'down-t' if not fresh.orderbook.rows }}">
+        {{ fa(fresh.orderbook.rows) if fresh.orderbook.rows else 'هرگز' }}
+      </div>
+      <div class="cover-meta muted small">نماد در آخرین عکس</div>
+    </div>
+    {#  The per-symbol datasets are counted in SYMBOLS, not dates: «۱۴۰۵-۰۶-۰۹»
+        would suggest the whole market is covered to that date when in fact one
+        symbol is. The number that matters here is how many you have.  #}
+    {% for name, key in [('سابقهٔ صف', 'queue'), ('عمق بازار درون‌روز', 'intraday_ob'),
+                         ('ریز معاملات', 'intraday_trades'), ('سهامداران عمده', 'shareholders')] %}
+    {% set d = fresh[key] %}
+    <div class="cover-cell{{ ' is-empty' if not d.rows }}">
+      <div class="cover-name">{{ name }}</div>
+      <div class="cover-date {{ 'down-t' if not d.rows }}">
+        {{ fa(d.get('symbols', d.rows)) if d.rows else 'هرگز' }}
+      </div>
+      <div class="cover-meta muted small">
+        {% if d.rows %}نماد{% if d.latest %} · تا {{ fy(d.latest) }}{% endif %}{% else %}درون‌روز{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
 {% if not updater_available %}
 <section class="panel">
   <p class="flash error" style="margin:0">ماژول به‌روزرسانی در دسترس نیست: {{ updater_error }}</p>
@@ -95,17 +149,33 @@
 </section>
 
 <section class="panel" id="form-panel">
-  <div class="panel-head"><h2>دریافت قیمت‌های جدید</h2></div>
+  <div class="panel-head"><h2>دریافت دادهٔ تازه</h2></div>
   <p class="muted small">
-    داده‌های قیمت از سرویس <b>finpy_tse</b> دریافت و در پایگاه داده درج می‌شود.
+    داده‌ها از سرویس <b>finpy_tse</b> دریافت و در پایگاه داده درج می‌شود.
     این کار در <b>پس‌زمینه</b> اجرا می‌شود و می‌توانید همین‌جا پیشرفت را ببینید یا آن را متوقف کنید.
   </p>
   <form method="post" action="{{ url_for('update_run') }}" class="update-form" id="update-form">
     <div class="update-grid">
-      <label>نوع:
+      {#  «نوع داده» — grouped, because the eight choices are four different
+          kinds of job with wildly different costs, and a flat list of eight
+          makes «دیده‌بان» (five seconds) look like a peer of «حقیقی/حقوقی سهام»
+          (several hours). The note under the grid says which is which.  #}
+      <label>نوع داده:
         <select name="kind" id="kind-select">
-          <option value="stock">سهام</option>
-          <option value="etf">صندوق‌ها</option>
+          {#  Driven by market.DATASET_GROUPS, never a literal list: a hard-coded
+              one here is why five datasets could be registered, routed, fetched
+              and still not appear in this box.  #}
+          {% for group in dataset_groups %}
+          <optgroup label="{{ group }}">
+            {% for d in datasets if d.group == group %}
+            <option value="{{ d.kind }}"
+                    data-dated="{{ '1' if d.dated else '0' }}"
+                    data-unit="{{ d.unit }}"
+                    data-heavy="{{ '1' if d.heavy else '0' }}"
+                    data-note="{{ d.note }}">{{ d.label }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endfor %}
         </select>
       </label>
       <label>حالت:
@@ -124,9 +194,21 @@
         <input type="text" name="ticker" id="upd-ticker" placeholder="خالی = همهٔ نمادها" dir="rtl" autocomplete="off">
       </label>
     </div>
-    <p class="muted small note" style="margin:0 0 12px">
+    {#  What this dataset is and what it costs, swapped in by the selector. It
+        sits above the «نماد» hint because it is the sentence that decides
+        whether the button should be pressed at all.  #}
+    <p class="ds-note" id="ds-note"></p>
+    <p class="muted small note" id="ticker-hint" style="margin:0 0 12px">
       برای به‌روزرسانی فقط یک نماد، آن را در کادر «نماد» وارد کنید؛ برای همهٔ نمادها آن را خالی بگذارید.
     </p>
+    {#  Shown only for the per-symbol-day datasets. It is an opt-IN, not a
+        warning you can click past: without it, «همهٔ نمادها» on «ریز معاملات»
+        is thousands of requests started by leaving a box empty.  #}
+    <label class="chk" id="lbl-heavy" style="display:none;margin:0 0 8px">
+      <input type="checkbox" name="heavy_all" value="1" id="upd-heavy">
+      <span class="down-t">می‌دانم که این کار برای <b>همهٔ نمادها</b> اجرا می‌شود و
+        برای هر نماد و هر روز یک درخواست جداگانه می‌فرستد.</span>
+    </label>
     {#  Resume is the DEFAULT, so the checkbox is the opt-OUT and its value is
         only submitted when the user asks for a re-download. A run that dies at
         symbol 500 of 782 used to re-fetch all 782 when started again.  #}
@@ -140,8 +222,9 @@
       تازه‌سازی شوند، این گزینه را علامت بزنید.
     </p>
     <p class="flash error small" id="full-warn" style="display:none;margin:0 0 12px">
-      ⚠ در حالت «کل سابقه» تمام تاریخچهٔ هر نماد از روز نخست دریافت می‌شود (تاریخ‌ها نادیده گرفته می‌شوند).
-      این عملیات طولانی است؛ پیش از اجرا مطمئن شوید جدول قیمت خالی است تا رکورد تکراری ایجاد نشود.
+      ⚠ در حالت «کل سابقه» تمام تاریخچهٔ موجود از روز نخست دریافت می‌شود (تاریخ‌ها نادیده گرفته می‌شوند).
+      این عملیات طولانی است — برای «حقیقی/حقوقی سهام» چند ساعت — و در جدول‌های
+      حقیقی/حقوقی و شاخص، رکوردهای موجود بازنویسی می‌شوند نه تکراری.
     </p>
     {#  The icon lives in the markup and the words in a span, because
         setRunEnabled() rewrites the label while a run is in flight and
@@ -154,20 +237,36 @@
 <!-- delete panel (works independently of finpy_tse — pure DB operation) -->
 <section class="panel danger-zone" id="delete-panel">
   <div class="panel-head">
-    <h2 class="down-t"><svg class="ico" aria-hidden="true"><use href="#i-trash"></use></svg> حذف داده‌های قیمت</h2>
-    <span class="muted small">حذف رکوردهای قیمت یک نماد یا همهٔ نمادها، در یک بازهٔ تاریخ یا کلیهٔ سوابق</span>
+    <h2 class="down-t"><svg class="ico" aria-hidden="true"><use href="#i-trash"></use></svg> حذف داده</h2>
+    <span class="muted small">هر داده‌ای که این صفحه می‌نویسد، از همین‌جا هم پاک می‌شود — یک نماد یا همه، در یک بازه یا کلیهٔ سوابق</span>
   </div>
   <p class="flash error small" style="margin:0 0 14px">
-    ⚠ این عملیات رکوردهای قیمت را برای همیشه از پایگاه داده حذف می‌کند و بازگشت‌پذیر نیست.
+    ⚠ این عملیات رکوردهای انتخاب‌شده را برای همیشه از پایگاه داده حذف می‌کند و بازگشت‌پذیر نیست.
     پیش از حذف از تاریخ‌های «از» و «تا» مطمئن شوید. با انتخاب «کلیهٔ سوابق»
     بازهٔ تاریخ نادیده گرفته می‌شود و تمام تاریخچهٔ موجود پاک خواهد شد.
   </p>
   <div class="update-grid">
+    {#  Every dataset the update page can WRITE, it can now also delete. Before
+        this, a wrong-year index sweep or a bad حقیقی/حقوقی back-fill could be
+        created from the UI and only undone with psql.  #}
     <label>نوع:
       <select id="del-kind">
-        <option value="stock">سهام</option>
-        <option value="etf">صندوق‌ها</option>
-        <option value="all">همه (سهام و صندوق‌ها)</option>
+        <optgroup label="قیمت">
+          <option value="stock" data-dated="1" data-sym="1">قیمت سهام</option>
+          <option value="etf" data-dated="1" data-sym="1">قیمت صندوق‌ها</option>
+          <option value="all" data-dated="1" data-sym="1">همه (سهام و صندوق‌ها)</option>
+        </optgroup>
+        <optgroup label="داده‌های دیگر">
+          <option value="ri" data-dated="1" data-sym="1">حقیقی/حقوقی</option>
+          <option value="index" data-dated="1" data-sym="0">شاخص‌ها</option>
+          <option value="usd" data-dated="1" data-sym="0">قیمت دلار</option>
+          <option value="watch" data-dated="1" data-sym="1">دیده‌بان بازار</option>
+          <option value="orderbook" data-dated="0" data-sym="1">عمق بازار (آخرین عکس)</option>
+          <option value="queue" data-dated="1" data-sym="1">سابقهٔ صف</option>
+          <option value="intraday_ob" data-dated="1" data-sym="1">عمق بازار درون‌روز</option>
+          <option value="intraday_trades" data-dated="1" data-sym="1">ریز معاملات</option>
+          <option value="shareholders" data-dated="0" data-sym="1">سهامداران عمده</option>
+        </optgroup>
       </select>
     </label>
     <label id="del-ticker-lbl">نماد:
@@ -239,30 +338,66 @@
     el.className = "note " + (ok ? "up-t" : "down-t");
   }
 
-  const KIND_FA = { stock: "سهام", etf: "صندوق‌ها", all: "سهام و صندوق‌ها" };
+  const delKindSel = document.getElementById("del-kind");
+  /*  `|| []` for the same reason syncDataset() guards its option: this block
+      runs at parse time, ABOVE render() and the status poll, so anything it
+      throws takes the progress console down with it — the form disappears and
+      «توقف» stops responding, which is the exact failure
+      tests/test_update_page_states.py exists to prevent.  */
+  const KIND_FA = {};
+  Array.from(delKindSel.options || []).forEach(o => {
+    KIND_FA[o.value] = o.textContent.trim();
+  });
+
+  /*  Some datasets have no date column and some have no ticker column, and the
+      panel must not offer a bound the delete will ignore. «عمق بازار» is the
+      latest snapshot only — there is no yesterday in it to delete — and
+      «شاخص‌ها» is not per-symbol.  */
+  function syncDelKind() {
+    const o = delKindSel.selectedOptions && delKindSel.selectedOptions[0];
+    if (!o || !document.getElementById("del-history").parentElement) return;
+    const dated = o.dataset.dated !== "0";
+    const bySym = o.dataset.sym !== "0";
+    ["del-start-lbl", "del-end-lbl"].forEach(id => {
+      document.getElementById(id).style.display = dated ? "" : "none";
+    });
+    document.getElementById("del-history").parentElement.parentElement.style.display =
+      dated ? "" : "none";
+    document.getElementById("del-ticker-lbl").style.display = bySym ? "" : "none";
+    if (!bySym) document.getElementById("del-ticker").value = "";
+  }
+  delKindSel.addEventListener("change", syncDelKind);
+  syncDelKind();
 
   document.getElementById("del-btn").addEventListener("click", async () => {
-    const kind = document.getElementById("del-kind").value;
-    const ticker = delAll.checked ? "" : delTicker.value.trim();
-    const allHistory = delHistory.checked;
-    const start = delStart.value.trim();
-    const end = delEnd.value.trim();
-    if (!allHistory) {
+    const kindOpt = delKindSel.selectedOptions[0];
+    const kind = delKindSel.value;
+    //  A dataset with no date column ignores the range; one with no ticker
+    //  column ignores the symbol. Validating against the controls actually on
+    //  screen is what lets one panel serve all of them without demanding a
+    //  bound the server would drop.
+    const dated = kindOpt.dataset.dated !== "0";
+    const bySym = kindOpt.dataset.sym !== "0";
+    const ticker = (!bySym || delAll.checked) ? "" : delTicker.value.trim();
+    const allHistory = !dated ? true : delHistory.checked;
+    const start = dated ? delStart.value.trim() : "";
+    const end = dated ? delEnd.value.trim() : "";
+    if (dated && !allHistory) {
       if (!start || !end) { showDel("تاریخ «از» و «تا» را وارد کنید.", false); return; }
       if (start > end) { showDel("تاریخ «از» نباید بعد از «تا» باشد.", false); return; }
     }
-    if (!delAll.checked && !ticker) {
+    if (bySym && !delAll.checked && !ticker) {
       showDel("یک نماد وارد کنید یا گزینهٔ «حذف همهٔ نمادها» را انتخاب کنید.", false); return;
     }
-    const target = ticker ? `نماد «${ticker}»` : `همهٔ نمادها (${KIND_FA[kind]})`;
+    const target = ticker ? `نماد «${ticker}»` : (bySym ? "همهٔ نمادها" : "همهٔ ردیف‌ها");
     const span = allHistory ? "کلیهٔ سوابق" : `از ${start} تا ${end}`;
-    if (!confirm(`حذف داده‌های قیمت ${target} — ${span}؟\nاین عملیات بازگشت‌پذیر نیست.`)) return;
+    if (!confirm(`حذف «${KIND_FA[kind]}» — ${target} — ${span}؟\nاین عملیات بازگشت‌پذیر نیست.`)) return;
     /*  Everything, for everyone: the one combination that leaves the platform
         with no prices at all. It gets a second, differently worded prompt so it
         cannot be reached by clicking through the first one out of habit.  */
     if (allHistory && !ticker &&
-        !confirm(`تأیید نهایی: کلیهٔ سوابق قیمت ${KIND_FA[kind]} برای تمام نمادها حذف می‌شود `
-                 + `و پایگاه داده خالی خواهد شد. ادامه می‌دهید؟`)) return;
+        !confirm(`تأیید نهایی: کلیهٔ سوابق «${KIND_FA[kind]}» حذف می‌شود `
+                 + `و این جدول خالی خواهد شد. ادامه می‌دهید؟`)) return;
 
     const btn = document.getElementById("del-btn");
     btn.disabled = true; label(btn, "در حال حذف…");
@@ -274,7 +409,7 @@
       });
       const j = await res.json();
       if (j.ok) {
-        const scope = j.all ? `همهٔ نمادها (${KIND_FA[kind]})` : "نماد " + ticker;
+        const scope = j.all ? `همهٔ ردیف‌ها (${KIND_FA[kind]})` : "نماد " + ticker;
         const range = allHistory ? "کلیهٔ سوابق" : `${fa(start)} تا ${fa(end)}`;
         showDel(`✅ ${fa(j.deleted)} رکورد حذف شد (${scope}، ${range}).`, true);
       } else {
@@ -289,33 +424,109 @@
 <script>
   const STOCK_NEXT = "{{ stock_next }}", ETF_NEXT = "{{ etf_next }}";
   const RETRY_URL = "{{ url_for('update_retry') }}";
-  const TOTALS = { stock: {{ summary.stocks }}, etf: {{ summary.etfs }} };
 
-  // kind-aware default start date
+  /*  Per-dataset facts the form needs. NEXT is where «افزایشی» should start —
+      each dataset's own last date + 1, not the price table's: حقیقی/حقوقی can
+      legitimately be a month behind prices, and defaulting it to tomorrow's
+      price date would fetch an empty window and report «بدون داده».
+      TOTALS is only the denominator shown before the server's own `total`
+      arrives; a dataset absent here simply shows no estimate rather than a
+      wrong one.  */
+  const NEXT = {
+    stock: STOCK_NEXT, etf: ETF_NEXT,
+    stock_ri: "{{ ri_stock_next }}", etf_ri: "{{ ri_etf_next }}",
+    index: "{{ index_next }}", usd: "{{ usd_next }}",
+  };
+  const TOTALS = { stock: {{ summary.stocks }}, etf: {{ summary.etfs }},
+                   stock_ri: {{ summary.stocks }}, etf_ri: {{ summary.etfs }},
+                   index: 50, usd: 1, watch: 1, symbols: 1 };
+  const KIND_LABEL = {
+    {% for d in datasets %}{{ d.kind|tojson }}: {{ d.label|tojson }},
+    {% endfor %}
+  };
+  const KIND_UNIT = {
+    {% for d in datasets %}{{ d.kind|tojson }}: {{ d.unit|tojson }},
+    {% endfor %}
+  };
+
   const kindSel = document.getElementById("kind-select");
   const startInp = document.getElementById("start-date");
-  kindSel.addEventListener("change", () => {
-    startInp.value = kindSel.value === "etf" ? ETF_NEXT : STOCK_NEXT;
-  });
 
-  // mode toggle: full history disables the date fields
-  const modeSel = document.getElementById("mode-select");
-  const endInp = document.getElementById("end-date");
-  const runBtn = document.getElementById("run-btn");
-  modeSel.addEventListener("change", () => {
-    const full = modeSel.value === "full";
-    document.getElementById("full-warn").style.display = full ? "" : "none";
-    [startInp, endInp].forEach((el) => {
-      el.disabled = full; el.required = !full;
+  /*  One function owns which controls are live, because the eight datasets do
+      not all take the same inputs: the two snapshot jobs have no date range and
+      no single-symbol scope, and the index / dollar sweeps have a range but no
+      per-symbol scope either. Hiding what does not apply is the difference
+      between a form that explains the job and one that invites a value the
+      server will throw away.  */
+  function syncDataset() {
+    /*  Defensive on purpose. This runs at parse time, ABOVE render() and the
+        status poll, so anything it throws takes the whole progress script down
+        with it — the form disappears and «توقف» stops responding, which is the
+        exact failure tests/test_update_page_states.py exists to prevent. A
+        selector with no options is not a state worth crashing over.  */
+    const opt = kindSel.selectedOptions && kindSel.selectedOptions[0];
+    if (!opt) return;
+    const kind = kindSel.value;
+    const dated = opt.dataset.dated === "1";
+
+    document.getElementById("ds-note").textContent = opt.dataset.note || "";
+
+    if (NEXT[kind]) startInp.value = NEXT[kind];
+
+    /*  «حالت» and the two date fields answer to BOTH dials — the dataset (does
+        it have a range at all?) and the mode (کل سابقه ignores the range) — so
+        one function resolves them together. Splitting it across two listeners
+        is how the fields ended up enabled for the snapshot jobs: whichever
+        handler ran last won.  */
+    const full = dated && modeSel.value === "full";
+    modeSel.parentElement.style.display = dated ? "" : "none";
+    ["lbl-start", "lbl-end"].forEach(id => {
+      document.getElementById(id).style.display = dated ? "" : "none";
+    });
+    [startInp, endInp].forEach(el => {
+      /*  `required` has to come off with the display, not just the opacity: a
+          hidden-but-required field makes the browser refuse to submit and gives
+          no visible reason why.  */
+      el.disabled = !dated || full;
+      el.required = dated && !full;
       el.parentElement.style.opacity = full ? ".45" : "";
     });
+    document.getElementById("full-warn").style.display = full ? "" : "none";
     // Only while it is actually clickable: during a run the button carries the
-    // reason it is disabled, and the mode toggle must not overwrite that with
-    // an invitation to click.
+    // reason it is disabled, and neither dial must overwrite that with an
+    // invitation to click.
     if (!runBtn.disabled) {
       label(runBtn, full ? "دریافت کل سابقه" : "اجرای به‌روزرسانی");
     }
-  });
+
+    /*  Every dataset except the four whole-market ones is scoped by symbol.
+        Derived from the unit rather than from a list of kinds, so a dataset
+        added later gets the right form without touching this.  */
+    const perSymbol = opt.dataset.unit === "نماد";
+    ["lbl-ticker", "ticker-hint", "lbl-refetch"].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = perSymbol ? "" : "none";
+    });
+    if (!perSymbol) document.getElementById("upd-ticker").value = "";
+
+    //  The opt-in for a per-symbol-day dataset run across the whole market.
+    const heavy = opt.dataset.heavy === "1";
+    const heavyLbl = document.getElementById("lbl-heavy");
+    if (heavyLbl) {
+      heavyLbl.style.display = heavy ? "" : "none";
+      if (!heavy) document.getElementById("upd-heavy").checked = false;
+    }
+
+    const unit = opt.dataset.unit || "نماد";
+    document.getElementById("upd-ticker").placeholder = "خالی = همهٔ " + unit + "‌ها";
+  }
+
+  const modeSel = document.getElementById("mode-select");
+  const endInp = document.getElementById("end-date");
+  const runBtn = document.getElementById("run-btn");
+  kindSel.addEventListener("change", syncDataset);
+  modeSel.addEventListener("change", syncDataset);
+  syncDataset();
 
   let lastStatus = null;
   // The last symbol actually seen being fetched. `current` is the one row in
@@ -471,11 +682,22 @@
     // s.total is the number of rows the job created in update_job_ticker — the
     // real denominator. TOTALS is the page-load fallback for a job-less page.
     const total = s.total || (s.subset ? s.subset : (TOTALS[s.kind] || 0));
-    const kindFa = s.kind === "etf" ? "صندوق‌ها" : "سهام";
-    const scope = s.subset ? ` · ${fa(s.subset)} نماد انتخابی` : "";
-    document.getElementById("prog-kind").textContent = (s.full
-      ? `${kindFa} · کل سابقه`
-      : `${kindFa} · ${fa(s.start)} تا ${fa(s.end)}`) + scope;
+    /*  The dataset's own name, not «سهام»/«صندوق‌ها». A «شاخص‌ها» run reported as
+        «سهام» is worse than no label: the panel would be describing a different
+        job from the one that is running. Unknown kinds fall through to the raw
+        key rather than to a guess.  */
+    const kindFa = KIND_LABEL[s.kind] || s.kind || "";
+    const unit = KIND_UNIT[s.kind] || "نماد";
+    /*  The two snapshot jobs have no meaningful range — the server fills in
+        yesterday's date purely so the job row has bounds — so printing «از … تا
+        …» there would state a window the run does not honour.  */
+    const dated = s.kind !== "watch" && s.kind !== "symbols";
+    const scope = s.subset ? ` · ${fa(s.subset)} ${unit} انتخابی` : "";
+    document.getElementById("prog-kind").textContent = (!dated
+      ? `${kindFa} · عکس لحظه‌ای`
+      : s.full
+        ? `${kindFa} · کل سابقه`
+        : `${kindFa} · ${fa(s.start)} تا ${fa(s.end)}`) + scope;
     document.getElementById("prog-processed").textContent =
       fa(s.processed) + (total ? " / " + fa(total) : "");
     document.getElementById("prog-success").textContent = fa(s.success);

@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+{% block title %}بورس‌نگار · شاخص‌ها{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">شاخص‌ها</h1>
+    <p class="page-sub">
+      شاخص‌های کل بازار و شاخص گروه‌های صنعت، به همراه نرخ دلار آزاد.
+      همهٔ بازده‌ها روی «مقدار تعدیل‌شدهٔ پایانی» (Adj&nbsp;Close) شاخص محاسبه می‌شود.
+    </p>
+  </div>
+</div>
+
+{% if not market_rows and not sector_rows %}
+{#  An empty table and a broken page must not look alike: this says exactly
+    which run fills it and links straight to the form that starts it.  #}
+<section class="panel empty-state">
+  <div class="empty-star">📈</div>
+  <h2>هنوز شاخصی دریافت نشده است</h2>
+  <p class="muted">
+    این صفحه از جدول <code>index_history</code> می‌خواند و آن جدول خالی است.
+    {% if current_user.is_admin %}
+    در صفحهٔ <a href="{{ url_for('update_page') }}">به‌روزرسانی</a>، نوع دادهٔ
+    «شاخص‌ها» را انتخاب و اجرا کنید — ده شاخص کل بازار و چهل شاخص گروه صنعت،
+    معمولاً در کمتر از چند دقیقه.
+    {% else %}
+    از مدیر سامانه بخواهید یک‌بار به‌روزرسانی «شاخص‌ها» را اجرا کند.
+    {% endif %}
+  </p>
+</section>
+{% else %}
+
+{# ── the headline row: what a reader looks at first ───────────────────────── #}
+<div class="stat-row idx-heads">
+  {% for r in headline %}
+  <div class="stat-card idx-head{{ ' on' if r.key == focus }}" data-idx="{{ r.key }}"
+       role="button" tabindex="0" title="نمایش نمودار {{ r.label }}">
+    <div class="idx-head-name">{{ r.label }}</div>
+    <div class="stat-num">{{ fa(r.value|round|int) }}</div>
+    <div class="idx-head-pill">{{ pill(r.d1) }}</div>
+  </div>
+  {% endfor %}
+  {% if usd %}
+  <div class="stat-card idx-head{{ ' on' if focus == 'usd' }}" data-idx="usd"
+       title="نمایش نمودار دلار آزاد">
+    <div class="idx-head-name">دلار آزاد</div>
+    <div class="stat-num">{{ fa((usd.value / 10)|round|int) }} <span class="idx-unit">تومان</span></div>
+    <div class="idx-head-pill">{{ pill(usd.d1) }}</div>
+  </div>
+  {% endif %}
+</div>
+
+{#  «شکاف کل و هم‌وزن» — the one derived number on this page, and the reason
+    both indices are collected. شاخص کل is weighted by market value, so a day
+    when three large caps rise carries it up; شاخص هم‌وزن counts every symbol the
+    same, so it tracks the median symbol. The GAP between them is the day's
+    actual breadth: positive means the big names carried the market, negative
+    means the small ones did. Neither index says that on its own.  #}
+{% set cw = (market_rows | selectattr('key', 'equalto', 'cwi') | list | first) %}
+{% set ew = (market_rows | selectattr('key', 'equalto', 'ewi') | list | first) %}
+{% if cw and ew and cw.d1 is not none and ew.d1 is not none %}
+{% set gap = cw.d1 - ew.d1 %}
+<section class="panel idx-gap">
+  <div class="idx-gap-body">
+    <span class="idx-gap-label">شکاف شاخص کل و هم‌وزن (۱ روزه)</span>
+    <span class="idx-gap-val">{{ pill(gap) }}</span>
+    <span class="muted small">
+      {% if gap > 0.15 %}
+        بازار را نمادهای بزرگ بالا برده‌اند؛ شاخص کل از هم‌وزن جلوتر است.
+      {% elif gap < -0.15 %}
+        رشد در نمادهای کوچک و متوسط بوده است؛ هم‌وزن از شاخص کل جلوتر است.
+      {% else %}
+        حرکت بازار میان نمادهای بزرگ و کوچک تقریباً یکنواخت بوده است.
+      {% endif %}
+    </span>
+  </div>
+</section>
+{% endif %}
+
+{# ── the chart ────────────────────────────────────────────────────────────── #}
+<section class="panel">
+  <div class="panel-head">
+    <h2 id="idx-chart-title">{{ focus_label }}</h2>
+    <div class="head-actions">
+      <label class="muted small">شاخص:
+        <select id="idx-pick">
+          <optgroup label="شاخص‌های کل بازار">
+            {% for r in market_rows %}
+            <option value="{{ r.key }}" {{ 'selected' if r.key == focus }}>{{ r.label }}</option>
+            {% endfor %}
+          </optgroup>
+          {% if usd %}<optgroup label="ارز"><option value="usd" {{ 'selected' if focus == 'usd' }}>دلار آزاد</option></optgroup>{% endif %}
+          {% if sector_rows %}
+          <optgroup label="شاخص گروه‌های صنعت">
+            {% for r in sector_rows %}
+            <option value="{{ r.key }}" {{ 'selected' if r.key == focus }}>{{ r.label }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endif %}
+        </select>
+      </label>
+      <span class="muted small" id="idx-chart-note"></span>
+    </div>
+  </div>
+  <div id="idx-chart" class="chart-box">در حال بارگذاری نمودار…</div>
+</section>
+
+{# ── the market indices ───────────────────────────────────────────────────── #}
+<section class="panel">
+  <div class="panel-head">
+    <h2>شاخص‌های کل بازار</h2>
+    <span class="muted small">آخرین داده: {{ fy(market_rows[0].j_date) if market_rows else '—' }}</span>
+  </div>
+  <div class="table-scroll">
+    <table class="grid sortable" id="idx-market">
+      <thead>
+        <tr>
+          <th data-sort="str">شاخص</th>
+          <th data-sort="num" class="numh">مقدار</th>
+          {% for pid, plabel, _n in periods %}<th data-sort="num" class="numh">{{ plabel }}</th>{% endfor %}
+          <th data-sort="num" class="numh">حجم</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in market_rows %}
+        <tr class="clickable" data-idx="{{ r.key }}">
+          <td class="rtl-name">{{ r.label }}</td>
+          <td class="num" data-v="{{ r.value or 0 }}">{{ fa(r.value|round|int) if r.value is not none else '—' }}</td>
+          {% for pid, _l, _n in periods %}
+          <td class="num" data-v="{{ r[pid] if r[pid] is not none else -99999 }}">{{ pill(r[pid]) }}</td>
+          {% endfor %}
+          <td class="num small muted" data-v="{{ r.volume or 0 }}">{{ cnt(r.volume) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{# ── the dollar, on the same period grid as the indices ───────────────────── #}
+{% if usd %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>دلار آزاد</h2>
+    <span class="muted small">آخرین داده: {{ fy(usd.j_date) }}</span>
+  </div>
+  <div class="table-scroll">
+    <table class="grid" id="idx-usd">
+      <thead>
+        <tr>
+          <th>نرخ</th><th class="numh">تومان</th><th class="numh">ریال</th>
+          {% for pid, plabel, _n in periods %}<th class="numh">{{ plabel }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="clickable" data-idx="usd">
+          <td class="rtl-name">دلار بازار آزاد</td>
+          <td class="num">{{ fa((usd.value / 10)|round|int) }}</td>
+          <td class="num muted">{{ fa(usd.value|round|int) }}</td>
+          {% for pid, _l, _n in periods %}<td class="num">{{ pill(usd[pid]) }}</td>{% endfor %}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="muted small note">
+    نرخ‌ها به ریال دریافت و برای خوانایی به تومان هم نمایش داده می‌شود.
+    برای سنجش «بازده واقعی»، بازدهٔ شاخص را با بازدهٔ دلار در همان بازه مقایسه کنید:
+    شاخصی که ۱۰٪ رشد کرده و دلاری که ۱۲٪ رشد کرده، به دلار افت کرده است.
+  </p>
+</section>
+{% endif %}
+
+{# ── the sector indices ───────────────────────────────────────────────────── #}
+<section class="panel">
+  <div class="panel-head">
+    <h2>شاخص گروه‌های صنعت</h2>
+    <span class="muted small">{{ fa(sector_rows|length) }} گروه</span>
+  </div>
+  {% if not sector_rows %}
+  <p class="muted note">
+    هنوز شاخص گروه صنعتی دریافت نشده است. اجرای «شاخص‌ها» در صفحهٔ به‌روزرسانی
+    هر چهل گروه را با هم می‌گیرد.
+  </p>
+  {% else %}
+  <div class="table-scroll">
+    <table class="grid sortable" id="idx-sector">
+      <thead>
+        <tr>
+          <th data-sort="str">گروه صنعت</th>
+          <th data-sort="num" class="numh">مقدار</th>
+          {% for pid, plabel, _n in periods %}<th data-sort="num" class="numh">{{ plabel }}</th>{% endfor %}
+          <th data-sort="num" class="numh">حجم</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in sector_rows %}
+        {#  The group name this index covers in `stocks.sector`, when the two
+            spellings are confidently the same thing — that link is the whole
+            point of storing the mapping. Three of the forty have no counterpart
+            in this database and simply get no link.  #}
+        {% set group = None %}
+        {% for g, k in sector_of_group.items() if k == r.key %}{% set group = g %}{% endfor %}
+        <tr class="clickable" data-idx="{{ r.key }}">
+          <td class="rtl-name">{{ r.label }}</td>
+          <td class="num" data-v="{{ r.value or 0 }}">{{ fa(r.value|round|int) if r.value is not none else '—' }}</td>
+          {% for pid, _l, _n in periods %}
+          <td class="num" data-v="{{ r[pid] if r[pid] is not none else -99999 }}">{{ pill(r[pid]) }}</td>
+          {% endfor %}
+          <td class="num small muted" data-v="{{ r.volume or 0 }}">{{ cnt(r.volume) }}</td>
+          <td class="small">
+            {% if group %}
+            <a class="row-link" href="{{ url_for('stocks_page', group=group) }}"
+               target="_blank" rel="noopener" title="نمادهای این گروه">نمادها ›</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const chartBox = document.getElementById("idx-chart");
+  if (!chartBox) return;
+  const pick = document.getElementById("idx-pick");
+  const title = document.getElementById("idx-chart-title");
+  const note = document.getElementById("idx-chart-note");
+  const SERIES_URL = "{{ url_for('api_index_series', key='__K__') }}";
+
+  /*  The first render is served from the page itself so the chart is on screen
+      with the rest of the markup; every change after that is a fetch. Rendering
+      fifty series into the HTML to avoid one request would be fifty times the
+      payload for the forty-nine nobody looks at.  */
+  let labels = {{ series | map(attribute=0) | list | tojson }};
+  let values = {{ series | map(attribute=1) | list | tojson }};
+
+  function draw() {
+    if (!values.length) { chartBox.textContent = "برای این شاخص داده‌ای ذخیره نشده است."; return; }
+    BN.priceChart("idx-chart", labels, values);
+    note.textContent = `${labels.length.toLocaleString("fa-IR")} روز معاملاتی`;
+  }
+  draw();
+  window.addEventListener("resize", () => { clearTimeout(window.__idxRz);
+    window.__idxRz = setTimeout(draw, 150); });
+
+  async function load(key, label) {
+    chartBox.textContent = "در حال بارگذاری…";
+    try {
+      const res = await fetch(SERIES_URL.replace("__K__", encodeURIComponent(key)));
+      const j = await res.json();
+      labels = j.points.map(p => p.d);
+      values = j.points.map(p => p.v);
+      title.textContent = j.label || label || "";
+      draw();
+      /*  Keep the URL in step so the chart someone is looking at survives a
+          reload and can be pasted to someone else. replaceState, not pushState:
+          flipping through ten indices should not put ten entries in the back
+          button.  */
+      const u = new URL(location.href);
+      u.searchParams.set("focus", key);
+      history.replaceState(null, "", u);
+    } catch (e) {
+      chartBox.textContent = "نمودار بارگذاری نشد.";
+    }
+  }
+
+  pick.addEventListener("change", () => {
+    load(pick.value, pick.selectedOptions[0].textContent);
+    document.querySelectorAll(".idx-head").forEach(c =>
+      c.classList.toggle("on", c.dataset.idx === pick.value));
+  });
+
+  //  The headline cards and every table row are shortcuts into the same picker.
+  function jump(key) {
+    if (!key) return;
+    const opt = pick.querySelector(`option[value="${CSS.escape(key)}"]`);
+    if (!opt) return;
+    pick.value = key;
+    pick.dispatchEvent(new Event("change"));
+    chartBox.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  document.querySelectorAll("[data-idx]").forEach(el => {
+    el.addEventListener("click", (ev) => {
+      //  A row's «نمادها ›» link goes to the stock list; it must not be
+      //  swallowed by the row's own jump-to-chart handler.
+      if (ev.target.closest("a")) return;
+      jump(el.dataset.idx);
+    });
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); jump(el.dataset.idx); }
+    });
+  });
+
+  ["idx-market", "idx-sector"].forEach(id => {
+    if (document.getElementById(id)) BN.initTable(id, null);
+  });
+})();
+</script>
+{% endblock %}

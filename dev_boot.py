@@ -39,6 +39,7 @@ Environment:
 """
 import logging
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -131,6 +132,126 @@ def _recorded_worker_pid(role=FETCH):
         return 0
 
 
+# ---------------------------------------------------------------------------
+# A WORKER RUNNING YESTERDAY'S CODE
+#
+# The web process and the Celery workers are separate long-running processes.
+# `python app.py` restarts the web half every time; the workers are started once
+# and then simply keep running, so after a change to tasks.py / tse_fetch.py the
+# worker is still executing the module it imported days ago.
+#
+# That is not a subtle problem. Adding the «حقیقی/حقوقی صندوق‌ها» data type and
+# restarting only the web app produced this, measured:
+#
+#     پردازش‌شده ۱ / ۲۹۳    موفق ۰    ناموفق ۱    زمان سپری‌شده ۹۰۹ث
+#
+# Every ticker died on `KeyError('etf_ri')` inside a worker whose
+# tse_fetch.KINDS predated the release, and because acks_late redelivers the
+# batch it was claimed again and again — six attempts per symbol, twelve rows
+# stuck in 'running', fifteen minutes, and nothing on the page to explain it.
+# tasks.fetch_batch now refuses an unknown kind with a message naming the fix;
+# this makes the fix unnecessary in the normal case, which is better.
+#
+# The test is deliberately coarse — "is any tracked source file newer than the
+# process?" — because the cost of being wrong is asymmetric: a needless restart
+# costs three seconds, a missed one costs the run.
+# ---------------------------------------------------------------------------
+#: The modules a worker actually executes. Templates and CSS are irrelevant to
+#: it, and including them would restart the worker every time a page is edited.
+_WORKER_SOURCES = ("tasks.py", "tse_fetch.py", "celery_app.py", "jobs.py",
+                   "market_data.py", "db.py", "market.py", "filter_engine.py",
+                   "backtest.py", "cache.py", "analytics_views.py")
+
+
+def _newest_source_mtime():
+    newest = 0.0
+    for name in _WORKER_SOURCES:
+        try:
+            newest = max(newest, os.path.getmtime(os.path.join(HERE, name)))
+        except OSError:
+            continue                     # a module this install does not have
+    return newest
+
+
+def _worker_start_time(role):
+    """When the running worker process started, as a POSIX timestamp, or None.
+
+    psutil is not a dependency of this project, so this asks the OS directly and
+    returns None on anything unexpected — an unknown start time means "do not
+    restart", which is the safe answer."""
+    pid = _recorded_worker_pid(role)
+    if not pid:
+        return None
+    try:
+        if os.name == "nt":
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 f"(Get-Process -Id {pid} -ErrorAction Stop).StartTime.ToUniversalTime()"
+                 ".Subtract([datetime]'1970-01-01').TotalSeconds"],
+                capture_output=True, text=True, timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        else:
+            out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                                 capture_output=True, text=True, timeout=15)
+            if out.returncode == 0 and out.stdout.strip():
+                import datetime
+                started = datetime.datetime.strptime(
+                    out.stdout.strip(), "%a %b %d %H:%M:%S %Y")
+                return started.timestamp()
+            return None
+        if out.returncode != 0:
+            return None
+        return float(out.stdout.strip().replace(",", "."))
+    except Exception:                    # noqa: BLE001 — diagnostics, never fatal
+        return None
+
+
+def _worker_is_stale(role):
+    """True when the worker started before the newest change to its own code.
+
+    A job in flight is left alone: restarting mid-batch would abandon symbols
+    that are already claimed, and the operator can restart it themselves once it
+    finishes. The stale worker will still refuse unknown kinds loudly in the
+    meantime (tasks.fetch_batch)."""
+    if not _flag("BN_RESTART_STALE_WORKER", True):
+        return False
+    started = _worker_start_time(role)
+    if started is None:
+        return False
+    if started >= _newest_source_mtime():
+        return False
+    try:
+        import jobs
+        if jobs.active_job_id():
+            log.warning("the %s worker is stale but a job is in flight — "
+                        "not restarting it now", role)
+            return False
+    except Exception:                    # noqa: BLE001 — no DB yet, or no tables
+        pass
+    return True
+
+
+def _stop_worker(role):
+    """Ask the tracked worker to exit. True when it is gone afterwards."""
+    pid = _recorded_worker_pid(role)
+    if not pid:
+        return False
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                           capture_output=True, timeout=20,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        else:
+            os.kill(pid, signal.SIGTERM)
+    except Exception:                    # noqa: BLE001
+        return False
+    for _ in range(20):
+        if not _pid_alive(pid):
+            return True
+        time.sleep(0.25)
+    return not _pid_alive(pid)
+
+
 def worker_running(role=FETCH):
     """True if a worker started by this module or by start_local.ps1 is alive.
 
@@ -193,7 +314,8 @@ def _worker_argv(role=FETCH):
 
 
 def ensure_worker(role=FETCH, timeout=None):
-    """Start a Celery worker for `role` if none is consuming its queue.
+    """Start a Celery worker for `role` if none is consuming its queue — or if
+    the one that is, is running code older than what is on disk.
 
     Returns "already-running", "started", "disabled", "no-broker" or "failed".
     """
@@ -208,7 +330,18 @@ def ensure_worker(role=FETCH, timeout=None):
         return "no-broker"
 
     if worker_running(role):
-        return "already-running"
+        # …unless it is running code older than what is on disk. See
+        # _worker_is_stale() for why that is worth a restart rather than a
+        # shrug.
+        if _worker_is_stale(role):
+            log.warning("the %s celery worker is older than the code — "
+                        "restarting it", role)
+            if _stop_worker(role):
+                time.sleep(1.0)
+            else:
+                return "already-running"       # could not stop it; leave it be
+        else:
+            return "already-running"
 
     os.makedirs(TOOLS_DIR, exist_ok=True)
     env = dict(os.environ)

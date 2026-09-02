@@ -30,8 +30,22 @@ the previous collection of separate Streamlit scripts. Same PostgreSQL database
   کندلی که شرط در آن تازه برقرار شده یک سیگنال است، ورود با قیمت باز شدن کندل بعد،
   و بازده ۱ تا ۲۲ کندل بعد در برابر «خرید کل بازار در همان روزها». ورودهای غیرقابل
   انجام (صف خرید، نماد متوقف) کنار گذاشته و شمرده می‌شوند.
+- **شاخص‌ها** (`/indices`) — ده شاخص کل بازار (کل، هم‌وزن، قیمت وزنی-ارزشی و
+  هم‌وزن، شناور آزاد، بازار اول و دوم، صنعت، ۵۰ فعال‌تر، ۳۰ بزرگ)، چهل شاخص گروه
+  صنعت، و نرخ دلار آزاد — با نمودار و «شکاف شاخص کل و هم‌وزن».
+- **پول حقیقی و حقوقی** (`/moneyflow`) — خالص ورود/خروج پول حقیقی، سرانهٔ خرید و
+  فروش، و قدرت خریدار در بازه‌های ۱ تا ۶۰ روز، به‌همراه «پول به کدام صنعت رفت؟».
+- **تابلوی زنده** (`/live`) — عکس کل بازار: صف خرید و فروش و سرانهٔ آن‌ها، حجم
+  حقیقی/حقوقی لحظه‌ای، EPS و P/E، ارزش بازار و حجم مبنا، و دفتر سفارش پنج‌سطحی
+  که با کلیک روی هر ردیف باز می‌شود.
 - **راهنما** (`/help`) و **درباره** (`/about`).
 - **جستجو** — جستجوی زندهٔ نماد/نام (سهام + صندوق) در نوار بالا.
+
+نوار ناوبری از دوازده پیوند به هشت رسیده: «سهام، صندوق‌ها، تابلوی زنده، شاخص‌ها،
+نقشهٔ بازار» زیر منوی **بازار** و «غربالگر، پول حقیقی و حقوقی، بازدهٔ بازه،
+استراتژی‌ها، فیلترها» زیر منوی **تحلیل** جمع شده‌اند. گروه‌بندی بر اساس *پرسش* است،
+نه بر اساس منبع داده: «بازار» یعنی «الان بازار چه می‌کند» و «تحلیل» یعنی «کدام نماد
+را نگاه کنم».
 
 ## اجرا / Run
 ```bash
@@ -1020,16 +1034,32 @@ Deliberately **not** built, rather than half-built:
 
 | Guide block | Why not |
 | --- | --- |
-| «بلاک عرضه و تقاضا» | the order book is not collected — `stockpricehistory` holds daily OHLCV only |
-| «بلاک حقیقی و حقوقی» | retail/institutional splits are not collected |
-| حجم مبنا / EPS / تعداد سهام of «بلاک داده عمومی» | not collected. The *price-band* half of that block **is** built, because it is derivable |
 | «بلاک سفارش» / «اطلاعات حساب» / «پرتفو» | no broker integration exists |
 | «بلاک تلگرام» | no bot is configured; «هشدار» delivers to the in-app feed instead |
 | «بلاک نمودار» / «خط روند اصلی» (drawing lines on a chart) | a charting feature, not a screening one. The *screening* half — "is price arriving at a level it was rejected from before" — is «حمایت و مقاومت» |
 | «بلاک ویژگی اضافی نماد» | user-defined per-symbol metadata needs a place to enter and store it; nothing here has one |
 
-Each of the first three is one ingestion job away (a table, a fetcher, a
-back-fill) — they are a data order, not a designer change.
+**Three entries left this table.** «بلاک حقیقی و حقوقی», «بلاک عرضه و تقاضا» and
+the حجم مبنا / EPS / تعداد سهام half of «بلاک داده عمومی» said "not collected"
+here, with a note that each was *one ingestion job away — a data order, not a
+designer change*. That order was placed: `ri_history` and `market_snapshot`
+now exist (see **دادهٔ فراتر از قیمت** below) and the palette carries a
+**«حقیقی و حقوقی»** shelf with two blocks:
+
+- **«حقیقی و حقوقی»** — a per-session *series* on the price calendar, so it
+  takes a timeframe and a shift and feeds a moving average or a cross like any
+  price: خالص ورود پول حقیقی, قدرت خریدار, سرانهٔ خرید/فروش, and the raw
+  values, volumes and head-counts behind them.
+- **«داده بنیادی»** — one *scalar* per symbol from the newest board snapshot:
+  EPS, P/E, ارزش بازار, حجم مبنا, تعداد سهام, and the buy/sell queue values and
+  their per-capita pair. No timeframe, because there is no history to reframe —
+  and **refused by the backtester**, because replaying today's P/E over bars
+  from two years ago is look-ahead the engine cannot remove.
+
+Both blocks refuse to run when their dataset has never been fetched, naming the
+«نوع داده» that fills it. That is deliberate: an empty results table is
+indistinguishable from a threshold set too high, and the user's next move would
+be to loosen a filter that was never wrong.
 
 Two places where this catalogue deliberately differs from the guide rather than
 lacking something:
@@ -1077,6 +1107,288 @@ type whenever someone asks for an indicator, and a filter that reopens as a pile
 of chips in the corner is a black box rather than a design. Saved filters are
 private to their account; «برون‌بری» hands the same JSON to a file so one can be
 sent to someone else.
+
+## دادهٔ فراتر از قیمت / The datasets beyond price
+
+Until now every page read one table: daily adjusted OHLCV. `finpy-tse` publishes
+four more things worth having, and this section is what was built from them,
+what was deliberately not, and why.
+
+### What each finpy function is worth here
+
+Verified against the **installed package**, not the printed guide — two of them
+behave differently:
+
+| Function | Data | Verdict |
+| --- | --- | --- |
+| `Get_Price_History` | daily adjusted OHLCV | already the whole platform (`tse_fetch.py`) |
+| `Get_RI_History` | حقیقی/حقوقی: counts, volumes and values of buys and sells | **built** — ⚠️ raises with its own defaults; see below |
+| ten `Get_*I_History` + `Get_SectorIndex_History` | 10 market indices + 40 sector indices | **built** — cheap and back-fillable |
+| `Get_MarketWatch` | the **whole market in one request**: ~1,540 symbols and a 5-level order book in 3.3 s | **built** — the highest-value call in the library |
+| `Get_USD_RIAL` | daily free-market USD/IRR | **built** |
+| `Build_Market_StockList` | reference list with sub-sector, panel and codes | **built** — `stocks` had 810 rows against 1,543 live symbols |
+| `Get_Queue_History` | queue values at the close, per symbol | **built** — ⚠️ finpy returns nothing at all for it; see below |
+| `Get_IntradayOB_History` | the full five-level order-book tape | **built** — ⚠️ same finpy bug |
+| `Get_IntradayTrades_History` | every executed trade | **built** — ~35,000 rows per liquid symbol-day |
+| `Get_ShareHoldersInfo` | holders above 1% | **built** — ⚠️ raises `FileNotFoundError` on modern pandas; see below |
+| `Build_PricePanel`, `Get_60D_PriceHistory` | convenience wrappers over the price fetch | **skipped** — the project's own parallel pipeline already does this, better and resumably |
+
+**Everything in the guide is now ingested except the last row**, and that one is
+a wrapper around a fetch this project already owns.
+
+### Four finpy bugs this integration works around
+
+All four are undocumented, all four fail silently or misleadingly, and
+`verify_marketdata.py` asserts against the installed package rather than the PDF:
+
+1. **`Get_RI_History` raises with its own defaults.** With `alt=False` — the
+   default — every call dies with `AttributeError: Can only use .dt accessor
+   with datetimelike values`: TSETMC's primary endpoint now returns a shape
+   finpy's date handling cannot parse. Every حقیقی/حقوقی row in this platform
+   exists because `tse_fetch.py` passes **`alt=True`**.
+2. **`Get_SectorIndex_History` does not match loosely.** The guide says «بانک»,
+   «بانکی» and «بانکی‌ها» all resolve; in this build it does an *exact* lookup
+   against a hard-coded list of forty strings and, on a miss, **scrapes a Google
+   search page** for the web-id. So `market_data.SECTOR_INDICES` mirrors finpy's
+   own forty names — feeding it this database's group names («خودرو و ساخت
+   قطعات») misses all forty times.
+
+3. **The intraday order book is not "unavailable" — it crashes.** Both
+   `Get_IntradayOB_History` and `Get_Queue_History` go through finpy's
+   `__Get_Day_LOB__`, which renames TSETMC's order-book columns **by position**:
+
+   ```python
+   data.columns = ['Time','Depth','Buy_Vol','Buy_No','Buy_Price', …]   # 8 names
+   ```
+
+   TSETMC has since added a `title` column, so nine columns arrive where eight
+   are expected and the assignment raises `ValueError: Length mismatch`. Both
+   callers wrap the day in a bare `except:` and print
+
+   ```
+   WARNING: The following days data is not available on TSE website…
+   ```
+
+   …which is why those two datasets looked like missing upstream data. They are
+   not: the raw endpoint returns 6,991 rows for a day finpy reports as empty.
+   `tse_fetch._day_lob()` reads the same endpoint and selects **by name**, which
+   is both the fix and immune to the next column TSETMC adds.
+
+   While reimplementing it: finpy's queue function also assigns `psGelStaMax`
+   (the *upper* band) to `Day_LL` and the minimum to `Day_UL` — **swapped** in
+   its output. Ours are not, and `verify_marketdata.py` asserts `day_ul > day_ll`
+   on every stored session.
+
+4. **`Get_ShareHoldersInfo` cannot run on modern pandas.** It reaches the
+   symbol's ISIN with `pd.read_html(r.text)`, and pandas ≥ 2.1 treats a raw HTML
+   string there as a *file path* — so every call dies with
+   `FileNotFoundError: [Errno 2] No such file or directory: <!doctype html>…`.
+   `tse_fetch._read_html_str_shim()` wraps `read_html` so a string argument is
+   handed through `StringIO`; everything else in finpy's function is correct and
+   is left alone.
+
+### The tables (`market_data.py`)
+
+| Table | Source | Shape |
+| --- | --- | --- |
+| `ri_history` | `Get_RI_History` | one row per symbol per session, back-fillable |
+| `index_history` | the eleven index functions | one row per index per session; market and sector indices share it, keyed by `index_key` |
+| `usd_rial` | `Get_USD_RIAL` | one row per day |
+| `market_snapshot` | `Get_MarketWatch` | one row per symbol per session, **forward-only** |
+| `order_book` | `Get_MarketWatch` | five rows per symbol, **latest only** |
+| `queue_history` | the intraday tape | one row per symbol per session, back-fillable |
+| `intraday_orderbook` | the intraday tape | the full five-level tape, ~7,000 rows per symbol-day |
+| `intraday_trades` | `GetTradeHistory` | every executed trade, ~35,000 rows per liquid symbol-day |
+| `shareholders` | `Get_ShareHoldersInfo` | holders above 1%, **latest only** |
+
+Every one is keyed so a re-fetch **replaces** rather than duplicates — the same
+property `tse_fetch.store()` gives the price tables, and for the same reason:
+under `acks_late` a worker killed after writing and before acknowledging is
+handed the same work again, so "twice" is normal, not hypothetical.
+
+`market_snapshot` is keyed on `(ticker, j_date)`, so running the snapshot twice
+in a day overwrites that session's row rather than appending. `captured_at` is
+stored because it is the only thing that says whether today's row is end-of-day
+data: a board captured at 06:32 shows zero volume and every symbol flat, and
+that is the truth about that moment, not a bug. The `/live` page prints the
+capture time above everything else for exactly that reason.
+
+`order_book` is replaced wholesale, never merged. It is a photograph, and half
+of an old one mixed into a new one is not a state the market was ever in — a
+symbol missing from the newest response genuinely has no current book, and
+showing yesterday's queue as today's is what would mislead someone into a trade.
+
+### The update page grew a dimension
+
+Adding five data types to `/update` needed **no new job machinery**. Everything
+about a run — the work list, the claim, the retry, the progress tiles, «توقف»,
+«مکث» and resume — is written against `kind` and nothing else (`jobs.py`,
+`tasks.py`, `market.py`), so a new dataset is an entry in `tse_fetch.KINDS` plus
+a handler, and it inherits all of it. The form now offers eight types in four
+groups, each with a sentence saying what it costs, because they range from three
+seconds (the board) to several hours (a full حقیقی/حقوقی back-fill) and a form
+that presents those identically invites someone to start the wrong one.
+
+Two changes were needed around the edges:
+
+- **`finalize_update` skips the analytics rebuild for non-price runs.** The
+  twenty materialized views are built from the price tables and read nothing
+  else, so a run that fetched شاخص‌ها or the dollar has left every one of them
+  exactly as correct as it was. Rebuilding anyway is six measured minutes of
+  identical output, and it would park the page on «در حال بازسازی تحلیل‌ها…»
+  after a three-second snapshot. The cache version is still bumped.
+- **`nightly_update` derives each dataset's «از تاریخ» from its own table.**
+  حقیقی/حقوقی can legitimately be a month behind prices while a back-fill runs,
+  and taking the start date from the price table would ask TSETMC for a window
+  that dataset has never covered, store nothing, and leave the gap open night
+  after night. A dataset that has **never** been fetched is skipped by the
+  schedule entirely: `next_day(None)` would hand it `FIRST_JALALI` and quietly
+  start five years × 800 symbols at 23:00. That first back-fill is an operator's
+  decision, made once on the page where the cost is written next to the button.
+
+**The queue values are collected twice, on purpose.** `market_snapshot` gets
+them for the whole market in one ~5-second request but only from the day the
+feature is switched on; `queue_history` gets them one symbol-day at a time and
+reaches as far back as TSETMC keeps the tape. So the snapshot is the standing
+nightly job and the history is the tool you point at a symbol you care about.
+Where both cover the same session they agree — same numbers, same instant.
+
+**The three intraday datasets are not on the schedule, and should not be.** One
+request per symbol-day means «ریز معاملات» across the market for a month is
+~24,000 requests. They are per-symbol tools: `market.HEAVY_KINDS` marks them and
+the update form refuses to start one market-wide unless «همهٔ نمادها» is ticked
+deliberately. The tick tape is worth the trouble when you want it — its min
+price, max price and summed volume reproduce the daily bar's low, high and
+volume **exactly**, which is the strongest correctness check in this whole
+feature and is asserted by `verify_marketdata.py --live`.
+
+**Everything the update page can write, it can also delete.** Before this, a
+wrong-year index sweep could be created from the UI and undone only with psql.
+`market_data.DELETABLE` maps each dataset to its table, ticker column and date
+column; a dataset with no date column ignores the range and can only be cleared
+wholesale, which is the truth about a snapshot. The range stays mandatory unless
+`all_history` is passed explicitly — the same guard `db.delete_price_history`
+has, and for the same reason.
+
+The beat runs the board at **13:30** — the only one whose timing is substantive.
+The photograph worth keeping is the one taken after the 12:30 close, when the
+queues have frozen; that is what makes `market_snapshot` a usable end-of-day
+queue history, and it is the whole reason `Get_Queue_History` is not fetched
+symbol by symbol. Indices and the dollar follow the price runs at 22:30, and the
+two long حقیقی/حقوقی sweeps go last.
+
+### پر کردن پایگاه داده / Filling the database
+
+The /update page runs **one job at a time**, deliberately — two fetches
+competing for TSETMC connections is the main source of the timeouts that look
+like "no data". Filling an empty database therefore means starting thirteen
+jobs in the right order and waiting for each, which is what `backfill.py` does:
+
+```bash
+python backfill.py --list      # what it would do, with a time estimate
+python backfill.py             # run it
+python backfill.py --full      # whole history, not just since the last date
+python backfill.py --only index,usd
+python backfill.py --symbol فولاد --intraday --from 1405-05-01 --to 1405-06-09
+```
+
+**The order is not arbitrary.** `symbols` goes first because it refreshes the
+`stocks` reference table and every per-symbol job iterates over that table — a
+symbol missing there is invisible to all of them. Prices come before the
+datasets that join against them. The two long حقیقی/حقوقی sweeps go last.
+
+**It measures coverage, not recency.** `market.dataset_latest()` returns
+MAX(j_date), so a table holding ONE symbol fetched to yesterday reports itself
+as fully up to date — and an incremental run then computes an empty window and
+fetches nothing, for ever, while 809 symbols stay empty. That is right for the
+nightly job and exactly wrong for a back-fill, so `backfill.py` counts *symbols
+with any row* and widens the window when coverage is below 90 %:
+
+```
+  حقیقی/حقوقی سهام        ۸۱۰ مورد  ≈ —          به‌روز است   [پوشش ۸۰۹/۸۱۰]
+  سهامداران عمده          ۸۱۰ مورد  ≈ ۵۴ دقیقه   عکس لحظه‌ای  [پوشش ۱/۸۱۰]
+```
+
+**It will not run the intraday datasets across the market**, and that is a
+measurement rather than caution: at 1.7 s per symbol-day, 810 symbols over one
+year is ~92 hours of continuous fetching. They run only for a named `--symbol`.
+
+Ctrl+C abandons the *watch*, not the fetch — the workers are detached, so the
+job carries on and the next run picks up where it left off.
+
+### ⚠ Restart the workers after adding a data type
+
+The web process and the Celery workers are **separate long-running processes**.
+`python app.py` restarts the web half; the workers are started once and keep
+running, so after a change to `tasks.py` / `tse_fetch.py` a worker is still
+executing the module it imported days ago.
+
+That is not subtle. Adding «حقیقی/حقوقی صندوق‌ها» and restarting only the web app
+produced this, measured:
+
+```
+پردازش‌شده ۱ / ۲۹۳    موفق ۰    ناموفق ۱    زمان سپری‌شده ۹۰۹ث
+```
+
+Every ticker was dying on `KeyError('etf_ri')` inside the stale worker, and
+because `acks_late` redelivers the batch it was claimed again and again — six
+attempts per symbol, twelve rows stuck in `'running'`, fifteen minutes, and
+**nothing on the page to explain it** (a `KeyError` is not a `FetchError`, so it
+never reached `mark_failed`).
+
+Three things now stop that:
+
+1. **`tasks.fetch_batch` refuses an unknown kind**, once, marking every ticker
+   in the batch failed with a message that names the actual remedy — «کارگر این
+   نوع داده را نمی‌شناسد … کارگرهای Celery را دوباره راه‌اندازی کنید». Not
+   retried: no amount of waiting teaches a running process a new module.
+2. **`dev_boot` restarts a worker whose process is older than its own source**
+   (`_WORKER_SOURCES`), so the ordinary `python app.py` fixes it by itself. A
+   job in flight defers the restart — abandoning claimed symbols is worse — and
+   `BN_RESTART_STALE_WORKER=0` turns it off.
+3. **`tests/test_stale_worker.py`** pins all of the above, including that a
+   kind offered on the update form always exists in `tse_fetch.KINDS` — the
+   static half of the same failure, which no restart would fix.
+
+To restart them by hand: `.\start_local.ps1 -Stop` then `python app.py`.
+
+### The join that makes the designer blocks correct
+
+`filter_engine._load_columns` pulls the حقیقی/حقوقی columns in with a
+`LEFT JOIN ri_history ON (ticker, date)` rather than loading them separately,
+and that join is the correctness argument: it aligns every value to the **price**
+calendar, so «میانگین ۵ روزهٔ خالص حقیقی» and «RSI روی پایانی» index the same
+bars. Two independently-loaded series would drift by one on any session the two
+tables disagree about — and they disagree routinely while a back-fill is running.
+`LEFT`, not `INNER`: an inner join would silently shorten the price series for
+every symbol whose RI back-fill is behind, quietly changing what every *other*
+indicator in the same graph computes.
+
+A missing RI row stays **`None`**, not `0.0` — `_NULLABLE_COLS` exempts those
+columns from the loader's usual repair. Zero would say «هیچ حقیقی‌ای نخرید»,
+which is a claim about the session; the missing row only says the data has not
+been fetched. The same distinction runs through every division in
+`_flow_series`: a session with no retail buyer has an *undefined* سرانه, and
+that matters twice over, because zero would make it match both «قدرت خریدار > ۲»
+and «قدرت خریدار < ۰.۵».
+
+Weekly and monthly frames sum the حقیقی/حقوقی columns — including the
+head-counts — so a weekly سرانه is the week's rials over the week's
+buyer-sessions, which is the published definition. Averaging the daily ratios
+instead would weight a dead Wednesday the same as a heavy Saturday.
+
+### Verifying
+
+```bash
+python verify_marketdata.py          # schema, arithmetic, fetch layer, routes, nav
+python verify_marketdata.py --live   # …and one real fetch of each dataset
+```
+
+Part B is the point of that file: it asserts the two finpy facts above against
+the installed package, and Part D checks that the fetched rows **join to real
+price bars** — a fetch that succeeds but stores dates the price table does not
+have is worse than a failure, because every حقیقی/حقوقی block then reads `None`
+and every filter using one matches nothing, silently.
 
 ## چرا یک به‌روزرسانی گیر می‌کند / Why an update stalls, and what stops it
 
