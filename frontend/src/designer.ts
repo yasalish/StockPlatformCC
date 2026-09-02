@@ -7,6 +7,7 @@
 import { createApp, h } from "vue";
 import DesignerApp from "./designer/DesignerApp.vue";
 import type { Catalog } from "./designer/graph";
+import { getJson, revealIslandFallback } from "./http";
 
 async function boot() {
   const host = document.getElementById("designer-app");
@@ -16,16 +17,10 @@ async function boot() {
 
   let catalog: Catalog;
   try {
-    const res = await fetch(`/api/designer/catalog?kind=${kind}`, {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    catalog = (await res.json()) as Catalog;
+    catalog = await getJson<Catalog>(`/api/designer/catalog?kind=${kind}`);
   } catch (err) {
     console.error("[bn] filter designer failed to load:", err);
-    document.querySelectorAll<HTMLElement>(".bn-island-fallback").forEach((n) => {
-      n.hidden = false;
-    });
+    revealIslandFallback(err);
     return;
   }
 

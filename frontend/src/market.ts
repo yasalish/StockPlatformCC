@@ -11,6 +11,7 @@ import { createApp, h } from "vue";
 import MarketPanel from "./MarketPanel.vue";
 import CalcGrid from "./CalcGrid.vue";
 import type { MarketPayload } from "./types";
+import { getJson, revealIslandFallback } from "./http";
 
 function readJson<T>(el: HTMLElement, attr: string, fallback: T): T {
   const raw = el.dataset[attr];
@@ -34,16 +35,12 @@ async function boot() {
   const url = `/api/market/${kind}${asOf ? `?as_of=${encodeURIComponent(asOf)}` : ""}`;
   let payload: MarketPayload;
   try {
-    const res = await fetch(url, { headers: { Accept: "application/json" } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    payload = (await res.json()) as MarketPayload;
+    payload = await getJson<MarketPayload>(url);
   } catch (err) {
     // Leave the server-rendered fallback in place and say why, rather than
     // replacing a working table with an empty one.
     console.error("[bn] market data failed to load:", err);
-    document.querySelectorAll<HTMLElement>(".bn-island-fallback").forEach((n) => {
-      n.hidden = false;
-    });
+    revealIslandFallback(err);
     return;
   }
 

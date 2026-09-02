@@ -9,6 +9,7 @@
 import { createApp, h } from "vue";
 import ResultApp from "./designer/ResultApp.vue";
 import type { Catalog } from "./designer/graph";
+import { getJson, revealIslandFallback } from "./http";
 
 async function boot() {
   const host = document.getElementById("designer-result");
@@ -24,16 +25,10 @@ async function boot() {
   try {
     const cq = new URLSearchParams({ kind });
     if (group) cq.set("group", group);
-    const res = await fetch(`/api/designer/catalog?${cq}`, {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    catalog = (await res.json()) as Catalog;
+    catalog = await getJson<Catalog>(`/api/designer/catalog?${cq}`);
   } catch (err) {
     console.error("[bn] filter result page failed to load:", err);
-    document.querySelectorAll<HTMLElement>(".bn-island-fallback").forEach((n) => {
-      n.hidden = false;
-    });
+    revealIslandFallback(err);
     return;
   }
 

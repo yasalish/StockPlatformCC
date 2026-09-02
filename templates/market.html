@@ -170,7 +170,13 @@
    link back to the server-rendered view rather than a blank panel. #}
 <section class="panel bn-island-fallback" hidden>
   <div class="panel-head"><h1>{{ title }}</h1></div>
-  <p class="muted note">
+  {#  Filled by revealIslandFallback() in frontend/src/http.ts with the reason
+      the load failed. It matters most for a 429, where the generic advice
+      below — "reload the page" — is the one thing that makes the situation
+      worse. Empty and hidden until then, so a page that never fails shows
+      nothing extra.  #}
+  <p class="note flash error" data-role="island-error" hidden></p>
+  <p class="muted note" data-role="island-generic">
     جدول بارگذاری نشد. <a href="{{ url_for('export_gainer', kind=kind) }}">خروجی اکسل</a>
     یا صفحه را دوباره بارگذاری کنید.
   </p>

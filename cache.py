@@ -748,3 +748,143 @@ def refresh_in_progress():
         return bool(r.exists(_refresh_lock_key()))
     except (RedisError, OSError):
         return False
+
+
+# ---------------------------------------------------------------------------
+# Per-account throttling and host-wide slots
+# ---------------------------------------------------------------------------
+# Two primitives the web tier needs and could not express before, both of which
+# have to be shared across processes to mean anything:
+#
+#   throttle_*  — a failure counter with exponential backoff, keyed on whatever
+#                 the caller chooses. Used by the login form, keyed on the
+#                 ACCOUNT rather than the IP: nginx's per-IP limiter is the
+#                 wrong tool here, because Iranian mobile carriers put very
+#                 large populations behind one NAT address, so a per-IP limit is
+#                 simultaneously too strict for real users at market open and
+#                 useless against a distributed attempt.
+#
+#   claim_slot  — N host-wide slots, so a CPU-bound endpoint can be limited
+#                 across every worker in every replica. A threading.Semaphore
+#                 only ever limited one process: with 4 Gunicorn workers a
+#                 "2 slots" guard actually permitted 8 concurrent runs.
+#
+# Both degrade deliberately when Redis is down, and each says how below.
+# ---------------------------------------------------------------------------
+
+def _throttle_keys(bucket, ident):
+    """Namespaced keys for one throttled identity.
+
+    The identity is hashed rather than interpolated: it comes from a form field,
+    so it must not be able to shape a Redis key, and hashing also keeps the
+    usernames people typed out of the keyspace.
+    """
+    h = hashlib.sha256(str(ident).encode("utf-8")).hexdigest()[:32]
+    return (f"{PREFIX}:throttle:{bucket}:{h}:n",
+            f"{PREFIX}:throttle:{bucket}:{h}:until")
+
+
+def throttle_check(bucket, ident):
+    """Seconds the caller must wait, or 0 when it may proceed.
+
+    With no Redis this returns 0 — the request is allowed. That is the honest
+    trade: refusing every login because the cache is down would turn a cache
+    outage into a total outage, and the password check itself still stands.
+    """
+    r = _client()
+    if r is None:
+        return 0
+    _, until_key = _throttle_keys(bucket, ident)
+    try:
+        ttl = r.ttl(until_key)
+    except (RedisError, OSError) as e:
+        _down(e)
+        return 0
+    # -2 = no such key, -1 = key with no expiry (should not happen; treat as
+    # clear rather than as a permanent lockout).
+    return int(ttl) if ttl and ttl > 0 else 0
+
+
+def throttle_fail(bucket, ident, threshold=5, base=2, cap=900, window=3600):
+    """Record one failure. Returns the seconds to wait before the next attempt.
+
+    The first `threshold` failures cost nothing, so a person mistyping a
+    password twice is not punished. After that the wait doubles per failure —
+    2s, 4s, 8s … — capped at `cap`. The counter itself expires after `window`
+    of quiet, so an account is never permanently poisoned by old failures.
+    """
+    r = _client()
+    if r is None:
+        return 0
+    n_key, until_key = _throttle_keys(bucket, ident)
+    try:
+        pipe = r.pipeline()
+        pipe.incr(n_key)
+        pipe.expire(n_key, int(window))
+        fails = int(pipe.execute()[0])
+        over = fails - int(threshold)
+        if over <= 0:
+            return 0
+        delay = min(int(cap), int(base) * (2 ** (over - 1)))
+        r.set(until_key, b"1", ex=delay)
+        return delay
+    except (RedisError, OSError) as e:
+        _down(e)
+        return 0
+
+
+def throttle_clear(bucket, ident):
+    """Forget an identity's failures. Called on a successful login, so a user
+    who eventually remembers their password starts clean."""
+    r = _client()
+    if r is None:
+        return
+    try:
+        r.delete(*_throttle_keys(bucket, ident))
+    except (RedisError, OSError):
+        pass
+
+
+SLOT_TTL = int(os.environ.get("RUN_SLOT_TTL", "180"))
+
+
+def claim_slot(name, slots, ttl=None, owner="?"):
+    """Take one of `slots` host-wide slots for `name`, or return None.
+
+    Returns an opaque token to hand to release_slot(). Each slot is its own
+    SET NX EX key, following claim_refresh() above: the TTL is what makes a
+    slot self-healing, so a worker killed mid-run frees its slot without any
+    cleanup path having to run.
+
+    Returns None when Redis is unavailable — the CALLER then falls back to its
+    in-process semaphore. Granting freely here would remove the protection
+    exactly when the system is already unhealthy, and refusing everything would
+    take a working feature offline over a cache outage; neither is right, and
+    only the caller knows its local fallback.
+    """
+    r = _client()
+    if r is None:
+        return None
+    ex = int(ttl or SLOT_TTL)
+    for i in range(int(slots)):
+        key = f"{PREFIX}:slot:{name}:{i}"
+        try:
+            if r.set(key, str(owner).encode("utf-8")[:200], nx=True, ex=ex):
+                return key
+        except (RedisError, OSError) as e:
+            _down(e)
+            return None
+    return None
+
+
+def release_slot(token):
+    """Give a slot back. Safe with None, so callers can release unconditionally."""
+    if not token:
+        return
+    r = _client()
+    if r is None:
+        return
+    try:
+        r.delete(token)
+    except (RedisError, OSError):
+        pass

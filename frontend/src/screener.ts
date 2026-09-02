@@ -6,6 +6,7 @@
 import { createApp, h } from "vue";
 import ScreenerPanel from "./ScreenerPanel.vue";
 import type { ScreenerPayload } from "./types";
+import { getJson, revealIslandFallback } from "./http";
 
 async function boot() {
   const host = document.getElementById("screener-app");
@@ -17,16 +18,10 @@ async function boot() {
 
   let payload: ScreenerPayload;
   try {
-    const res = await fetch(`/api/screener/${kind}?${q.toString()}`, {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    payload = (await res.json()) as ScreenerPayload;
+    payload = await getJson<ScreenerPayload>(`/api/screener/${kind}?${q.toString()}`);
   } catch (err) {
     console.error("[bn] screener data failed to load:", err);
-    document.querySelectorAll<HTMLElement>(".bn-island-fallback").forEach((n) => {
-      n.hidden = false;
-    });
+    revealIslandFallback(err);
     return;
   }
 

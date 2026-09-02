@@ -29,7 +29,56 @@ from flask_login import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 
+import cache
 import db
+
+# ---------------------------------------------------------------------------
+# Login hardening (review findings H-6 and H-7)
+# ---------------------------------------------------------------------------
+# H-6 had two halves, and they need different fixes.
+#
+# ENUMERATION. The check used to read:
+#
+#     if not row or not check_password_hash(row["password_hash"], password):
+#
+# `or` short-circuits, so an unknown username never reached the hash and the
+# response came back in a fraction of the time a known one took. That timing
+# difference reliably answers "is this username registered?" — for every
+# username an attacker cares to try. The fix is to always spend the hash: when
+# there is no such user the password is checked against the fixed hash below,
+# whose only purpose is to cost the same as a real one.
+#
+# _DUMMY_HASH is computed once at import, so a login never pays to build it.
+# Its work factor is whatever the installed Werkzeug's default is, which is also
+# what generate_password_hash() gives new accounts — so it matches hashes created
+# by this codebase. An account whose hash predates a Werkzeug default change
+# would still differ slightly; the large, reliable signal (no hash at all vs a
+# full hash) is what this removes.
+#
+# LOCKOUT. There was no per-account failure counter anywhere, so the only
+# protection was nginx's per-IP limit — which H-7 shows is the wrong key:
+# Iranian carriers NAT very large populations behind single addresses, making a
+# per-IP limit both too strict for real users at market open and irrelevant to
+# a distributed attempt. The counter below is keyed on the ACCOUNT, in Redis, so
+# it is shared by every worker and every replica.
+_DUMMY_HASH = generate_password_hash("bn-constant-time-equaliser")
+
+#: Redis bucket name for login failures, and the backoff shape. Five free
+#: attempts, then 2s, 4s, 8s … capped at five minutes, forgotten after an hour
+#: of quiet. Generous enough that a person mistyping their password twice never
+#: notices, steep enough that guessing is not worth the wall-clock.
+_LOGIN_BUCKET = "login"
+LOGIN_FREE_ATTEMPTS = int(os.environ.get("LOGIN_FREE_ATTEMPTS", "5"))
+LOGIN_BACKOFF_CAP = int(os.environ.get("LOGIN_BACKOFF_CAP", "300"))
+LOGIN_FAIL_WINDOW = int(os.environ.get("LOGIN_FAIL_WINDOW", "3600"))
+
+
+def _wait_message(seconds):
+    """«… ثانیه دیگر» / «… دقیقه دیگر» — a wait a person can act on."""
+    if seconds >= 60:
+        mins = (seconds + 59) // 60
+        return f"{db.to_persian(mins)} دقیقه"
+    return f"{db.to_persian(seconds)} ثانیه"
 
 login_manager = LoginManager()
 login_manager.login_view = "auth.login"
@@ -164,11 +213,49 @@ def login():
         password = request.form.get("password") or ""
         remember = bool(request.form.get("remember"))
 
-        row = db.get_user_by_username(username)
-        if not row or not check_password_hash(row["password_hash"], password):
-            flash("نام کاربری یا گذرواژه نادرست است.", "error")
+        # Case-fold the throttle identity so "Ali" and "ali" share one counter
+        # and cannot be used to buy extra attempts against the same account.
+        ident = username.casefold()
+
+        wait = cache.throttle_check(_LOGIN_BUCKET, ident) if ident else 0
+        if wait:
+            # Deliberately says nothing about whether the account exists — the
+            # message is identical for a real account under attack and for a
+            # username that was never registered.
+            flash(f"تلاش‌های ناموفق پیاپی زیاد بوده است. لطفاً "
+                  f"{_wait_message(wait)} دیگر دوباره تلاش کنید.", "error")
             return render_template("login_register.html", mode="login", username=username)
 
+        row = db.get_user_by_username(username)
+        # Always spend a hash. `check_password_hash` against _DUMMY_HASH cannot
+        # succeed, and the point is the time it takes, not the answer — see the
+        # note on H-6 at the top of this module. Assigning `ok` first and
+        # branching after keeps the two paths the same shape.
+        if row:
+            ok = check_password_hash(row["password_hash"], password)
+        else:
+            check_password_hash(_DUMMY_HASH, password)
+            ok = False
+
+        if not ok:
+            delay = cache.throttle_fail(
+                _LOGIN_BUCKET, ident,
+                threshold=LOGIN_FREE_ATTEMPTS,
+                cap=LOGIN_BACKOFF_CAP,
+                window=LOGIN_FAIL_WINDOW,
+            ) if ident else 0
+            if delay:
+                flash(f"نام کاربری یا گذرواژه نادرست است. به دلیل تلاش‌های "
+                      f"ناموفق پیاپی، {_wait_message(delay)} دیگر دوباره تلاش کنید.",
+                      "error")
+            else:
+                flash("نام کاربری یا گذرواژه نادرست است.", "error")
+            return render_template("login_register.html", mode="login", username=username)
+
+        # Someone who eventually remembers their password starts clean, so a
+        # long-forgotten string of failures cannot delay a legitimate login
+        # hours later.
+        cache.throttle_clear(_LOGIN_BUCKET, ident)
         login_user(User(row), remember=remember)
         db.touch_user_login(row["id"])
 

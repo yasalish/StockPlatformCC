@@ -19,6 +19,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ 'ثبت‌نام' if is_reg else 'ورود' }} — بورس‌نگار</title>
 
+  {#  Client error reporting (review finding C-4). This template does not
+      extend base.html — it is the only other page with its own shell — so the
+      two lines base.html carries have to be repeated here rather than
+      inherited. Worth the duplication: the login screen is where a broken
+      bundle costs the most, because the visitor cannot get past it to report
+      anything, and it is the one page where the reporter runs without a
+      session. /api/client-error is exempted from the login gate for exactly
+      this case.  #}
+  <script>window.BN_RELEASE = "{{ asset_version('js/app.js') }}";</script>
+  <script src="{{ url_for('static', filename='js/errors.js') }}?v={{ asset_version('js/errors.js') }}"></script>
+
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}?v={{ asset_version('favicon.svg') }}" type="image/svg+xml">
 
   <!-- Vazirmatn Persian font + icon glyphs — self-hosted; both live in auth.css -->

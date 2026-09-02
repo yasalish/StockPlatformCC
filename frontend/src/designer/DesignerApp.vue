@@ -34,6 +34,7 @@ import {
   type GNode,
 } from "./graph";
 import { fa } from "../format";
+import { postJson, userMessage } from "../http";
 
 const props = defineProps<{
   catalog: Catalog;
@@ -212,15 +213,18 @@ function loadExample(key: string) {
 }
 
 /* -------------------------------------------------------------------- run */
+/* Delegates to http.ts so these POSTs get the bounded wait the review's M-3
+   asked for. The thrown message is preserved exactly: userMessage() returns the
+   server's own `error` field when there is one, which is what this function
+   used to dig out by hand, and falls back to a described failure — "the reply
+   took too long", "no connection" — where it previously produced the unhelpful
+   `خطای سرور (undefined)` for a request that never arrived at all. */
 async function post<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((data as { error?: string }).error || `خطای سرور (${res.status})`);
-  return data as T;
+  try {
+    return await postJson<T>(url, body);
+  } catch (e) {
+    throw new Error(userMessage(e));
+  }
 }
 
 /**

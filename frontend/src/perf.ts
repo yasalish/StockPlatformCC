@@ -8,6 +8,7 @@
 import { createApp, h } from "vue";
 import PerfPanel from "./PerfPanel.vue";
 import type { PerfPayload } from "./types";
+import { getJson, revealIslandFallback } from "./http";
 
 async function boot() {
   const host = document.getElementById("perf-app");
@@ -21,16 +22,10 @@ async function boot() {
 
   let payload: PerfPayload;
   try {
-    const res = await fetch(`/api/performance/${kind}?${q.toString()}`, {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    payload = (await res.json()) as PerfPayload;
+    payload = await getJson<PerfPayload>(`/api/performance/${kind}?${q.toString()}`);
   } catch (err) {
     console.error("[bn] performance data failed to load:", err);
-    document.querySelectorAll<HTMLElement>(".bn-island-fallback").forEach((n) => {
-      n.hidden = false;
-    });
+    revealIslandFallback(err);
     return;
   }
 

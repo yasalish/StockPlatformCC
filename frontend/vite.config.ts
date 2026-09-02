@@ -20,7 +20,29 @@ export default defineConfig({
     // common. es2019 covers optional chaining's absence gracefully via
     // transpilation while keeping the bundle small.
     target: "es2019",
-    sourcemap: true,
+    // H-5. `sourcemap: true` was unconditional, so static/dist/ shipped 11 .map
+    // files — about 1.1 MB of the 1.3 MB directory — under nginx's one-year
+    // immutable policy. That published the complete TypeScript source, the
+    // filter-designer graph model included, to anyone who asked for it.
+    //
+    // It costs ordinary users nothing (browsers fetch maps only with devtools
+    // open), so this is source disclosure rather than a performance problem —
+    // but it is disclosure for no benefit.
+    //
+    // Keyed on --watch, which is exactly the distinction that matters here:
+    // `npm run dev` is `vite build --watch` and wants maps, `npm run build` is
+    // the one-shot build that produces the image and must not ship them.
+    //
+    // NOT `process.env.NODE_ENV !== "production"`, which is the obvious fix and
+    // is wrong for this project: Vite sets NODE_ENV=production for EVERY
+    // `vite build`, watching or not, so that condition silently strips maps
+    // from development too — the one place they are actually used. Verified by
+    // running both scripts and counting the .map files.
+    //
+    // If readable production stack traces are wanted later: generate them,
+    // upload to Sentry at build time, and delete them from static/dist before
+    // the image is built. Generating them is fine; serving them is not.
+    sourcemap: process.argv.includes("--watch") || process.argv.includes("-w"),
     rollupOptions: {
       // One entry per island: market.html (order 08), performance.html, one
       // shared by the two scan pages (filters.html / strategies.html), the

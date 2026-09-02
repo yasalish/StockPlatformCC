@@ -8,6 +8,7 @@
 import { createApp, h } from "vue";
 import ScanPanel from "./ScanPanel.vue";
 import type { ScanPayload } from "./types";
+import { getJson, revealIslandFallback } from "./http";
 
 async function boot() {
   const host = document.getElementById("scan-app");
@@ -24,16 +25,10 @@ async function boot() {
 
   let payload: ScanPayload;
   try {
-    const res = await fetch(`/api/scan/${what}/${kind}?${q.toString()}`, {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    payload = (await res.json()) as ScanPayload;
+    payload = await getJson<ScanPayload>(`/api/scan/${what}/${kind}?${q.toString()}`);
   } catch (err) {
     console.error(`[bn] ${what} data failed to load:`, err);
-    document.querySelectorAll<HTMLElement>(".bn-island-fallback").forEach((n) => {
-      n.hidden = false;
-    });
+    revealIslandFallback(err);
     return;
   }
 

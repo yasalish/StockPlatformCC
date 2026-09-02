@@ -32,7 +32,13 @@
 
 <section class="panel bn-island-fallback" hidden>
   <div class="panel-head"><h2>طراحی فیلتر</h2></div>
-  <p class="muted note">
+  {#  Filled by revealIslandFallback() in frontend/src/http.ts with the reason
+      the load failed. It matters most for a 429, where the generic advice
+      below — "reload the page" — is the one thing that makes the situation
+      worse. Empty and hidden until then, so a page that never fails shows
+      nothing extra.  #}
+  <p class="note flash error" data-role="island-error" hidden></p>
+  <p class="muted note" data-role="island-generic">
     طراح فیلتر بارگذاری نشد. صفحه را دوباره بارگذاری کنید. اگر مرورگرتان
     جاوااسکریپت را مسدود کرده است، این صفحه کار نمی‌کند — فیلترهای آمادهٔ
     <a href="{{ url_for('filters_page') }}">صفحهٔ فیلترها</a> بدون جاوااسکریپت هم

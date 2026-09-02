@@ -31,6 +31,7 @@ import { loadDraft, designerUrl, resultUrl } from "./draft";
 import type { Catalog, Graph } from "./graph";
 import { fa } from "../format";
 import { handledInRow, openDetail } from "../nav";
+import { postJson, userMessage } from "../http";
 
 const props = defineProps<{
   catalog: Catalog;
@@ -132,26 +133,25 @@ async function run() {
   busy.value = true;
   error.value = "";
   try {
-    const res = await fetch("/api/designer/backtest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({
-        graph: graph.value,
-        kind: kind.value,
-        group: group.value || null,
-        subgroup: subgroup.value || null,
-        sessions: sessions.value,
-        cost: cost.value,
-        hold: hold.value,
-        fill: fill.value,
-        repeat: repeat.value,
-      }),
+    // postJson bounds the wait at 60s. A backtest replays years of history, so
+    // the ceiling is generous — but it IS a ceiling, where a bare fetch would
+    // sit until Gunicorn's 120s timeout with no spinner and nothing to read.
+    report.value = await postJson<Report>("/api/designer/backtest", {
+      graph: graph.value,
+      kind: kind.value,
+      group: group.value || null,
+      subgroup: subgroup.value || null,
+      sessions: sessions.value,
+      cost: cost.value,
+      hold: hold.value,
+      fill: fill.value,
+      repeat: repeat.value,
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((data as { error?: string }).error || `HTTP ${res.status}`);
-    report.value = data as Report;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "بک‌تست اجرا نشد.";
+    // userMessage prefers the server's own sentence — for a 429 from the slot
+    // guard that is «یک بک‌تست دیگر در حال اجراست…», which tells the user to
+    // wait rather than to retry immediately.
+    error.value = userMessage(e);
     report.value = null;
   } finally {
     busy.value = false;

@@ -10,6 +10,7 @@ Run:
     python app.py            # then open http://127.0.0.1:5002
 """
 import io
+import json
 import os
 import secrets
 import threading
@@ -244,6 +245,74 @@ def readyz():
     return jsonify(out), (200 if healthy else 503)
 
 
+#: Reports accepted per client per window before the rest are dropped. A
+#: broken page can fire a handful of distinct errors; thirty in ten minutes
+#: from one address is a loop or an abuser, and neither adds information.
+CLIENT_ERROR_BUDGET = int(os.environ.get("CLIENT_ERROR_BUDGET", "30"))
+CLIENT_ERROR_WINDOW = int(os.environ.get("CLIENT_ERROR_WINDOW", "600"))
+#: Hard ceiling on a report body. The client truncates the stack to 2 KB, so
+#: anything near this is not one of ours.
+CLIENT_ERROR_MAX_BYTES = 8 * 1024
+
+
+@app.route("/api/client-error", methods=["POST"])
+def client_error():
+    """Record a JavaScript failure reported by static/js/errors.js (C-4).
+
+    Logged at ERROR so observability.setup_sentry()'s LoggingIntegration turns
+    it into a Sentry/GlitchTip event with no browser SDK involved — see the
+    header of errors.js for why that trade was made.
+
+    ALWAYS answers 204, including when the report is rejected. The client is a
+    fire-and-forget beacon; telling it that its error report errored would only
+    invite a retry loop on a page that is already broken.
+    """
+    raw = request.get_data(cache=False, as_text=False) or b""
+    if len(raw) > CLIENT_ERROR_MAX_BYTES:
+        return ("", 204)
+
+    # Keyed on the address rather than the account: these arrive from the login
+    # page too, where there is no account yet.
+    ident = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+    if cache.throttle_fail("clienterr", ident, threshold=CLIENT_ERROR_BUDGET,
+                           base=CLIENT_ERROR_WINDOW, cap=CLIENT_ERROR_WINDOW,
+                           window=CLIENT_ERROR_WINDOW):
+        return ("", 204)
+
+    try:
+        body = json.loads(raw.decode("utf-8"))
+        if not isinstance(body, dict):
+            raise ValueError("not an object")
+    except Exception:
+        return ("", 204)
+
+    def field(name, limit):
+        v = body.get(name)
+        return str(v)[:limit] if v not in (None, "") else ""
+
+    # Every value is re-derived and length-capped here rather than trusted:
+    # this endpoint is unauthenticated, so the body is attacker-controlled and
+    # must not be able to shape a log line.
+    log.error(
+        "client error",
+        extra={
+            "client_kind": field("kind", 40) or "error",
+            "client_message": field("message", 300),
+            "client_source": field("source", 300),
+            "client_line": field("line", 12),
+            "client_col": field("col", 12),
+            "client_page": field("page", 300),
+            "client_release": field("release", 40),
+            "client_viewport": field("viewport", 20),
+            "client_stack": field("stack", 2000),
+            # From the request, not the body — the client deliberately does not
+            # send it, and the header cannot be forged past nginx.
+            "client_ua": (request.headers.get("User-Agent") or "")[:300],
+        },
+    )
+    return ("", 204)
+
+
 @app.before_request
 def _require_login():
     """Gate the whole platform behind a login. Auth pages and static assets stay
@@ -254,7 +323,12 @@ def _require_login():
         return
     # Container probes must answer before anyone can log in, or the orchestrator
     # would restart a perfectly healthy container forever.
-    if endpoint in ("healthz", "readyz"):
+    #
+    # client_error joins them, and for a comparable reason: the failure it
+    # exists to report happens on the login page as often as anywhere else, and
+    # a reporter that needs a session cannot report the bug that stopped you
+    # getting one. It is rate-limited and size-capped in its own handler.
+    if endpoint in ("healthz", "readyz", "client_error"):
         return
     if current_user.is_authenticated:
         # The data-update pages (downloads / deletes) are admin-only.
@@ -1001,8 +1075,55 @@ def screener_page():
 #: on a 2-worker box is a page that stops responding, so runs queue instead of
 #: piling up. The wait is bounded: a caller that cannot get in within
 #: DESIGNER_RUN_WAIT seconds is told to try again rather than held forever.
+#:
+#: THE SEMAPHORE BELOW IS THE FALLBACK, NOT THE GUARD (review finding C-3).
+#: threading.Semaphore lives inside ONE process. With 4 Gunicorn workers a
+#: "2 slots" limit actually permitted 4 × 2 = 8 concurrent CPU-bound runs —
+#: four times what the comment above intends — and adding web replicas would
+#: have multiplied it again. _acquire_run_slot() takes the slot in Redis so the
+#: limit is host-wide (and replica-wide), and only falls back to this local
+#: semaphore when Redis is unreachable, where a per-process limit is still
+#: better than none.
 _designer_run_lock = threading.Semaphore(int(os.environ.get("DESIGNER_RUN_SLOTS", "2")))
-DESIGNER_RUN_WAIT = float(os.environ.get("DESIGNER_RUN_WAIT", "25"))
+DESIGNER_RUN_SLOTS = int(os.environ.get("DESIGNER_RUN_SLOTS", "2"))
+#: Down from 25s. A waiter is not idle — it holds one of the worker's four
+#: threads for the whole wait, so four queued filter requests could leave a
+#: worker serving nothing else. Ten seconds still absorbs a normal collision
+#: between two users; anything longer is a request that should have been told
+#: to try again. The real fix is Phase 2 of the review: run these on a
+#: dedicated Celery queue and return a job id to poll, so a heavy run never
+#: occupies a web worker at all.
+DESIGNER_RUN_WAIT = float(os.environ.get("DESIGNER_RUN_WAIT", "10"))
+
+
+def _acquire_run_slot(name, slots, local_sem, wait, owner="?"):
+    """Take one of `slots` host-wide slots for `name`, waiting up to `wait`.
+
+    Returns a zero-argument release callable on success, or None if the wait
+    expired and the caller should answer 429.
+
+    Redis has no blocking SET NX, so this polls. The poll interval is coarse on
+    purpose: these runs take seconds, so checking four times a second is ample
+    and costs nothing next to the work being guarded.
+
+    When Redis is unreachable it uses the in-process semaphore instead. That is
+    a deliberate downgrade rather than a failure: the guard exists to stop a
+    box being saturated, and a per-process limit still does some of that, while
+    refusing every run would take a working feature offline over a cache
+    outage.
+    """
+    deadline = time.monotonic() + max(0.0, float(wait))
+    while True:
+        if cache.available():
+            token = cache.claim_slot(name, slots, owner=owner)
+            if token is not None:
+                return lambda: cache.release_slot(token)
+        elif local_sem.acquire(blocking=False):
+            return local_sem.release
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        time.sleep(min(0.25, remaining))
 
 
 @app.route("/filter-designer")
@@ -1081,9 +1202,13 @@ def api_designer_run():
     body, err = _designer_body()
     if err:
         return err
-    if not _designer_run_lock.acquire(timeout=DESIGNER_RUN_WAIT):
+    release = _acquire_run_slot("designer-run", DESIGNER_RUN_SLOTS,
+                                _designer_run_lock, DESIGNER_RUN_WAIT,
+                                owner=f"{os.getpid()}")
+    if release is None:
         return jsonify({"error": "سامانه در حال اجرای فیلترهای دیگری است؛ "
-                                 "چند لحظه بعد دوباره تلاش کنید."}), 429
+                                 "چند لحظه بعد دوباره تلاش کنید.",
+                        "retry_after": int(DESIGNER_RUN_WAIT)}), 429
     t0 = time.perf_counter()
     try:
         out = filter_engine.run(body["graph"], kind=body["kind"],
@@ -1094,7 +1219,7 @@ def api_designer_run():
         log.exception("designer run failed")
         return jsonify({"error": "اجرای فیلتر با خطا روبه‌رو شد."}), 500
     finally:
-        _designer_run_lock.release()
+        release()
 
     # No `watched` / `etf_type_colors` here, unlike /api/screener: the result
     # table has no star and no type badge, and a query per run whose answer is
@@ -1132,6 +1257,9 @@ def api_designer_explain():
 #: again in a moment", not a request that sits open for a minute and then times
 #: out in the proxy.
 _backtest_lock = threading.Semaphore(int(os.environ.get("BACKTEST_SLOTS", "1")))
+#: Host-wide, like the run slots above — the local semaphore is only the
+#: fallback for a Redis outage. See _acquire_run_slot and finding C-3.
+BACKTEST_SLOTS = int(os.environ.get("BACKTEST_SLOTS", "1"))
 BACKTEST_WAIT = float(os.environ.get("BACKTEST_WAIT", "8"))
 
 
@@ -1175,9 +1303,13 @@ def api_designer_backtest():
     sessions = int(_num("sessions", backtest_engine.DEFAULT_SESSIONS, 20, 1500))
     cost = _num("cost", backtest_engine.DEFAULT_COST, 0.0, 10.0)
     hold = int(_num("hold", 0, 0, 250)) or None
-    if not _backtest_lock.acquire(timeout=BACKTEST_WAIT):
+    release = _acquire_run_slot("designer-backtest", BACKTEST_SLOTS,
+                                _backtest_lock, BACKTEST_WAIT,
+                                owner=f"{os.getpid()}")
+    if release is None:
         return jsonify({"error": "یک بک‌تست دیگر در حال اجراست؛ چند لحظه بعد "
-                                 "دوباره تلاش کنید."}), 429
+                                 "دوباره تلاش کنید.",
+                        "retry_after": int(BACKTEST_WAIT)}), 429
     t0 = time.perf_counter()
     try:
         out = backtest_engine.backtest(
@@ -1191,7 +1323,7 @@ def api_designer_backtest():
         log.exception("designer backtest failed")
         return jsonify({"error": "اجرای بک‌تست با خطا روبه‌رو شد."}), 500
     finally:
-        _backtest_lock.release()
+        release()
     return jsonify({**out, "server_ms": int((time.perf_counter() - t0) * 1000)})
 
 

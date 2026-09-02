@@ -42,6 +42,22 @@
       repeated in JavaScript.  #}
   <script>window.BN_PREFS = {{ prefs_json | tojson }};</script>
 
+  {#  ── گزارش خطای مرورگر / client error reporting (review finding C-4) ──────
+      FIRST script in the document, and not deferred, so it is installed before
+      any other script can throw. Loaded on every page including the login
+      screen — a reporter that needs a session cannot report the bug that
+      stopped you getting one.
+
+      BN_RELEASE is app.js's mtime, which changes whenever a bundle is
+      rebuilt, so every report carries the build it came from. That is the
+      release tagging the review asked for, without a build-time step.
+
+      static/js/errors.js explains why this is a beacon to our own endpoint
+      rather than the Sentry browser SDK — the server logs it at ERROR and
+      Sentry's LoggingIntegration turns it into an event from there.  #}
+  <script>window.BN_RELEASE = "{{ asset_version('js/app.js') }}";</script>
+  <script src="{{ url_for('static', filename='js/errors.js') }}?v={{ asset_version('js/errors.js') }}"></script>
+
   {#  Declared so the browser stops requesting /favicon.ico, which this app has
       never had — that request was a 404 on every single page load.  #}
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}?v={{ asset_version('favicon.svg') }}" type="image/svg+xml">
