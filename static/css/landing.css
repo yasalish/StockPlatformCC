@@ -177,11 +177,10 @@ body.home-page .container{ padding-top:var(--sp-6) }
    being measured against is that they show the product and this one describes
    it. This is the slot for that.
 
-   It currently holds a token-drawn ILLUSTRATION, not a screenshot: nothing in
-   it is real market data, and it must never be dressed up as such. Replace the
-   whole `.l-shot-body` with `<img src="…dashboard.webp" alt="…">` as soon as a
-   real capture exists — the frame, chrome and shadow are already correct and
-   nothing else has to change.
+   It holds five real screenshots of the real pages, produced by
+   `python landing_shots.py`. What was here before was a token-drawn
+   illustration — grey skeleton bars in a browser frame — and it read as a page
+   that had failed to load, which is worse than no image at all.
    --------------------------------------------------------------------------- */
 .l-shot{
   max-width:min(980px, 100%); margin:var(--sp-10) auto 0;
@@ -203,55 +202,60 @@ body.home-page .container{ padding-top:var(--sp-6) }
   background:var(--surface-1); border:1px solid var(--line);
   color:var(--ink-3); font-size:.6875rem; direction:ltr;
 }
-.l-shot-body{ padding:var(--sp-5); background:var(--surface-1) }
-.l-shot-body img{ display:block; width:100%; height:auto }
+.l-shot-body{ position:relative; background:var(--surface-0) }
 
-/* the illustration itself */
-.l-mock{ display:grid; gap:var(--sp-4) }
-.l-mock-top{ display:grid; grid-template-columns:repeat(4,1fr); gap:var(--sp-3) }
-.l-mock-stat{
-  padding:var(--sp-3); border:1px solid var(--line);
-  border-radius:var(--radius-sm); background:var(--surface-0); text-align:start;
+/* 1600x900 captures, so the box reserves exactly 16/9 before a single byte of
+   image has arrived. Without this the hero grows by ~500px when the first
+   screenshot decodes, which moves the headline someone is already reading. */
+.l-slides{ position:relative; aspect-ratio:16/9; overflow:hidden }
+/* Only OPACITY is transitioned. Putting `visibility` in the same transition —
+   the obvious way to keep the hidden slides out of the way — wedges the fade:
+   visibility is a discrete property, so the browser holds it at `hidden` for
+   the whole duration, and the opacity interpolation never lands. The slide then
+   sits at opacity 0 permanently no matter which class it carries, which is
+   exactly the bug this replaced.
+
+   Hiding is therefore split by concern: `pointer-events` keeps the stack from
+   swallowing clicks, and landing.js toggles `aria-hidden` so a screen reader is
+   offered one screenshot rather than five. */
+.l-slide{
+  position:absolute; inset:0; margin:0;
+  opacity:0; pointer-events:none;
+  transition:opacity 520ms var(--ease);
 }
-.l-mock-stat span{
-  display:block; height:7px; border-radius:99px;
-  background:var(--line-strong); opacity:.7;
+.l-slide.is-on{ opacity:1; pointer-events:auto }
+/* The files are already 16/9, so `cover` crops nothing — it is here to keep a
+   regenerated capture at a different aspect ratio from letterboxing. */
+.l-slide img{
+  display:block; width:100%; height:100%;
+  object-fit:cover; object-position:top center;
 }
-.l-mock-stat span:first-child{ width:52%; margin-bottom:9px; opacity:.45 }
-.l-mock-stat span:last-child{ width:74%; height:11px }
-.l-mock-stat.up span:last-child{ background:var(--up) }
-.l-mock-stat.down span:last-child{ background:var(--down) }
-.l-mock-chart{
-  border:1px solid var(--line); border-radius:var(--radius-sm);
-  background:var(--surface-0); padding:var(--sp-3);
+
+/* Labelled pills rather than anonymous dots. The request these answer was
+   "show the demo of all pages", and a row of identical circles does not say
+   which pages exist — the names do, and they double as the caption. */
+.l-dots{
+  display:flex; flex-wrap:wrap; gap:6px; justify-content:center;
+  padding:var(--sp-3) var(--sp-4);
+  background:var(--surface-2); border-top:1px solid var(--line);
 }
-.l-mock-chart svg{ display:block; width:100%; height:130px }
-/* The sparkline reads the accent through the cascade rather than naming a
-   colour, so it re-tints with the theme like everything else. `vector-effect`
-   keeps the 2px stroke at 2px despite the non-uniform viewBox scaling that
-   `preserveAspectRatio:none` introduces. */
-.l-spark-line{
-  stroke:var(--accent); stroke-width:2;
-  stroke-linejoin:round; stroke-linecap:round;
-  vector-effect:non-scaling-stroke;
+/* Hidden until landing.js arms them: without the script they are controls that
+   do nothing, and one static screenshot with no dots is a cleaner failure than
+   five buttons that ignore the click. */
+.l-shot:not(.is-ready) .l-dots{ display:none }
+.l-dot{
+  padding:6px 13px; border:1px solid transparent; border-radius:99px;
+  background:transparent; color:var(--ink-2);
+  font-family:inherit; font-size:.8125rem; font-weight:600;
+  cursor:pointer; white-space:nowrap;
+  transition:background var(--dur-1) var(--ease), color var(--dur-1) var(--ease),
+             border-color var(--dur-1) var(--ease);
 }
-.l-spark-fill{
-  fill:color-mix(in srgb,var(--accent) 14%, transparent); stroke:none;
+.l-dot:hover{ background:var(--surface-1); color:var(--ink) }
+.l-dot.is-on{
+  background:var(--surface-1); border-color:var(--accent); color:var(--accent);
 }
-.l-mock-rows{ display:grid; gap:7px }
-.l-mock-row{
-  display:grid; grid-template-columns:1.6fr 1fr 1fr .8fr;
-  gap:var(--sp-3); align-items:center;
-  padding:9px var(--sp-3); border-radius:var(--radius-sm);
-  background:var(--surface-0);
-}
-.l-mock-row i{
-  display:block; height:8px; border-radius:99px;
-  background:var(--line-strong); opacity:.65;
-}
-.l-mock-row i:first-child{ opacity:.85 }
-.l-mock-row .pos{ background:var(--up); opacity:.9 }
-.l-mock-row .neg{ background:var(--down); opacity:.9 }
+.l-dot:focus-visible{ outline:2px solid var(--accent); outline-offset:2px }
 
 /* ---------------------------------------------------------------------------
    3. Sections on the light ground
@@ -375,10 +379,33 @@ body.home-page .container{ padding-top:var(--sp-6) }
    --------------------------------------------------------------------------- */
 @media (max-width:720px){
   .l-hero{ padding-inline:var(--sp-4) }
-  .l-shot-body{ padding:var(--sp-3) }
-  .l-mock-top{ grid-template-columns:repeat(2,1fr) }
-  .l-mock-row{ grid-template-columns:1.6fr 1fr .8fr }
-  .l-mock-row i:nth-child(3){ display:none }
+  /* Five labelled pills do not fit one phone-width row, and wrapping them onto
+     three lines makes the frame's caption taller than the screenshot's own
+     chrome. At this width they collapse to dots; the browser bar above still
+     names the page on show, so nothing is lost but the redundancy. */
+  .l-dots{ padding:var(--sp-2) }
+  /* The dot people SEE is 9px; the button they TAP is 34px. Shrinking the
+     button itself to 9px — the obvious way to draw a dot — leaves a target a
+     third the size a thumb can reliably hit, so the mark is a pseudo-element
+     centred in a full-size, transparent button instead. */
+  .l-dot{
+    position:relative; width:34px; height:34px; padding:0;
+    border-radius:50%; background:transparent; border-color:transparent;
+  }
+  .l-dot::after{
+    content:""; position:absolute; inset:50% auto auto 50%;
+    translate:-50% -50%; width:9px; height:9px; border-radius:50%;
+    background:var(--line-strong);
+    transition:background var(--dur-1) var(--ease);
+  }
+  .l-dot:hover{ background:transparent }
+  .l-dot:hover::after{ background:var(--ink-3) }
+  .l-dot.is-on{ background:transparent; border-color:transparent }
+  .l-dot.is-on::after{ background:var(--accent) }
+  .l-dot-label{
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip-path:inset(50%); white-space:nowrap;
+  }
   .home-page .l-cta .btn{ width:100% }
   .l-steps{ padding:var(--sp-6) var(--sp-5) }
 }
