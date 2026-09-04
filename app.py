@@ -2422,6 +2422,67 @@ if __name__ == "__main__":
     # instance already holds 5002.
     port = int(os.environ.get("DEV_PORT") or os.environ.get("PORT") or "5002")
 
+    # PORT ALREADY IN USE — refuse to start, loudly.
+    #
+    # Werkzeug's dev server sets SO_REUSEADDR, and on Windows that does not mean
+    # "reuse a port stuck in TIME_WAIT" the way it does on Linux. It means a
+    # second process may bind a port another process is ALREADY LISTENING on,
+    # and both stay bound. New connections then land on one of them with no rule
+    # you can rely on.
+    #
+    # That would merely be untidy if the processes were interchangeable, but
+    # they are not: each one holds its OWN Jinja template cache. So an edit to a
+    # template shows up on some requests and not others, while CSS and JS edits
+    # appear every time — asset_version() re-reads those from disk per request
+    # in any process. "My change did nothing, sometimes" is the least debuggable
+    # symptom this app can produce, and it cost a full round to find three
+    # copies of it listening on 5002, started at 15:32, 17:25 and 23:02.
+    #
+    # BN_ALLOW_PORT_REUSE=1 if a second instance there is genuinely what you
+    # want. WERKZEUG_RUN_MAIN is set in the reloader's child, which binds the
+    # socket itself — checking there would find the parent and refuse to start.
+    if not os.environ.get("WERKZEUG_RUN_MAIN"):
+        _probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+        _busy = dev_boot.port_already_serving(_probe_host, port)
+        _allow = os.environ.get("BN_ALLOW_PORT_REUSE", "").strip().lower()
+        if _busy and _allow not in ("1", "true", "yes"):
+            # A Windows console is cp1252 by default and raises on both the ✗
+            # and the Persian line — which turned this whole message into a
+            # charmap traceback the first time it fired. Widen the stream, then
+            # degrade per line if even that is not enough: the instructions are
+            # the point, and they are all ASCII.
+            import sys as _sys
+
+            try:
+                _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+            for _line in (
+                "",
+                f"  ✗ پورت {port} هم‌اکنون در اختیار نسخهٔ دیگری از برنامه است.",
+                "",
+                f"  Something is already listening on {_probe_host}:{port}.",
+                "  Starting a second instance would leave BOTH of them bound, and",
+                "  each one caches its own copy of the templates — so you would see",
+                "  your edits on some requests and not on others.",
+                "",
+                "  Find it and stop it first:",
+                "",
+                f"      Windows:      netstat -ano | findstr :{port}",
+                "                    taskkill /PID <pid> /F",
+                f"      macOS/Linux:  lsof -ti tcp:{port} | xargs kill",
+                "",
+                "  Or put this copy on another port:  DEV_PORT=5003 python app.py",
+                "  Or, if you really do want two:     BN_ALLOW_PORT_REUSE=1",
+                "",
+            ):
+                try:
+                    print(_line, flush=True)
+                except UnicodeEncodeError:
+                    print(_line.encode("ascii", "replace").decode("ascii"),
+                          flush=True)
+            raise SystemExit(1)
+
     # Werkzeug prints " * Running on http://… " (and "Press CTRL+C to quit")
     # through the `werkzeug` logger at INFO, but observability.setup_logging()
     # pins that logger to WARNING because its per-request lines duplicate our

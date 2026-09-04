@@ -422,6 +422,39 @@ def ensure_workers():
 # ---------------------------------------------------------------------------
 # Browser
 # ---------------------------------------------------------------------------
+def port_already_serving(host, port, timeout=0.4):
+    """True when something is ALREADY listening on this host and port.
+
+    `python app.py` calls this before binding, and refuses to start if it is
+    true. On Linux a second bind would simply fail with EADDRINUSE — but
+    Werkzeug's dev server sets SO_REUSEADDR, and on Windows that flag means
+    something different: it lets a second process bind a port another process
+    is already listening on. Both stay bound, and connections are handed to one
+    of them with no rule you can rely on.
+
+    That matters here because each process caches its own Jinja templates. Two
+    instances of different vintages on one port means template edits appear on
+    some requests and not others, while CSS and JS edits appear every time —
+    asset_version() re-reads those from disk per request in any process. It is
+    the least debuggable symptom this app can produce; three copies of it were
+    once found listening on 5002, started hours apart.
+
+    A plain TCP connect is the right test, unlike the Redis liveness check in
+    redis_boot which has to speak the protocol: here anything that accepts on
+    the port will take the browser's request, whatever it is.
+    """
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.settimeout(timeout)
+    try:
+        return probe.connect_ex((host, port)) == 0
+    except OSError:
+        # An unresolvable host cannot be occupied by anything we could collide
+        # with — let the real bind produce the real error.
+        return False
+    finally:
+        probe.close()
+
+
 def open_browser_when_ready(host, port, timeout=20.0):
     """Open the app in a browser once the port actually accepts connections.
 
