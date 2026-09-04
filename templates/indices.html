@@ -145,6 +145,16 @@
     <h2>دلار آزاد</h2>
     <span class="muted small">آخرین داده: {{ fy(usd.j_date) }}</span>
   </div>
+  {#  The dollar's own chart, always on screen rather than hidden behind the
+      picker at the top of the page. On this page the dollar is the yardstick
+      the indices get measured against — that is what the «بازده واقعی» note
+      below the table is about — and a yardstick you have to go and select is
+      one nobody uses.
+
+      Drawn in تومان to match the column beside it: usd_rial stores ریال, and
+      the ÷۱۰ happens in the script at the foot of the page so the axis and the
+      table can never disagree.  #}
+  <div id="usd-chart" class="chart-box">در حال بارگذاری نمودار…</div>
   <div class="table-scroll">
     <table class="grid" id="idx-usd">
       <thead>
@@ -241,11 +251,20 @@
       payload for the forty-nine nobody looks at.  */
   let labels = {{ series | map(attribute=0) | list | tojson }};
   let values = {{ series | map(attribute=1) | list | tojson }};
+  let focusKey = {{ focus | tojson }};
+
+  /*  The dollar is stored in ریال and quoted in تومان everywhere else on this
+      page — the headline card and the table's first numeric column both divide
+      by ten. The chart has to agree with them, or the same rate appears twice
+      on one screen in two units. The API keeps returning raw ریال; the
+      conversion belongs here, at the one place that displays it.  */
+  const inToman = (key, vs) => key === "usd" ? vs.map(v => v / 10) : vs;
 
   function draw() {
     if (!values.length) { chartBox.textContent = "برای این شاخص داده‌ای ذخیره نشده است."; return; }
-    BN.priceChart("idx-chart", labels, values);
-    note.textContent = `${labels.length.toLocaleString("fa-IR")} روز معاملاتی`;
+    BN.priceChart("idx-chart", labels, inToman(focusKey, values));
+    note.textContent = `${labels.length.toLocaleString("fa-IR")} روز معاملاتی`
+                     + (focusKey === "usd" ? " · به تومان" : "");
   }
   draw();
   window.addEventListener("resize", () => { clearTimeout(window.__idxRz);
@@ -258,6 +277,7 @@
       const j = await res.json();
       labels = j.points.map(p => p.d);
       values = j.points.map(p => p.v);
+      focusKey = key;
       title.textContent = j.label || label || "";
       draw();
       /*  Keep the URL in step so the chart someone is looking at survives a
@@ -302,6 +322,27 @@
   ["idx-market", "idx-sector"].forEach(id => {
     if (document.getElementById(id)) BN.initTable(id, null);
   });
+})();
+
+/*  ── the dollar's own chart ──────────────────────────────────────────────
+    Its own block, not the picker chart above: this one never changes series,
+    so it stays put and can be read against whichever index is showing at the
+    top. Same renderer, same hover readout, same keyboard stepping.  */
+(function () {
+  const box = document.getElementById("usd-chart");
+  if (!box) return;
+  const labels = {{ usd_series | map(attribute=0) | list | tojson }};
+  //  ریال → تومان, matching the «تومان» column in the table below it.
+  const values = ({{ usd_series | map(attribute=1) | list | tojson }}).map(v => v / 10);
+  function draw() {
+    if (!values.length) { box.textContent = "دادهٔ دلار ذخیره نشده است."; return; }
+    BN.priceChart("usd-chart", labels, values);
+  }
+  draw();
+  //  Redrawn on resize like the chart above — the renderer measures the
+  //  container once and would otherwise keep the width it first saw.
+  window.addEventListener("resize", () => { clearTimeout(window.__usdRz);
+    window.__usdRz = setTimeout(draw, 150); });
 })();
 </script>
 {% endblock %}

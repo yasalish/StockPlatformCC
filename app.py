@@ -425,26 +425,24 @@ def spark(values, w=120, h=34, pad=2, labels=None):
     span = (hi - lo) or 1.0
     inner = h - 2 * pad
     n = len(pts)
-    # RIGHT-TO-LEFT TIME AXIS. `pts` arrives oldest-first, and index 0 is placed
-    # at the RIGHT edge so time runs leftwards — the direction a Persian reader
-    # scans, and the direction /indices already used (see the x() in
-    # BN.priceChart). The dashboard was the only chart in the app running the
-    # other way, which put the newest session at the far edge from the headline
-    # number sitting above it.
+    # LEFT-TO-RIGHT TIME AXIS: `pts` arrives oldest-first and index 0 goes at
+    # x=0, so the newest session is at the right edge. Same direction as the
+    # /indices chart (the x() in BN.priceChart) — the app draws time one way
+    # only, and an RTL page does not imply an RTL axis.
     #
     # Everything downstream follows from the coordinates rather than assuming a
     # direction: the area below closes on the actual first and last x, and
     # spark-hover.js finds the nearest sample by x distance.
-    coords = [(w - (w * i) / (n - 1), pad + inner - ((v - lo) / span) * inner)
+    coords = [((w * i) / (n - 1), pad + inner - ((v - lo) / span) * inner)
               for i, v in enumerate(pts)]
     line = "M" + " L".join(f"{x:.1f} {y:.1f}" for x, y in coords)
     return {
         "line": line,
         # Closed back along the baseline for the gradient fill. Built from the
-        # ACTUAL first and last x rather than from 0 and w, so the fill still
-        # closes correctly now that the series runs right-to-left — hard-coding
-        # the corners is what would break silently if the direction changed
-        # again.
+        # ACTUAL first and last x rather than from the literal corners 0 and w,
+        # so the fill stays correct whichever way the axis runs — hard-coding
+        # the corners is what breaks silently when the direction changes, and
+        # the direction has now changed twice.
         "area": (f"{line} L{coords[-1][0]:.1f} {h:.1f} "
                  f"L{coords[0][0]:.1f} {h:.1f} Z"),
         "w": w, "h": h,
@@ -1736,18 +1734,28 @@ def indices_page():
     focus = (request.args.get("focus") or "cwi").strip()
     market_rows = md.index_rows()
     sector_rows = md.index_rows(sectors=True)
+    usd = md.usd_summary()
     known = {r["key"] for r in market_rows} | {r["key"] for r in sector_rows}
+    # «دلار آزاد» is one of the pickable series in the chart at the top, so it
+    # has to survive a reload: choosing it writes ?focus=usd into the URL, and
+    # without this line that URL silently fell back to شاخص کل — the chart you
+    # sent someone was not the chart they opened.
+    if usd:
+        known.add("usd")
     if focus not in known:
         focus = market_rows[0]["key"] if market_rows else "cwi"
     headline = [r for r in market_rows if r["key"] in md.HEADLINE_INDICES]
     headline.sort(key=lambda r: md.HEADLINE_INDICES.index(r["key"]))
+    # One query, two uses: the focused chart when the dollar is focused, and
+    # always the dollar's own panel further down the page.
+    usd_series = md.usd_rows(bars=240)
     return render_template(
         "indices.html",
         market_rows=market_rows, sector_rows=sector_rows, headline=headline,
         periods=md.INDEX_PERIODS, focus=focus,
-        focus_label=md.index_label(focus),
-        series=md.index_series(focus, bars=240),
-        usd=md.usd_summary(), usd_series=md.usd_rows(bars=240),
+        focus_label="دلار آزاد" if focus == "usd" else md.index_label(focus),
+        series=usd_series if focus == "usd" else md.index_series(focus, bars=240),
+        usd=usd, usd_series=usd_series,
         sector_of_group=md.SECTOR_OF_GROUP,
         fresh=md.freshness_cached())
 

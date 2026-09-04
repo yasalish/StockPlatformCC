@@ -233,11 +233,19 @@ const BN = (function () {
     let max = Math.max(...values), min = Math.min(...values);
     if (max === min) { max += 1; min -= 1; }
 
-    /*  RTL: index 0 sits at the RIGHT edge and i grows leftwards, which is how
-        a Persian reader scans a time axis. Everything below — including the
-        pointer-to-index maths — respects that, and getting the direction
-        backwards is the classic bug here. */
-    const x = (i) => padL + plotW - (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+    /*  TIME RUNS LEFT TO RIGHT. Index 0 — the oldest session — sits at the LEFT
+        edge and the newest is on the RIGHT.
+
+        This chart used to run the other way, on the reasoning that an RTL page
+        should have an RTL time axis. That reasoning is wrong: the page's TEXT
+        direction and a quantitative axis are different things, and a price
+        chart that runs backwards from every other price chart a trader has
+        seen costs a moment of re-orientation on every glance.
+
+        Everything below DERIVES from x() — the area polygon, the inverse in
+        indexFromClientX, the arrow keys — so this one line sets the direction
+        for the whole chart. */
+    const x = (i) => padL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
     const yy = (v) => padT + plotH - ((v - min) / (max - min)) * plotH;
 
     //  Direction over the WHOLE window colours the series, matching the
@@ -329,8 +337,8 @@ const BN = (function () {
       const r = svg.getBoundingClientRect();
       if (!r.width || n <= 1) return 0;
       const vx = ((clientX - r.left) / r.width) * w;          // to viewBox units
-      //  Inverse of x(): i grows as vx DECREASES, because of RTL.
-      const t = (padL + plotW - vx) / plotW;
+      //  Inverse of x(): i grows WITH vx, since time runs left to right.
+      const t = (vx - padL) / plotW;
       return Math.max(0, Math.min(n - 1, Math.round(t * (n - 1))));
     }
 
@@ -341,14 +349,16 @@ const BN = (function () {
       if (ev.pointerType === "touch") showAt(indexFromClientX(ev.clientX));
     });
 
-    //  Keyboard: the same readout without a pointer. In RTL the visually-next
-    //  point is to the LEFT, so ArrowLeft steps forward in time.
+    //  Keyboard: the same readout without a pointer. Time runs left to right,
+    //  so ArrowRight is forward in time, Home is the oldest session and End the
+    //  newest — which is also what a screen-reader user expects from an axis
+    //  that reads like a number line.
     container.tabIndex = 0;
     container.addEventListener("keydown", function (ev) {
-      if (ev.key === "ArrowLeft") { ev.preventDefault(); showAt((active < 0 ? -1 : active) + 1); }
-      else if (ev.key === "ArrowRight") { ev.preventDefault(); showAt((active < 0 ? 1 : active) - 1); }
-      else if (ev.key === "Home") { ev.preventDefault(); showAt(n - 1); }
-      else if (ev.key === "End") { ev.preventDefault(); showAt(0); }
+      if (ev.key === "ArrowRight") { ev.preventDefault(); showAt((active < 0 ? -1 : active) + 1); }
+      else if (ev.key === "ArrowLeft") { ev.preventDefault(); showAt((active < 0 ? n : active) - 1); }
+      else if (ev.key === "Home") { ev.preventDefault(); showAt(0); }
+      else if (ev.key === "End") { ev.preventDefault(); showAt(n - 1); }
       else if (ev.key === "Escape") { hide(); }
     });
     container.addEventListener("blur", hide);

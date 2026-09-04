@@ -152,20 +152,18 @@
 
     // The same values without a pointer.
     //
-    // spark() now draws RIGHT-TO-LEFT: index 0 (oldest) sits at the right edge
-    // and time runs leftwards. So the arrow that moves forward in time is
-    // ArrowLeft, and the mapping below is the mirror of what it was before the
-    // axis flipped. Getting this backwards is invisible in review and obvious
-    // the moment anyone uses it.
+    // spark() draws LEFT-TO-RIGHT: index 0 (oldest) sits at x=0 and the newest
+    // sample is at the right edge. So ArrowRight moves forward in time, Home is
+    // the oldest session and End the newest — the same mapping as the /indices
+    // chart, which is the point.
     host.tabIndex = 0;
     host.setAttribute("role", "application");
     host.addEventListener("keydown", function (ev) {
-      // ArrowLeft = later in time = a higher index.
-      if (ev.key === "ArrowLeft") { ev.preventDefault(); show((active < 0 ? -1 : active) + 1); }
-      else if (ev.key === "ArrowRight") { ev.preventDefault(); show((active < 0 ? pts.length : active) - 1); }
-      // Home is the newest session, which is now the LEFT edge.
-      else if (ev.key === "Home") { ev.preventDefault(); show(pts.length - 1); }
-      else if (ev.key === "End") { ev.preventDefault(); show(0); }
+      // ArrowRight = later in time = a higher index.
+      if (ev.key === "ArrowRight") { ev.preventDefault(); show((active < 0 ? -1 : active) + 1); }
+      else if (ev.key === "ArrowLeft") { ev.preventDefault(); show((active < 0 ? pts.length : active) - 1); }
+      else if (ev.key === "Home") { ev.preventDefault(); show(0); }
+      else if (ev.key === "End") { ev.preventDefault(); show(pts.length - 1); }
       else if (ev.key === "Escape") { hide(); }
     });
     host.addEventListener("blur", hide);
