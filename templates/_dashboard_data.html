@@ -105,11 +105,53 @@
     </svg>
   </div>
   {% endif %}
-  <p class="muted small" style="margin:6px 0 0">
+  <p class="muted small dfocus-foot">
     ۲۵۰ روز معاملاتی · تا {{ fy(f.j_date) }} ·
     <a href="{{ url_for('indices_page', focus=f.key) }}">همهٔ شاخص‌ها ›</a>
   </p>
 </section>
+
+{# ── نمودار دلار آزاد ─────────────────────────────────────────────────────
+   The same card as the index above, on the same 250-session window, so the two
+   can be read against each other — which is the comparison this market makes
+   constantly. Its own card rather than a second line on the index chart: they
+   are different units (ریال against an index level) and sharing an axis would
+   make one of them a flat line.
+
+   `value / 10` because usd_rial stores rials and the page quotes tomans, the
+   same conversion the ticker strip above uses. #}
+{% if g.usd and g.usd_chart %}
+{% set uc = g.usd_chart %}
+<section class="dash-focus">
+  <div class="dfocus-head">
+    <div>
+      <h2 class="dfocus-name">دلار آزاد</h2>
+      <div class="dfocus-val">{{ fa((g.usd.value / 10) | round(0)) }}
+        <span class="dfocus-unit">تومان</span></div>
+    </div>
+    <div class="dfocus-periods">
+      {% for key, label in [('d1','۱ روز'), ('d5','۱ هفته'), ('d20','۱ ماه'),
+                            ('d60','۳ ماه'), ('d240','۱ سال')] %}
+      <span class="dperiod"><b>{{ label }}</b>{{ pill(g.usd[key]) }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="dfocus-host spark-host" data-spark-points="{{ uc.points }}"
+       data-spark-w="{{ uc.w }}"
+       aria-label="نمودار دلار آزاد در ۲۵۰ روز گذشته — با کلیدهای جهت‌دار مقدار هر روز را بخوانید">
+    <svg class="dfocus-chart spark {{ 'up' if uc.up else 'down' }}"
+         viewBox="0 0 {{ uc.w }} {{ uc.h }}" preserveAspectRatio="none"
+         role="img" aria-label="نمودار دلار آزاد در ۲۵۰ روز گذشته">
+      <path class="spark-area" d="{{ uc.area }}"/>
+      <path class="spark-line" d="{{ uc.line }}"/>
+    </svg>
+  </div>
+  <p class="muted small dfocus-foot">
+    ۲۵۰ روز · تا {{ fy(g.usd.j_date) }} · بالاترین {{ fa((g.usd.high / 10) | round(0)) }}
+    · پایین‌ترین {{ fa((g.usd.low / 10) | round(0)) }} تومان
+  </p>
+</section>
+{% endif %}
 
 {# ── شبکهٔ کارت‌ها ────────────────────────────────────────────────────────
    Each card shows one shape the tables below cannot: how wide the move was,

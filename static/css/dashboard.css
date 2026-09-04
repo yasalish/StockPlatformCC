@@ -304,3 +304,15 @@ body.dash-page{
 }
 .sh-tip b{ font-weight:700; font-variant-numeric:tabular-nums; color:var(--ink) }
 .sh-tip span{ color:var(--ink-3); font-size:var(--fs-11) }
+
+/* The unit beside a headline figure — «۲۰۹,۳۰۰ تومان». Smaller and quieter
+   than the number so the figure still reads as one thing, and baseline-aligned
+   rather than superscripted. */
+.dfocus-unit{
+  font-size:var(--fs-13); font-weight:600; color:var(--ink-3);
+  letter-spacing:0; margin-inline-start:4px;
+}
+/* Was an inline style="margin:6px 0 0" on the index chart's footnote; now a
+   class, so the two focus cards share it and the CSP has one less inline
+   style to allow. */
+.dfocus-foot{ margin:var(--sp-2) 0 0 }

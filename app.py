@@ -425,13 +425,28 @@ def spark(values, w=120, h=34, pad=2, labels=None):
     span = (hi - lo) or 1.0
     inner = h - 2 * pad
     n = len(pts)
-    coords = [((w * i) / (n - 1), pad + inner - ((v - lo) / span) * inner)
+    # RIGHT-TO-LEFT TIME AXIS. `pts` arrives oldest-first, and index 0 is placed
+    # at the RIGHT edge so time runs leftwards — the direction a Persian reader
+    # scans, and the direction /indices already used (see the x() in
+    # BN.priceChart). The dashboard was the only chart in the app running the
+    # other way, which put the newest session at the far edge from the headline
+    # number sitting above it.
+    #
+    # Everything downstream follows from the coordinates rather than assuming a
+    # direction: the area below closes on the actual first and last x, and
+    # spark-hover.js finds the nearest sample by x distance.
+    coords = [(w - (w * i) / (n - 1), pad + inner - ((v - lo) / span) * inner)
               for i, v in enumerate(pts)]
     line = "M" + " L".join(f"{x:.1f} {y:.1f}" for x, y in coords)
     return {
         "line": line,
-        # Closed back along the baseline for the gradient fill.
-        "area": f"{line} L{w:.1f} {h:.1f} L0 {h:.1f} Z",
+        # Closed back along the baseline for the gradient fill. Built from the
+        # ACTUAL first and last x rather than from 0 and w, so the fill still
+        # closes correctly now that the series runs right-to-left — hard-coding
+        # the corners is what would break silently if the direction changed
+        # again.
+        "area": (f"{line} L{coords[-1][0]:.1f} {h:.1f} "
+                 f"L{coords[0][0]:.1f} {h:.1f} Z"),
         "w": w, "h": h,
         "dot_x": round(coords[-1][0], 1), "dot_y": round(coords[-1][1], 1),
         # Direction over the WHOLE window, which is what colours the line. Not
@@ -873,7 +888,22 @@ def dashboard_data():
             "strips": {r["key"]: spark([v for _, v in md.index_series(r["key"], bars=60)],
                                        w=110, h=30) for r in heads},
             "usd": md.usd_summary(),
-            "usd_strip": spark([v for _, v in md.usd_rows(bars=60)], w=110, h=30),
+            # DIVIDED BY 10 — usd_rial stores rials, and every dollar figure on
+            # this page is quoted in tomans. Without it the hover readout said
+            # ۲,۰۲۱,۹۵۰ while the headline directly above it said ۲۰۹,۳۰۰: the
+            # same number in two units, which reads as a bug. The strip is
+            # converted too, so nothing about the dollar is in rials anywhere on
+            # this page. (Scaling every point by a constant does not change the
+            # shape of the line — only what the readout says.)
+            "usd_strip": spark([v / 10 for _, v in md.usd_rows(bars=60)], w=110, h=30),
+            # The dollar gets a full chart of its own, on the same 250-session
+            # window as the index. It is the second number every trader on this
+            # market checks, and a 110px strip in the ticker row could show its
+            # shape but never a value — labels are asked for here so the same
+            # hover readout works on it.
+            "usd_chart": (lambda ser: spark([v / 10 for _, v in ser], w=1000, h=190,
+                                            pad=6, labels=[d for d, _ in ser])
+                          )(md.usd_rows(bars=250)),
             "board": md.board_totals(),
             "flow": md.flow_totals(kind="stock", days=5),
             "sectors": md.flow_by_sector(kind="stock", days=5, limit=9),
