@@ -68,6 +68,28 @@ IS_PRODUCTION = APP_ENV == "production"
 
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
+
+# ---------------------------------------------------------------------------
+# Template reloading in development
+# ---------------------------------------------------------------------------
+# Jinja compiles each template ONCE per process and caches the result. In
+# production that is exactly right — the files cannot change under a running
+# container, and re-stat'ing 31 templates on every render is pure waste at
+# 1,200 requests/second.
+#
+# In development it is a trap, and an expensive one. Editing a template has no
+# effect until the process is restarted, and nothing says so: the page renders
+# perfectly, from the version compiled at boot. The failure looks exactly like
+# "my change did nothing" — you re-read the diff, re-check the branch, and the
+# file on disk is correct the whole time. CSS and JavaScript hide the problem
+# further by working fine, because asset_version() re-reads the file's mtime on
+# every request, so only TEMPLATE edits vanish.
+#
+# So: on in development, off in production. `explain_template_loading` stays
+# off — it is very loud — but is worth knowing about when a template resolves
+# to the wrong file.
+app.config["TEMPLATES_AUTO_RELOAD"] = not IS_PRODUCTION
+app.jinja_env.auto_reload = not IS_PRODUCTION
 # Static assets are cache-busted by asset_version() (?v=<mtime>) in the
 # templates, so they can be cached hard. _cache_policy() below is what actually
 # stamps the header; this keeps Flask's own send_file default consistent with it
