@@ -1287,3 +1287,71 @@ table.grid tr.alert-off .sym{ color:var(--ink-2) }
   .flow-bar-row{ grid-template-columns:minmax(90px,1fr) 2fr minmax(80px,auto) }
   .nav-pop{ min-width:210px }
 }
+
+/* ---------------------------------------------------------------------------
+   نمودار خطی — BN.priceChart (static/js/app.js)
+   ---------------------------------------------------------------------------
+   The /indices line chart. Every colour lives here rather than in the
+   JavaScript, which is the whole point of the rewrite: the previous version
+   hard-coded #2f6db3 and a pale blue fill, so on the seven dark themes it drew
+   a daylight chart on a near-black panel and the «رنگ صعود و نزول» setting
+   never reached it. Reading --up / --down / --line-soft means the chart now
+   follows all fourteen themes and the colour-blind and فیروزه‌ای schemes for
+   free.
+
+   `.pc` carries `up` or `down` for the direction of the whole window, so the
+   series and its fill agree with the pill beside it.
+   --------------------------------------------------------------------------- */
+.pc{ display:block; width:100%; overflow:visible; touch-action:pan-y }
+.pc:focus-visible,
+.chart-box:focus-visible{ outline:2px solid var(--focus); outline-offset:2px }
+
+.pc-grid{ stroke:var(--line-soft); stroke-width:.5 }
+.pc-tick{ fill:var(--ink-3); font-size:10px; font-family:inherit }
+
+.pc-line{
+  fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round;
+  vector-effect:non-scaling-stroke;
+}
+.pc-area{ stroke:none }
+/* The gradient fades to nothing at the baseline so the fill reads as depth
+   rather than as a solid block — a flat 10% wash is what made the old chart
+   look like a screenshot of a chart. */
+.pc.up   .pc-line{ stroke:var(--up) }
+.pc.down .pc-line{ stroke:var(--down) }
+.pc.up   .pc-stop-a{ stop-color:var(--up);   stop-opacity:.26 }
+.pc.down .pc-stop-a{ stop-color:var(--down); stop-opacity:.26 }
+.pc .pc-stop-b{ stop-color:var(--up); stop-opacity:0 }
+.pc.down .pc-stop-b{ stop-color:var(--down); stop-opacity:0 }
+
+/* The crosshair and the dot are the interactive half. No transition on the
+   crosshair: a lagging crosshair feels broken, because the pointer is already
+   somewhere else by the time it arrives. */
+.pc-cross{ stroke:var(--ink-3); stroke-width:1; stroke-dasharray:3 3; pointer-events:none }
+.pc-dot{ stroke:var(--panel); stroke-width:2; pointer-events:none }
+.pc.up   .pc-dot{ fill:var(--up) }
+.pc.down .pc-dot{ fill:var(--down) }
+
+/* The readout. Positioned by the script in CSS pixels over a relatively
+   positioned .chart-box. `pointer-events:none` matters: without it the tip
+   sits under the cursor and steals the pointermove that moves it, so the
+   chart freezes wherever you first hovered. */
+.pc-tip{
+  position:absolute; z-index:2; pointer-events:none;
+  display:flex; flex-direction:column; align-items:flex-end; gap:1px;
+  padding:5px 9px; border-radius:var(--radius-sm);
+  background:var(--surface-1); border:1px solid var(--line-strong);
+  box-shadow:var(--shadow-md);
+  font-size:var(--fs-12); line-height:1.35; white-space:nowrap;
+}
+.pc-tip b{ font-weight:700; font-variant-numeric:tabular-nums; color:var(--ink) }
+.pc-tip span{ color:var(--ink-3); font-size:var(--fs-11) }
+
+/* The container the script positions the tip inside. Height is set by the SVG,
+   so this only needs to establish the positioning context — the script sets
+   `position:relative` too, defensively, for a container this rule misses. */
+.chart-box{ position:relative }
+
+@media (prefers-reduced-motion:reduce){
+  .pc-dot, .pc-cross{ transition:none }
+}

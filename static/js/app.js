@@ -199,39 +199,159 @@ const BN = (function () {
   }
 
   /* ---- self-contained SVG price line chart (RTL: oldest on the right) ---- */
+  /* -------------------------------------------------------------------------
+     priceChart — the index / price line chart, with a hover readout
+     -------------------------------------------------------------------------
+     Used by /indices. Rebuilt for two reasons.
+
+     1. IT IGNORED THE THEME. The line was hard-coded #2f6db3 and the fill
+        rgba(47,109,179,.10), so on the seven dark themes the chart stayed a
+        pale daylight blue on a near-black panel, and the «رنگ صعود و نزول»
+        setting never reached it. Every colour now comes from a CSS class, so
+        the chart follows the palette like the tables do — including the
+        فیروزه‌ای / سرخابی scheme.
+
+     2. IT WAS NOT INTERACTIVE. A finance chart whose values you cannot read is
+        a picture of data. There is now a crosshair, a dot on the series and a
+        floating readout that follows the pointer, plus keyboard stepping so
+        the same information is reachable without a mouse.
+
+     Still no charting library, deliberately: this is ~90 lines against 40-130
+     KB of vendor JavaScript for an audience on slow mobile connections, and
+     the app already ships KLineChart for the one screen that needs candles.
+     ------------------------------------------------------------------------- */
   function priceChart(containerId, labels, values) {
     const container = document.getElementById(containerId);
     if (!container) return;
     container.innerHTML = "";
     const n = values.length;
     if (!n) { container.textContent = "بدون داده"; return; }
+
     const w = container.clientWidth || 820, h = 300;
     const padL = 60, padR = 14, padT = 14, padB = 30;
     const plotW = w - padL - padR, plotH = h - padT - padB;
     let max = Math.max(...values), min = Math.min(...values);
     if (max === min) { max += 1; min -= 1; }
+
+    /*  RTL: index 0 sits at the RIGHT edge and i grows leftwards, which is how
+        a Persian reader scans a time axis. Everything below — including the
+        pointer-to-index maths — respects that, and getting the direction
+        backwards is the classic bug here. */
     const x = (i) => padL + plotW - (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
     const yy = (v) => padT + plotH - ((v - min) / (max - min)) * plotH;
-    const svg = el("svg", { viewBox: `0 0 ${w} ${h}`, width: "100%", height: h });
+
+    //  Direction over the WHOLE window colours the series, matching the
+    //  server-rendered sparklines in app.spark(). Not the last bar: a series
+    //  that rose all year and dipped on the final session is still rising.
+    const rising = values[n - 1] >= values[0];
+    const svg = el("svg", {
+      viewBox: "0 0 " + w + " " + h, width: "100%", height: h,
+      class: "pc " + (rising ? "up" : "down"),
+      role: "img",
+      "aria-label": "نمودار در " + faDigits(String(n)) + " روز معاملاتی"
+    });
+
+    //  A gradient needs a document-unique id, or two charts on one page share
+    //  the first one's stops.
+    const gid = "pcg-" + containerId + "-" + Math.random().toString(36).slice(2, 7);
+    const defs = el("defs", {});
+    const grad = el("linearGradient", { id: gid, x1: "0", y1: "0", x2: "0", y2: "1" });
+    grad.appendChild(el("stop", { offset: "0%", class: "pc-stop-a" }));
+    grad.appendChild(el("stop", { offset: "100%", class: "pc-stop-b" }));
+    defs.appendChild(grad);
+    svg.appendChild(defs);
 
     for (let g = 0; g <= 4; g++) {
       const gy = padT + (g / 4) * plotH;
-      svg.appendChild(el("line", { x1: padL, y1: gy, x2: w - padR, y2: gy, class: "axis", "stroke-width": .5 }));
-      svg.appendChild(el("text", { x: padL - 6, y: gy + 4, "text-anchor": "end" }, fmt(max - (g / 4) * (max - min))));
+      svg.appendChild(el("line", { x1: padL, y1: gy, x2: w - padR, y2: gy, class: "pc-grid" }));
+      svg.appendChild(el("text", { x: padL - 6, y: gy + 4, "text-anchor": "end", class: "pc-tick" },
+                                  fmt(max - (g / 4) * (max - min))));
     }
-    // ~6 date labels
     const step = Math.max(1, Math.ceil(n / 6));
     labels.forEach((lb, i) => {
       if (i % step !== 0 && i !== n - 1) return;
-      svg.appendChild(el("text", { x: x(i), y: h - 10, "text-anchor": "middle" }, faDigits(lb)));
+      svg.appendChild(el("text", { x: x(i), y: h - 10, "text-anchor": "middle", class: "pc-tick" },
+                                  faDigits(lb)));
     });
 
-    // area + line
-    const linePts = values.map((v, i) => `${x(i)},${yy(v)}`).join(" ");
-    const areaPts = `${x(0)},${padT + plotH} ${linePts} ${x(n - 1)},${padT + plotH}`;
-    svg.appendChild(el("polygon", { points: areaPts, fill: "rgba(47,109,179,.10)" }));
-    svg.appendChild(el("polyline", { points: linePts, fill: "none", stroke: "#2f6db3", "stroke-width": 2, "stroke-linejoin": "round" }));
+    const linePts = values.map((v, i) => x(i) + "," + yy(v)).join(" ");
+    svg.appendChild(el("polygon", {
+      points: x(0) + "," + (padT + plotH) + " " + linePts + " " + x(n - 1) + "," + (padT + plotH),
+      fill: "url(#" + gid + ")", class: "pc-area"
+    }));
+    svg.appendChild(el("polyline", { points: linePts, class: "pc-line" }));
+
+    //  ---- the hover readout ------------------------------------------------
+    const cross = el("line", { class: "pc-cross", y1: padT, y2: padT + plotH, x1: 0, x2: 0 });
+    const dot = el("circle", { class: "pc-dot", r: 4, cx: 0, cy: 0 });
+    cross.style.opacity = dot.style.opacity = "0";
+    svg.appendChild(cross);
+    svg.appendChild(dot);
+
+    if (!container.style.position) container.style.position = "relative";
+    const tip = document.createElement("div");
+    tip.className = "pc-tip";
+    tip.hidden = true;
     container.appendChild(svg);
+    container.appendChild(tip);
+
+    let active = -1;
+    function showAt(i) {
+      if (i < 0 || i >= n) return;
+      active = i;
+      const px = x(i), py = yy(values[i]);
+      cross.setAttribute("x1", px); cross.setAttribute("x2", px);
+      dot.setAttribute("cx", px); dot.setAttribute("cy", py);
+      cross.style.opacity = dot.style.opacity = "1";
+      tip.textContent = "";
+      const b = document.createElement("b");
+      b.textContent = fmt(values[i]);
+      const sp = document.createElement("span");
+      sp.textContent = faDigits(labels[i] || "");
+      tip.appendChild(b); tip.appendChild(sp);
+      tip.hidden = false;
+      //  px/py are viewBox units and the tip is positioned in CSS pixels, so
+      //  scale by the rendered width. Clamped to the container so it never
+      //  hangs off the edge on the first or last point.
+      const k = container.clientWidth / w;
+      const tw = tip.offsetWidth || 90;
+      let left = px * k - tw / 2;
+      left = Math.max(2, Math.min(container.clientWidth - tw - 2, left));
+      tip.style.left = left + "px";
+      tip.style.top = Math.max(0, py * k - tip.offsetHeight - 10) + "px";
+    }
+    function hide() {
+      active = -1;
+      cross.style.opacity = dot.style.opacity = "0";
+      tip.hidden = true;
+    }
+    function indexFromClientX(clientX) {
+      const r = svg.getBoundingClientRect();
+      if (!r.width || n <= 1) return 0;
+      const vx = ((clientX - r.left) / r.width) * w;          // to viewBox units
+      //  Inverse of x(): i grows as vx DECREASES, because of RTL.
+      const t = (padL + plotW - vx) / plotW;
+      return Math.max(0, Math.min(n - 1, Math.round(t * (n - 1))));
+    }
+
+    svg.addEventListener("pointermove", function (ev) { showAt(indexFromClientX(ev.clientX)); });
+    svg.addEventListener("pointerleave", hide);
+    //  A tap should read a value rather than do nothing.
+    svg.addEventListener("pointerdown", function (ev) {
+      if (ev.pointerType === "touch") showAt(indexFromClientX(ev.clientX));
+    });
+
+    //  Keyboard: the same readout without a pointer. In RTL the visually-next
+    //  point is to the LEFT, so ArrowLeft steps forward in time.
+    container.tabIndex = 0;
+    container.addEventListener("keydown", function (ev) {
+      if (ev.key === "ArrowLeft") { ev.preventDefault(); showAt((active < 0 ? -1 : active) + 1); }
+      else if (ev.key === "ArrowRight") { ev.preventDefault(); showAt((active < 0 ? 1 : active) - 1); }
+      else if (ev.key === "Home") { ev.preventDefault(); showAt(n - 1); }
+      else if (ev.key === "End") { ev.preventDefault(); showAt(0); }
+      else if (ev.key === "Escape") { hide(); }
+    });
+    container.addEventListener("blur", hide);
   }
 
   /* ---- security-detail tabs (technical / returns / history) ---- */
