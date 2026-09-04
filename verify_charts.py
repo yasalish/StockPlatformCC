@@ -140,6 +140,31 @@ else:
     check(client.get("/indices?focus=nonsense").status_code == 200,
           "an unknown focus key still renders the page")
 
+    # ---- the dashboard, whose charts are server-rendered SVG ---------------
+    #
+    # NOT "/": the dashboard's charts arrive from /dashboard/data as a lazily
+    # loaded fragment, so grepping the shell page finds no <path> at all and
+    # every direction check passes vacuously. That is exactly how a broken
+    # chart would slip through, so the count is asserted before the direction.
+    frag = client.get("/dashboard/data")
+    fh = frag.get_data(as_text=True)
+    check(frag.status_code == 200, "/dashboard/data renders", frag.status_code)
+    check("شاخص کل" in fh and "دلار آزاد" in fh,
+          "…carrying both the index and the dollar card")
+
+    lines = re.findall(r'class="spark-line[^"]*" d="M([\d.]+) ', fh)
+    check(len(lines) >= 5, "…with sparklines actually in the markup", len(lines))
+    check(bool(lines) and all(x == "0.0" for x in lines),
+          "…every one of them starting at x=0, i.e. oldest on the left",
+          sorted(set(lines)))
+
+    for m in re.finditer(r'data-spark-points="([^"]{200,})"', fh):
+        rows_ = [q.split(":") for q in m.group(1).split("|")]
+        xs_ = [float(q[0]) for q in rows_]
+        check(xs_ == sorted(xs_),
+              f"hoverable chart ({len(xs_)} pts) ascends with time",
+              f"{rows_[0][2]} → {rows_[-1][2]}")
+
 print()
 print("=" * 74)
 print(f"  {len(OK)} گذشت · {len(BAD)} ناموفق")
