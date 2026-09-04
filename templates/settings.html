@@ -8,9 +8,20 @@
 {% from "_settings_controls.html" import seg, toggle with context %}
 <div data-no-autorefresh></div>
 
+{#  Standard page opening — see the note in heatmap.html.  #}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">تنظیمات</h1>
+    <p class="page-sub">
+      پوسته، چگالی جدول‌ها، رقم‌ها و رنگ صعود و نزول. هر تغییر بی‌درنگ ذخیره
+      می‌شود و روی همهٔ صفحه‌ها اعمال می‌گردد.
+    </p>
+  </div>
+</div>
+
 <section class="panel">
   <div class="panel-head">
-    <h1>تنظیمات</h1>
+    <h2>پوستهٔ نمایش</h2>
     <span class="set-saved" data-role="saved">ذخیره شد ✓</span>
   </div>
   <p class="set-hint">
@@ -32,13 +43,28 @@
               data-theme-id="{{ t.id }}" aria-pressed="{{ 'true' if t.id == prefs.theme else 'false' }}">
         {#  The swatch paints itself: surface colour as the card, accent as the
             bar and dots. That is why the two hex values live in prefs.THEMES —
-            a picker whose samples are approximations lies about the choice.  #}
-        <span class="sw-canvas" style="background:{{ t.swatch[0] }}">
+            a picker whose samples are approximations lies about the choice.
+            THE PRICE DOTS USED TO LIE BY THAT EXACT STANDARD. They were
+            hard-coded to #14874f / #d92d20 on light families and #3fb950 /
+            #f85149 on dark ones — the CLASSIC green and red. A user who had
+            switched «رنگ صعود و نزول» to آبی / نارنجی or to فیروزه‌ای /
+            سرخابی still saw green and red on all fourteen swatches,
+            advertising colours the app would never show them.
+
+            Fixed with the token system rather than more hex: data-theme AND
+            data-updown are set on the canvas below, so var(--up) inside it
+            resolves through style.css's own [data-theme] and
+            [data-updown][data-theme] blocks to THAT theme's up colour under
+            the CURRENT scheme. Both attributes have to sit on the same element
+            because those override selectors are compound. Exact for every
+            combination, with nothing new to keep in step by hand.  #}
+        <span class="sw-canvas" style="background:{{ t.swatch[0] }}"
+              data-theme="{{ t.id }}" data-updown="{{ prefs.updown_scheme }}">
           <span class="sw-bar" style="background:{{ t.swatch[1] }}"></span>
           <span class="sw-dots">
             <span class="sw-dot" style="background:{{ t.swatch[1] }}"></span>
-            <span class="sw-dot" style="background:{{ '#14874f' if t.family == 'light' else '#3fb950' }}"></span>
-            <span class="sw-dot" style="background:{{ '#d92d20' if t.family == 'light' else '#f85149' }}"></span>
+            <span class="sw-dot sw-dot-up"></span>
+            <span class="sw-dot sw-dot-down"></span>
           </span>
         </span>
         <span class="sw-name">

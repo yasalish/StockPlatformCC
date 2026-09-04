@@ -8,6 +8,31 @@
 {% set cat_options = filters if kind == 'etf' else filters2 %}
 {% set cat_label = 'نوع صندوق' if kind == 'etf' else 'گروه' %}
 
+{#  This page opened straight into the calculator card, so «تحلیل عملکرد سهام»
+    existed only in the browser tab — every other screen names itself on the
+    page. `title` is already passed in by both routes (stocks_page and
+    etfs_page), so the header just renders what the tab already said.  #}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{{ title }}</h1>
+    <p class="page-sub">
+      بازدهٔ دوره‌ای همهٔ {{ 'صندوق‌های قابل معامله' if kind == 'etf' else 'نمادهای بازار' }}
+      از یک هفته تا ۱۸ ماه، با سقف و کف قیمت هر بازه. جدول در مرورگر مرتب و
+      غربال می‌شود، بدون بارگذاری دوباره.
+    </p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="{{ url_for('performance_page', kind=kind) }}">
+      <svg class="ico" aria-hidden="true"><use href="#i-chart"></use></svg>
+      بازدهٔ دوره‌ای
+    </a>
+    <a class="btn" href="{{ url_for('heatmap_page', kind=kind) }}">
+      <svg class="ico" aria-hidden="true"><use href="#i-map"></use></svg>
+      نقشهٔ بازار
+    </a>
+  </div>
+</div>
+
 {# ─ multi-period gains + compare panel (mirrors etf_gainer.py) — TOP of page ─ #}
 <section class="panel calc-panel" id="calc-panel">
   <div class="panel-head">
@@ -92,7 +117,9 @@
   {% if compare and not compare2 %}
   <div class="cmp-head">
     <h3>مقایسهٔ «{{ compare.ticker }}»
-      <span class="tag" style="background:{{ '#1a9d63' if compare_kind=='etf' else '#2f6db3' }}">{{ 'صندوق' if compare_kind=='etf' else 'سهم' }}</span>
+      {#  Was #1a9d63 / #2f6db3, which ignored every theme. .tag-kind reads
+            --up / --accent instead.  #}
+        <span class="tag tag-kind {{ 'etf' if compare_kind=='etf' else 'stock' }}">{{ 'صندوق' if compare_kind=='etf' else 'سهم' }}</span>
       با برترین‌های {{ ('«' ~ cat ~ '»') if cat else 'کل بازار' }}</h3>
     <span class="muted small">{{ compare.name }} · قیمت پایانی {{ fa(compare.latest) }}</span>
   </div>
@@ -169,7 +196,10 @@
 {# Shown only if the island fails to load or fetch — the page degrades to a
    link back to the server-rendered view rather than a blank panel. #}
 <section class="panel bn-island-fallback" hidden>
-  <div class="panel-head"><h1>{{ title }}</h1></div>
+  {#  h2, not h1: the page header above owns the only h1 on the page now. Two
+      h1 elements is a document with two titles, which a screen reader reads as
+      exactly that.  #}
+  <div class="panel-head"><h2>{{ title }}</h2></div>
   {#  Filled by revealIslandFallback() in frontend/src/http.ts with the reason
       the load failed. It matters most for a 429, where the generic advice
       below — "reload the page" — is the one thing that makes the situation

@@ -4,11 +4,21 @@
 {% block content %}
 <div data-preset-page="heatmap" data-preset-kind="{{ kind }}"></div>
 
-<section class="panel">
-  <div class="panel-head">
-    <h1>نقشهٔ بازار</h1>
-    <span class="muted small" data-role="hm-asof"></span>
+{#  Standard page opening, like every other screen: title and subtitle on
+    the page rather than inside a card. The as-of stamp stays in the subtitle
+    line, which is where the other data pages keep their freshness note; the
+    JavaScript still fills the same [data-role="hm-asof"] element.  #}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">نقشهٔ بازار</h1>
+    <p class="page-sub">
+      اندازهٔ هر خانه ارزش بازار نماد است و رنگ آن بازدهٔ دوره.
+      <span class="muted small" data-role="hm-asof"></span>
+    </p>
   </div>
+</div>
+
+<section class="panel">
 
   {#  A plain GET form: the map is a page you link to and bookmark («نقشهٔ گروه
       فلزات در یک ماه گذشته»), so the state belongs in the URL rather than in

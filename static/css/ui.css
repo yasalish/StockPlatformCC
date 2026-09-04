@@ -1355,3 +1355,22 @@ table.grid tr.alert-off .sym{ color:var(--ink-2) }
 @media (prefers-reduced-motion:reduce){
   .pc-dot, .pc-cross{ transition:none }
 }
+
+/* ---------------------------------------------------------------------------
+   Two badges that used to carry hard-coded colours
+   ---------------------------------------------------------------------------
+   `.sw-dot-up` / `.sw-dot-down` are the price dots in the theme picker. They
+   were literal hex — classic green/red — so they advertised the wrong pair to
+   anyone using the colour-blind or فیروزه‌ای scheme. settings.html now sets
+   data-theme AND data-updown on each swatch canvas, so these two resolve
+   through style.css's own [data-theme] and [data-updown][data-theme] blocks to
+   that theme's colours under the CURRENT scheme.
+
+   `.tag-kind` is the سهم / صندوق badge on market.html, which was #2f6db3 /
+   #1a9d63 regardless of palette.
+   --------------------------------------------------------------------------- */
+.theme-swatch .sw-dot-up{ background:var(--up) }
+.theme-swatch .sw-dot-down{ background:var(--down) }
+
+.tag-kind.stock{ background:var(--accent); color:var(--on-accent) }
+.tag-kind.etf{ background:var(--up); color:var(--on-accent) }
