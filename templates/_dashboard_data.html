@@ -84,12 +84,26 @@
     </div>
   </div>
   {% if fc %}
-  <svg class="dfocus-chart spark {{ 'up' if fc.up else 'down' }}"
-       viewBox="0 0 {{ fc.w }} {{ fc.h }}" preserveAspectRatio="none"
-       role="img" aria-label="نمودار {{ f.label }} در ۲۵۰ روز معاملاتی گذشته">
-    <path class="spark-area" d="{{ fc.area }}"/>
-    <path class="spark-line" d="{{ fc.line }}"/>
-  </svg>
+  {#  Wrapped in a hover host so static/js/spark-hover.js can put a crosshair
+      and a value readout on it. The chart itself is still server-rendered SVG
+      and still needs no JavaScript to be a chart — the data-attribute is the
+      only addition, and if the script never loads the reader gets exactly the
+      chart the server sent.
+
+      preserveAspectRatio="none" stays: an index line has no meaningful aspect
+      ratio and filling the card is what makes the shape readable. The hover
+      maths reads the viewBox width from data-spark-w rather than measuring, so
+      the stretch does not matter to it.  #}
+  <div class="dfocus-host spark-host" data-spark-points="{{ fc.points }}"
+       data-spark-w="{{ fc.w }}"
+       aria-label="نمودار {{ f.label }} در ۲۵۰ روز معاملاتی گذشته — با کلیدهای جهت‌دار مقدار هر روز را بخوانید">
+    <svg class="dfocus-chart spark {{ 'up' if fc.up else 'down' }}"
+         viewBox="0 0 {{ fc.w }} {{ fc.h }}" preserveAspectRatio="none"
+         role="img" aria-label="نمودار {{ f.label }} در ۲۵۰ روز معاملاتی گذشته">
+      <path class="spark-area" d="{{ fc.area }}"/>
+      <path class="spark-line" d="{{ fc.line }}"/>
+    </svg>
+  </div>
   {% endif %}
   <p class="muted small" style="margin:6px 0 0">
     ۲۵۰ روز معاملاتی · تا {{ fy(f.j_date) }} ·

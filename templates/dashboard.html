@@ -7,6 +7,9 @@
     See the header of dashboard.css.  #}
 {% block head %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v={{ asset_version('css/dashboard.css') }}">
+  {#  Deferred: it enhances charts that do not exist until the fetch below
+      returns, so nothing is gained by blocking the parse for it.  #}
+  <script defer src="{{ url_for('static', filename='js/spark-hover.js') }}?v={{ asset_version('js/spark-hover.js') }}"></script>
 {% endblock %}
 
 {% block content %}
@@ -51,7 +54,14 @@
         if (!r.ok) throw new Error("http " + r.status);
         return r.text();
       })
-      .then(function (html) { host.innerHTML = html; })
+      .then(function (html) {
+        host.innerHTML = html;
+        // The charts arrive with this HTML, after spark-hover.js has
+        // already run its own DOMContentLoaded pass over an empty page —
+        // so the readout has to be attached again here. init() is
+        // idempotent (it marks each host), so a double call is harmless.
+        if (window.BNSparkHover) window.BNSparkHover.init(host);
+      })
       .catch(function () {
         host.innerHTML =
           '<p class="flash error">بارگذاری داده‌های داشبورد ناموفق بود. ' +

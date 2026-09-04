@@ -265,3 +265,42 @@ body.dash-page{
   }
   @keyframes d-grow{ from{ transform:scaleX(0) } to{ transform:scaleX(1) } }
 }
+
+/* ---------------------------------------------------------------------------
+   10. خواندن مقدار روی نمودار — the hover readout (static/js/spark-hover.js)
+   ---------------------------------------------------------------------------
+   The focus chart is server-rendered SVG, which is why this page needs no
+   charting library. The cost was that its values could not be read: you could
+   see the shape of the index over 250 sessions and not one number on it. These
+   styles are the readout that fixes that; the chart is still a complete chart
+   without them.
+   --------------------------------------------------------------------------- */
+.spark-host{ position:relative; display:block }
+.spark-host:focus-visible{ outline:2px solid var(--focus); outline-offset:3px;
+                           border-radius:var(--radius-sm) }
+/* touch-action:pan-y so a vertical swipe still scrolls the page on a phone —
+   without it, dragging across the chart traps the gesture. */
+.dfocus-host{ touch-action:pan-y }
+
+.sh-cross{
+  stroke:var(--ink-3); stroke-width:1; stroke-dasharray:3 3;
+  pointer-events:none; vector-effect:non-scaling-stroke;
+}
+.sh-dot{ stroke:var(--panel); stroke-width:2; pointer-events:none }
+.spark.up   ~ .sh-dot,
+.spark-host .spark.up   .sh-dot{ fill:var(--up) }
+.spark-host .spark.down .sh-dot{ fill:var(--down) }
+
+/* pointer-events:none is load-bearing: without it the readout sits under the
+   cursor, swallows the pointermove that would move it, and the chart appears
+   to freeze wherever it was first hovered. */
+.sh-tip{
+  position:absolute; z-index:3; pointer-events:none;
+  display:flex; flex-direction:column; align-items:flex-end; gap:1px;
+  padding:5px 9px; border-radius:var(--radius-sm);
+  background:var(--surface-1); border:1px solid var(--line-strong);
+  box-shadow:var(--shadow-md);
+  font-size:var(--fs-12); line-height:1.35; white-space:nowrap;
+}
+.sh-tip b{ font-weight:700; font-variant-numeric:tabular-nums; color:var(--ink) }
+.sh-tip span{ color:var(--ink-3); font-size:var(--fs-11) }

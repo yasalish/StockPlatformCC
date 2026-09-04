@@ -367,7 +367,7 @@ def pill(val):
                   f'{escape(db.to_persian(abs(val)))}٪</span>')
 
 
-def spark(values, w=120, h=34, pad=2):
+def spark(values, w=120, h=34, pad=2, labels=None):
     """Turn a series of numbers into SVG path data for a sparkline.
 
     Returns a dict of ready-made `d` attributes — `line` for the stroke and
@@ -384,6 +384,17 @@ def spark(values, w=120, h=34, pad=2):
 
     The viewBox is normalised to w x h and the SVG is stretched by CSS, so the
     caller picks the aspect ratio and never has to match pixels.
+
+    HOVER DATA. When `labels` is given, the result also carries `points` — a
+    compact "x:value:label" string per sample — which static/js/spark-hover.js
+    reads to put a crosshair and a readout on the chart. It is emitted only when
+    asked for, because the five 110px ticker strips on the dashboard are too
+    small to hover meaningfully and adding 60 samples of JSON to each of them
+    would be pure page weight.
+
+    The x coordinates are baked in rather than recomputed in the browser: they
+    are already known here, and recomputing them client-side would mean keeping
+    two copies of this projection in step — exactly the drift M-2 was about.
     """
     pts = [float(v) for v in values if v is not None]
     if len(pts) < 2:
@@ -406,6 +417,17 @@ def spark(values, w=120, h=34, pad=2):
         # session is still a rising series, and coloring it red would say the
         # opposite of what the shape shows.
         "up": pts[-1] >= pts[0],
+        # "x:value:label|x:value:label|..." — one field separator and one record
+        # separator, neither of which can occur in a number or a Jalali date, so
+        # the client can split it without a JSON parse of a few thousand values.
+        "points": ("|".join(
+            # .12g, NOT :g. The default gives six significant digits, which
+            # silently rounded an index of 6,583,932 to 6,583,930 in the
+            # readout — a wrong number in a financial figure, for two bytes.
+            # Twelve covers any realistic price or index and its decimals.
+            f"{x:.1f}:{v:.12g}:{(labels[i] if labels and i < len(labels) else '')}"
+            for i, ((x, _y), v) in enumerate(zip(coords, pts))
+        ) if labels else None),
     }
 
 
@@ -821,8 +843,11 @@ def dashboard_data():
         graphs = {
             "heads": heads,
             "focus": focus,
-            "focus_chart": spark([v for _, v in md.index_series(focus["key"], bars=250)],
-                                 w=1000, h=190, pad=6) if focus else None,
+            # The one chart on this page big enough to hover: labels are asked
+            # for so spark() emits the per-sample data spark-hover.js needs.
+            "focus_chart": (lambda ser: spark([v for _, v in ser], w=1000, h=190,
+                                              pad=6, labels=[d for d, _ in ser])
+                            )(md.index_series(focus["key"], bars=250)) if focus else None,
             "strips": {r["key"]: spark([v for _, v in md.index_series(r["key"], bars=60)],
                                        w=110, h=30) for r in heads},
             "usd": md.usd_summary(),
