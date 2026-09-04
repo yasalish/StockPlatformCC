@@ -1134,11 +1134,37 @@ def api_performance(kind):
         abort(404)
     args = request.args.to_dict(flat=True)
     args["kind"] = kind
-    t0 = time.perf_counter()
-    d = _performance_data(args)
-    elapsed = (time.perf_counter() - t0) * 1000.0
 
-    return jsonify({
+    # M-1, applied here too. This is the app's LARGEST payload — 1,333 KB, ten
+    # times the width of /api/market — and jsonify() re-encoded all of it on
+    # every request to produce identical bytes. Measured 127 ms warm before
+    # this, essentially all of it json.dumps under the GIL holding a worker
+    # thread.
+    #
+    # Cacheable for the same reason /api/market is: H-1 took the per-user
+    # `watched` field out, so the document is now identical for every caller.
+    # The key is the whole filter set, because this endpoint filters
+    # server-side — group, subgroup, market and the compare ticker each select
+    # a different document, and all of them are bounded, low-cardinality
+    # choices from dropdowns rather than free text.
+    key = tuple(sorted((k, v) for k, v in args.items()))
+
+    def produce():
+        t0 = time.perf_counter()
+        d = _performance_data(args)
+        elapsed = (time.perf_counter() - t0) * 1000.0
+        return json.dumps(_performance_payload(d, elapsed),
+                          ensure_ascii=False, separators=(",", ":"), default=str)
+
+    body = cache.get_or_set("perfjson", key, produce)
+    return Response(body, mimetype="application/json")
+
+
+def _performance_payload(d, elapsed):
+    """The /api/performance body, as a dict. Split out of the view so the cache
+    wrapper above has something to serialise, and so the shape stays in one
+    place."""
+    return {
         # Full precision, deliberately. Rounding the percentages to four decimals
         # would take ~20% off the payload, but checked against the live data it
         # moved a number the user reads: 184.43496801705757 displays as ۱۸۴.۴۳
@@ -1154,7 +1180,7 @@ def api_performance(kind):
         "markets": d["markets"], "market": d["market"],
         "etf_type_colors": db.ETF_TYPE_COLORS,
         "server_ms": round(elapsed, 1),
-    })
+    }
 
 
 @app.route("/strategies")
@@ -1771,7 +1797,13 @@ def about_page():
     return render_template("about.html", summary=db.db_summary())
 
 
+# Defence in depth. app._require_login already gates every endpoint, so this
+# decorator never fires in production — but these two read current_user.id
+# directly, so if that global guard is ever narrowed or reordered they would
+# raise AttributeError on AnonymousUserMixin and 500 instead of redirecting.
+# Verified: /watchlist 500s for an anonymous caller with the guard removed.
 @app.route("/watchlist")
+@login_required
 def watchlist_page():
     """The user's «دیده‌بان» — starred stocks & ETFs with their period returns,
     reusing the cached market-gainer tables (so it's fast)."""
@@ -1784,7 +1816,13 @@ def watchlist_page():
                            as_of=as_of_s or as_of_e, total=len(keys))
 
 
+# Defence in depth. app._require_login already gates every endpoint, so this
+# decorator never fires in production — but these two read current_user.id
+# directly, so if that global guard is ever narrowed or reordered they would
+# raise AttributeError on AnonymousUserMixin and 500 instead of redirecting.
+# Verified: /watchlist 500s for an anonymous caller with the guard removed.
 @app.route("/api/watchlist/toggle", methods=["POST"])
+@login_required
 def api_watchlist_toggle():
     """Star ⇄ un-star a symbol for the current user. JSON in/out."""
     data = request.get_json(silent=True) or {}

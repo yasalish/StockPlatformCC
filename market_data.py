@@ -45,10 +45,72 @@ that is fast (a session's tick tape is ~2 seconds); across the market it is
 thousands of requests, which is why market.HEAVY_KINDS makes the update form
 insist on a symbol before it will start one.
 """
+import functools as _functools
+import inspect as _inspect
 import os
 
 import db
 import cache
+
+
+# ---------------------------------------------------------------------------
+# Caching market-wide reads
+# ---------------------------------------------------------------------------
+# Everything in this module reads the SAME market for every user — the numbers
+# depend on the trading session, never on who is asking — so it belongs in the
+# shared analytics cache alongside db.py's scans. Several functions here were
+# not in it, and profiling the running app found them costing whole seconds per
+# page (see freshness_cached and index_rows for the two worst).
+#
+# The decorator builds the cache key from the function's BOUND arguments, with
+# defaults applied, so money_flow('stock') and money_flow(kind='stock') share
+# one entry instead of computing the same rows twice.
+#
+# Invalidation is the same as everything else: cache.get_or_set namespaces on
+# the global version, and db.clear_caches() INCRs it when data changes. Nothing
+# here needs its own TTL beyond the default.
+
+def _cache_key_part(v):
+    """Make one argument usable in a cache key.
+
+    Lists and sets are sorted into tuples: a caller passing ["a","b"] and one
+    passing ["b","a"] want the same rows, and an unsorted key would compute
+    them twice. Anything exotic falls back to its repr, which is stable enough
+    for a key and cannot crash the call it is meant to speed up.
+    """
+    if isinstance(v, (list, set, frozenset)):
+        return tuple(sorted(str(x) for x in v))
+    if isinstance(v, (str, int, float, bool, type(None), tuple)):
+        return v
+    return repr(v)
+
+
+def _cached(namespace, ttl=None, bypass_if=None):
+    """Wrap a market-wide read in the shared cache.
+
+    `bypass_if` takes the bound arguments and returns True to skip the cache
+    entirely — used where an argument would blow up the keyspace, e.g. a
+    free-text search term a user can type without limit.
+    """
+    def deco(fn):
+        sig = _inspect.signature(fn)
+
+        @_functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            bound = sig.bind(*args, **kwargs)
+            bound.apply_defaults()
+            if bypass_if is not None and bypass_if(bound.arguments):
+                return fn(*args, **kwargs)
+            key = tuple(_cache_key_part(v) for v in bound.arguments.values())
+            return cache.get_or_set(namespace, key,
+                                    lambda: fn(*args, **kwargs), ttl=ttl)
+
+        # The undecorated function, for a caller that must not be served a
+        # cached answer. freshness() keeps its own explicit split for the same
+        # reason; this is the generic version of it.
+        wrapper.uncached = fn
+        return wrapper
+    return deco
 
 
 # ---------------------------------------------------------------------------
@@ -868,6 +930,7 @@ def _flow_window(kind, days, as_of=None):
             rows[-1]["j_date"], rows[0]["j_date"])
 
 
+@_cached("moneyflow")
 def money_flow(kind="stock", days=5, as_of=None, sector=None, market=None,
                limit=400, order="net_desc"):
     """Market-wide retail/institutional flow over the last `days` sessions.
@@ -1012,6 +1075,7 @@ def flow_history(kind, ticker, bars=120):
     return out
 
 
+@_cached("flowtotals")
 def flow_totals(kind="stock", days=1, as_of=None):
     """Whole-market net retail flow over the window — the headline on the page.
 
@@ -1037,6 +1101,7 @@ def flow_totals(kind="stock", days=1, as_of=None):
     return r
 
 
+@_cached("flowsector")
 def flow_by_sector(kind="stock", days=5, as_of=None, limit=40):
     """Net retail flow grouped by گروه صنعت — «پول وارد کدام صنعت شد؟», which is
     the question the per-symbol table cannot answer at a glance."""
